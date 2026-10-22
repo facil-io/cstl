@@ -172,6 +172,16 @@ CA-issued certificate (e.g. Let's Encrypt) in production.
 
 ---
 
+## SNI (Server Name Indication)
+
+Client connections send the SNI host name stored in the `fio_io_tls_s` object
+(`fio_io_tls_sni_set`, or the URL host name set automatically by
+`fio_io_connect`) via `SSL_set_tlsext_host_name` before the handshake starts.
+No SNI extension is sent when no host name is set (e.g., when connecting to an
+IP literal, which RFC 6066 forbids as an SNI value).
+
+---
+
 ## ALPN
 
 Register protocols with `fio_io_tls_alpn_add` before listen/connect. The first

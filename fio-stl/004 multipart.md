@@ -27,7 +27,8 @@ typedef struct {
   void *(*on_file_start)(void *udata,
                          fio_buf_info_s name,
                          fio_buf_info_s filename,
-                         fio_buf_info_s content_type);
+                         fio_buf_info_s content_type,
+                         fio_buf_info_s headers);
   int (*on_file_data)(void *udata, void *file_ctx, fio_buf_info_s data);
   void (*on_file_end)(void *udata, void *file_ctx);
   void (*on_error)(void *udata);
@@ -41,7 +42,12 @@ Callback table. All callbacks are optional; unset ones become no-ops.
 - `on_field_start` - optional streaming field start. If set, `on_field` is ignored and `on_field_data` / `on_field_end` are used instead.
 - `on_field_data` - called with a field data chunk. Return non-zero to abort.
 - `on_field_end` - called when a streaming field ends.
-- `on_file_start` - called when a file upload starts. Returns a context pointer for this file.
+- `on_file_start` - called for any part with a `filename` attribute,
+  including `filename=""` (non-NULL `filename.buf`, zero `filename.len`).
+  `headers` borrows the raw part headers, excluding the terminating
+  `\r\n\r\n`; it is valid only during the call. Returns a context pointer
+  for this file. An empty filename is never a field; consumers may skip it
+  by returning `NULL`.
 - `on_file_data` - called with a file data chunk. Return non-zero to abort.
 - `on_file_end` - called when a file upload ends.
 - `on_error` - called on parse error (optional).
@@ -94,6 +100,36 @@ Parses `data` as MIME multipart input. `boundary` is the boundary string **witho
 - `err == -2` - need more data. Keep `data + result.consumed ... data + len` and append new data before calling again.
 - `err == -1` - unrecoverable parse error or callback abort.
 
+Each part must fit in the buffer, because a part is only reported once its closing delimiter is found. Use `fio_multipart_stream_parse` to stream large file uploads.
+
+#### `fio_multipart_stream_parse`
+
+```c
+typedef struct { /* private */ } fio_multipart_stream_s;
+
+SFUNC fio_multipart_result_s
+fio_multipart_stream_parse(fio_multipart_stream_s *stream,
+                           const fio_multipart_parser_callbacks_s *callbacks,
+                           void *udata,
+                           fio_buf_info_s boundary,
+                           const char *data,
+                           size_t len);
+
+SFUNC int fio_multipart_stream_close(
+    fio_multipart_stream_s *stream,
+    const fio_multipart_parser_callbacks_s *callbacks,
+    void *udata);
+```
+
+Works like `fio_multipart_parse`, but streams file contents. `on_file_start` is called once a file part's headers arrive, `on_file_data` is called with each chunk as it arrives, and `on_file_end` is called when the file's closing delimiter is found. A file part doesn't need to fit in the buffer, so large uploads can be parsed in bounded memory. Regular fields still need to fit.
+
+- Zero-initialize `stream` (`fio_multipart_stream_s s = {0};`) and pass the same `stream` to every call.
+- On `err == -2`, keep `data + result.consumed ... data + len`, append more data, and call again. While streaming a file, a few trailing bytes (up to the delimiter length) are held back in case they start a delimiter.
+- If the input ends early (while `err == -2`), call `fio_multipart_stream_close`. It calls `on_file_end` for any open file and returns `-1` if a file was left incomplete.
+- If `on_file_data` returns non-zero, `on_file_end` is called and parsing stops with `err == -1`.
+
+`field_count` and `file_count` count the parts completed during each call.
+
 ### Examples
 
 #### Basic field and file parsing
@@ -107,8 +143,9 @@ static void *on_field(void *u, fio_buf_info_s n, fio_buf_info_s v, fio_buf_info_
   printf("field %.*s = %.*s\n", (int)n.len, n.buf, (int)v.len, v.buf);
   return NULL;
 }
-static void *on_file_start(void *u, fio_buf_info_s n, fio_buf_info_s fn, fio_buf_info_s ct) {
-  (void)u; (void)ct;
+static void *on_file_start(void *u, fio_buf_info_s n, fio_buf_info_s fn,
+                           fio_buf_info_s ct, fio_buf_info_s headers) {
+  (void)u; (void)ct; (void)headers;
   printf("file %.*s / %.*s\n", (int)n.len, n.buf, (int)fn.len, fn.buf);
   return NULL;
 }

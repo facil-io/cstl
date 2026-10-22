@@ -405,6 +405,66 @@ FIO_SFUNC void FIO_NAME_TEST(stl, openssl_tls_from_url)(void) {
 }
 
 /* *****************************************************************************
+Test: SNI host name handling (RFC 6066)
+***************************************************************************** */
+FIO_SFUNC void FIO_NAME_TEST(stl, openssl_sni)(void) {
+  fio_io_functions_s funcs = fio_openssl_io_functions();
+  fio_io_tls_s *tls = fio_io_tls_new();
+  FIO_ASSERT(tls != NULL, "fio_io_tls_new() failed");
+  FIO_ASSERT(fio_keystr_buf(&tls->sni).len == 0,
+             "new TLS context should have no SNI host name");
+
+  /* valid host name is stored */
+  fio_io_tls_sni_set(tls, "example.com", 11);
+  fio_buf_info_s sni = fio_keystr_buf(&tls->sni);
+  FIO_ASSERT(sni.len == 11 && !FIO_MEMCMP(sni.buf, "example.com", 11),
+             "SNI host name should be stored");
+
+  /* NULL / empty host names are silently ignored */
+  fio_io_tls_sni_set(tls, NULL, 0);
+  fio_io_tls_sni_set(tls, "", 0);
+  sni = fio_keystr_buf(&tls->sni);
+  FIO_ASSERT(sni.len == 11 && !FIO_MEMCMP(sni.buf, "example.com", 11),
+             "NULL / empty host name must not clear the SNI host name");
+
+  /* IP literals are ignored (RFC 6066, section 3) */
+  fio_io_tls_sni_set(tls, "127.0.0.1", 9);
+  fio_io_tls_sni_set(tls, "10.0.0.1", 8);
+  fio_io_tls_sni_set(tls, "::1", 3);
+  fio_io_tls_sni_set(tls, "[::1]", 5);
+  fio_io_tls_sni_set(tls, "2001:db8::1", 11);
+  sni = fio_keystr_buf(&tls->sni);
+  FIO_ASSERT(sni.len == 11 && !FIO_MEMCMP(sni.buf, "example.com", 11),
+             "IP literals must not replace the SNI host name");
+
+  /* a digit-leading name with letters is a DNS name, not an IP literal */
+  fio_io_tls_sni_set(tls, "3com.example", 12);
+  sni = fio_keystr_buf(&tls->sni);
+  FIO_ASSERT(sni.len == 12 && !FIO_MEMCMP(sni.buf, "3com.example", 12),
+             "DNS host name with digits should be accepted");
+
+  /* oversized host names are ignored (SNI limit is 255 bytes) */
+  char big[300];
+  FIO_MEMSET(big, 'a', sizeof(big));
+  fio_io_tls_sni_set(tls, big, sizeof(big));
+  sni = fio_keystr_buf(&tls->sni);
+  FIO_ASSERT(sni.len == 12 && !FIO_MEMCMP(sni.buf, "3com.example", 12),
+             "oversized host name must be ignored");
+
+  /* the SNI host name is visible to a built client context */
+  fio_io_tls_sni_set(tls, "other.example.org", 17);
+  void *ctx = funcs.build_context(tls, 1); /* client */
+  FIO_ASSERT(ctx != NULL, "build_context() should succeed for client");
+  fio___openssl_context_s *octx = (fio___openssl_context_s *)ctx;
+  sni = fio_keystr_buf(&octx->tls->sni);
+  FIO_ASSERT(sni.len == 17 && !FIO_MEMCMP(sni.buf, "other.example.org", 17),
+             "client context should carry the SNI host name");
+  funcs.free_context(ctx);
+
+  fio_io_tls_free(tls);
+}
+
+/* *****************************************************************************
 Test: stateless peer certificate iteration (fio___openssl_peer_info_next)
 
 Uses a real in-memory TLS handshake (BIO pair) with a 2-certificate chain.
@@ -614,6 +674,7 @@ int main(void) {
   FIO_NAME_TEST(stl, openssl_tls_each)();
   FIO_NAME_TEST(stl, openssl_full_config)();
   FIO_NAME_TEST(stl, openssl_tls_from_url)();
+  FIO_NAME_TEST(stl, openssl_sni)();
   FIO_NAME_TEST(stl, openssl_peer_info_next)();
   return 0;
 }

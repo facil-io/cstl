@@ -130,7 +130,7 @@ FIO_CONSTRUCTOR(fio___secret_constructor) {
     const char *secret_length = fio_sys_env("SECRET_LENGTH");
     len = secret_length ? fio_atol((char **)&secret_length) : 0;
     if (!len)
-      len = strlen(str);
+      len = FIO_STRLEN(str);
     if (!len)
       str = NULL;
   }

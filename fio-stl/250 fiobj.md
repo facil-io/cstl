@@ -202,6 +202,46 @@ void           fiobj_float_free(FIOBJ i);    /* type-specific free */
 
 ---
 
+## Data — `fiobj_data_*`
+
+A `FIOBJ_T_OTHER` class (`FIOBJ_TYPE(o) == FIOBJ_T_DATA`) wrapping a [Data Store](./012%20data.md) (`fio_data_s`). It keeps data in RAM until it exceeds a limit, then moves it to a temporary file. This suits large payloads such as file uploads (`fio_http_params2FIOBJ` stores uploads this way).
+
+```c
+#define FIOBJ_T_DATA 40
+
+FIOBJ       fiobj_data_new(size_t ram_limit); /* 0 = FIO_DATA_RAM_LIMIT */
+fio_data_s *fiobj_data_ptr(FIOBJ o);          /* NULL if not a Data object */
+
+fio_str_info_s fiobj_data_filename(FIOBJ data);
+fio_str_info_s fiobj_data_type(FIOBJ data);
+fio_str_info_s fiobj_data_headers(FIOBJ data);
+void fiobj_data_filename_set(FIOBJ data, fio_str_info_s filename);
+void fiobj_data_type_set(FIOBJ data, fio_str_info_s type);
+void fiobj_data_headers_set(FIOBJ data, fio_str_info_s headers);
+```
+
+Upload metadata belongs to the FIOBJ Data object, not its `fio_data_s` store.
+The three getters return NUL-terminated borrowed views, valid until the next
+setter for that property or until `fiobj_free(data)`. A getter returns a NULL
+`buf` for an unset property or a non-Data object; a set empty value has a
+non-NULL `buf` and `len == 0`. Each setter copies its input bytes; passing a
+NULL `buf` clears the property, and passing a non-Data object does nothing.
+On allocation failure the affected property is unset. Metadata is released by
+`fiobj_free`.
+
+Read and write through the store's API, for example `fio_data_write(fiobj_data_ptr(o), buf, len)` or `fio_data_read(fiobj_data_ptr(o), 65536)`. Save the content to a file with `fio_data_save(fiobj_data_ptr(o), filename)` (for example, to keep a file upload). Free with `fiobj_free`, which also closes any temporary file.
+
+Generic conversions:
+
+- `fiobj2cstr` (and JSON output) returns the whole content. A spilled store is memory mapped (no copy); where mapping isn't available the content is read into a heap buffer, and if that buffer can't be allocated an error is logged and the result is empty.
+- `fiobj2cstr`, JSON output and equality tests use the store's read buffer: they MAY invalidate buffers previously returned by `fio_data_*` (and `fiobj2cstr` results of the same object). They preserve the reading position.
+- `fiobj2i` / `fiobj2f` return the length.
+- Two Data objects are equal when their content is equal.
+
+The FIOBJ module includes the Data Store module automatically.
+
+---
+
 ## Strings — `fiobj_str_*`
 
 FIOBJ strings wrap the [Dynamic String module (201)](./201 string.md). The full `fiobj_str_*` API mirrors the `STR_*` API — write, concat, printf, base64, JSON-escape, UTF-8 helpers, freeze, etc.
@@ -424,7 +464,9 @@ size_t fiobj_hash_update_json(FIOBJ hash, fio_str_info_s str);
 size_t fiobj_hash_update_json2(FIOBJ hash, char *ptr, size_t len);
 ```
 
-Parses JSON and merges the resulting key-value pairs into an existing hash map. Silently skips non-object JSON data. Returns bytes consumed (0 on error).
+Parses a JSON object and merges its members into an existing hash map. Nested objects merge into existing Hash members and nested arrays append to existing Array members; any other conflicting value is overwritten (new wins).
+
+On a parsing error, or when the JSON root isn't an object, members merged before the error remain and nothing else changes. Returns the number of bytes consumed before parsing stopped (0 if `hash` is `FIOBJ_INVALID`). The hash is never freed.
 
 ### JavaScript-style path lookup
 

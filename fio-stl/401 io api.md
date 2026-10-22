@@ -268,6 +268,11 @@ contain TLS hints. `timeout` defaults to 30 seconds. `on_failed` is the cleanup
 hook for failed connection attempts; established connections use the protocol
 callbacks.
 
+For TLS URLs (`https`, `wss`, `tls`, or explicit TLS hints), the URL's host
+name is automatically set as the SNI (Server Name Indication) host name sent
+during the TLS handshake (see `fio_io_tls_sni_set`). IP literals are excluded,
+as required by RFC 6066.
+
 ---
 
 ## IO Handles and Operations
@@ -443,6 +448,9 @@ int fio_io_tls_alpn_select(fio_io_tls_s *tls,
                            fio_io_s *io);
 fio_io_tls_s *fio_io_tls_trust_add(fio_io_tls_s *tls,
                                    const char *public_cert_file);
+fio_io_tls_s *fio_io_tls_sni_set(fio_io_tls_s *tls,
+                                 const char *hostname,
+                                 size_t hostname_len);
 uintptr_t fio_io_tls_cert_count(fio_io_tls_s *tls);
 uintptr_t fio_io_tls_alpn_count(fio_io_tls_s *tls);
 uintptr_t fio_io_tls_trust_count(fio_io_tls_s *tls);
@@ -453,6 +461,12 @@ SNI, ALPN protocol callbacks, and trusted certificates / CA stores. Passing
 `NULL` certificate paths can request a backend-provided self-signed certificate;
 passing `NULL` to `fio_io_tls_trust_add` asks the backend to use system trust.
 Backend behavior is documented in the TLS backend docs.
+
+`fio_io_tls_sni_set` sets the SNI (Server Name Indication) host name a TLS
+client sends during the handshake. `fio_io_connect` sets it automatically from
+the URL's host name, so manual calls are rarely needed. `NULL` / empty host
+names and IP literals (IPv4 / IPv6) are silently ignored, as SNI carries DNS
+host names only (RFC 6066).
 
 `fio_io_tls_alpn_add` silently ignores a `NULL` protocol name and replaces a
 `NULL` callback with a no-op. The first ALPN protocol added is the default.

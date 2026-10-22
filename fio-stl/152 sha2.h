@@ -1236,7 +1236,7 @@ SFUNC fio_u512 fio_sha512_finalize(fio_sha512_s *h) {
   const size_t total = h->total_len;
   const size_t remainder = total & 127;
   h->cache.u8[remainder] = 0x80U; /* set the 1 bit at the left most position */
-  if ((remainder) > 112) { /* make sure there's room to attach `total_len` */
+  if ((remainder) >= 112) { /* make sure there's room to attach `total_len` */
     fio___sha512_round(&h->hash, h->cache.u8);
     h->cache = (fio_u1024){0};
   }

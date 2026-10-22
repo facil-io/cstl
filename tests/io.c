@@ -146,6 +146,90 @@ static void test_io_defer(void) {
 }
 
 /* *****************************************************************************
+Unit tests - fio_io_write2 ownership on the invalid (NULL) IO error path
+***************************************************************************** */
+#if FIO_OS_POSIX
+#include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+static volatile int fio___test_io_write2_dealloc_count = 0;
+static void *fio___test_io_write2_dealloc_arg = NULL;
+static void fio___test_io_write2_dealloc(void *buf) {
+  ++fio___test_io_write2_dealloc_count;
+  fio___test_io_write2_dealloc_arg = buf;
+}
+
+/* A fresh regular-file descriptor (unlinked tmpfile, duplicated). */
+static int fio___test_io_write2_tmp_fd(void) {
+  FILE *f = tmpfile();
+  FIO_ASSERT(f, "tmpfile failed");
+  FIO_ASSERT(fwrite("data", 1, 4, f) == 4 && !fflush(f), "tmpfile write");
+  int fd = dup(fileno(f));
+  fclose(f);
+  FIO_ASSERT(fd >= 0, "dup failed");
+  return fd;
+}
+
+static int fio___test_io_write2_fd_is_open(int fd) {
+  errno = 0;
+  if (fcntl(fd, F_GETFD) != -1)
+    return 1;
+  FIO_ASSERT(errno == EBADF, "unexpected fcntl errno %d", errno);
+  return 0;
+}
+
+static void test_io_write2_null_io_ownership(void) {
+  int fd;
+  /* Without `copy`, the fd is owned by write2 and closed on error. */
+  fd = fio___test_io_write2_tmp_fd();
+  fio_io_write2(NULL, .fd = fd, .len = 4);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(!fio___test_io_write2_fd_is_open(fd),
+             "NULL IO: fd without copy must be closed");
+
+  fd = fio___test_io_write2_tmp_fd();
+  fio_io_sendfile(NULL, fd, 0, 4);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(!fio___test_io_write2_fd_is_open(fd),
+             "NULL IO: fio_io_sendfile must close the fd on error");
+
+  /* With `copy`, the fd stays caller-owned (also when `dealloc` is set). */
+  fd = fio___test_io_write2_tmp_fd();
+  fio_io_write2(NULL, .fd = fd, .len = 4, .copy = 1);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_io_write2_fd_is_open(fd),
+             "NULL IO: fd with copy must stay open");
+  close(fd);
+
+  fd = fio___test_io_write2_tmp_fd();
+  fio_io_write2(NULL,
+                .fd = fd,
+                .len = 4,
+                .copy = 1,
+                .dealloc = fio___test_io_write2_dealloc);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_io_write2_fd_is_open(fd),
+             "NULL IO: fd with copy (and dealloc) must stay open");
+  close(fd);
+
+  /* Buffers: `dealloc` still runs once on error, with the buffer. */
+  static char buf[] = "payload";
+  fio___test_io_write2_dealloc_count = 0;
+  fio___test_io_write2_dealloc_arg = NULL;
+  fio_io_write2(NULL,
+                .buf = buf,
+                .len = sizeof(buf),
+                .dealloc = fio___test_io_write2_dealloc);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_io_write2_dealloc_count == 1 &&
+                 fio___test_io_write2_dealloc_arg == buf,
+             "NULL IO: buffer dealloc must run once with the buffer");
+  fprintf(stderr, "* fio_io_write2 NULL IO ownership: OK\n");
+}
+#endif
+
+/* *****************************************************************************
 Unit tests - protocol iteration
 ***************************************************************************** */
 static volatile int fio___test_io_each_count = 0;
@@ -1552,6 +1636,9 @@ int main(void) {
   test_io_close_write_order();
   test_io_noop_and_protocol_set_init();
   test_io_defer();
+#if FIO_OS_POSIX
+  test_io_write2_null_io_ownership();
+#endif
   test_io_protocol_each();
   test_io_env_global();
   test_io_tls_helpers();

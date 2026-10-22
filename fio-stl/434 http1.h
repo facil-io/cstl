@@ -45,15 +45,21 @@ static void fio_http1_on_complete(void *udata) {
 HTTP/1.1 Parser callbacks
 ***************************************************************************** */
 
-FIO_IFUNC void fio___http_request_too_big(fio___http_connection_s *c) {
+/** Sends an error response and detaches the request (stops processing it). */
+FIO_IFUNC void fio___http_request_abort(fio___http_connection_s *c,
+                                        size_t status) {
   fio_http_s *h = c->h;
   fio_io_dup(c->io); /* sending the response will result in fio_undup */
   fio_io_suspend(c->io);
   c->h = NULL;
   c->suspend = 1;
-  if (fio_http_send_error_response(h, 413))
+  if (fio_http_send_error_response(h, status))
     fio_io_free(c->io); /* response not sent, we need to fio_undup */
   fio_http_free(h);
+}
+
+FIO_IFUNC void fio___http_request_too_big(fio___http_connection_s *c) {
+  fio___http_request_abort(c, 413);
 }
 
 FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
@@ -221,8 +227,18 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
     return 0; /* don't overwrite client payload on redirect */
   if (chunk.len + fio_http_body_length(c->h) > c->settings->max_body_size)
     goto too_big;
-  fio_http_body_write(c->h, chunk.buf, chunk.len);
+  if (fio_http_body_write(c->h, chunk.buf, chunk.len))
+    goto write_failed;
   return 0;
+write_failed:
+  /* the body couldn't be stored (i.e., no temporary file): the server sends
+   * a 500 error response, both sides close the connection. */
+  FIO_LOG_DEBUG2("(%d) HTTP/1.1 couldn't store body, closing connection %d",
+                 fio_io_pid(),
+                 fio_io_fd(c->io));
+  if (!c->is_client)
+    fio___http_request_abort(c, 500);
+  return -1; /* parser error: closes the connection (after the response) */
 too_big:
   fio___http_request_too_big(c);
   return 0;
@@ -379,6 +395,7 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
   { /* write status string */
     fio_str_info_s method = fio_http_method(h);
     fio_str_info_s path = fio_http_path(h);
+    fio_str_info_s query = fio_http_query(h);
     fio_str_info_s version = fio_http_version(h);
     if (!path.len)
       path = FIO_STR_INFO1((char *)"/");
@@ -389,6 +406,8 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
                       FIO_STRING_WRITE_STR_INFO(method),
                       FIO_STRING_WRITE_STR2(" ", 1),
                       FIO_STRING_WRITE_STR_INFO(path),
+                      FIO_STRING_WRITE_STR2("?", (size_t)(query.len > 0)),
+                      FIO_STRING_WRITE_STR_INFO(query),
                       FIO_STRING_WRITE_STR2(" ", 1),
                       FIO_STRING_WRITE_STR_INFO(version),
                       FIO_STRING_WRITE_STR2("\r\n", 2));
@@ -412,12 +431,15 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
     return;
   fio_http_body_seek(h, 0);
   if (fio_http_body_fd(h) == -1) {
-    buf = fio_http_body_read(h, (size_t)-1);
+    /* zero-copy: send a reference to the RAM body (its own allocation) */
     fio_io_write2(c->io,
-                  .buf = (char *)fio_http_dup(h),
-                  .len = buf.len,
-                  .offset = (size_t)(buf.buf - (char *)h),
-                  .dealloc = (void (*)(void *))fio_http_free);
+                  .buf = fio_bstr_copy(fio_data_bstr(&h->body)),
+                  .len = fio_http_body_length(h),
+                  .dealloc = ((union {
+                               void (*bstr)(char *);
+                               void (*dealloc)(void *);
+                             }){.bstr = fio_bstr_free})
+                                 .dealloc);
   } else {
     fio_io_write2(c->io,
                   .fd = fio_http_body_fd(h),
@@ -625,7 +647,7 @@ no_write_err:
   if (args.buf) {
     if (args.dealloc)
       args.dealloc((void *)args.buf);
-  } else if ((uint32_t)(args.fd + 1) > 1U) {
+  } else if ((uint32_t)(args.fd + 1) > 1U && !args.copy) {
     close(args.fd);
   }
 }

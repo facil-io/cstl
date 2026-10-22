@@ -136,6 +136,8 @@ static void fio___http_settings_validate(fio_http_settings_s *s,
     s->max_line_len = FIO_HTTP_DEFAULT_MAX_LINE_LEN;
   if (!s->max_body_size)
     s->max_body_size = FIO_HTTP_DEFAULT_MAX_BODY_SIZE;
+  if (!s->max_params)
+    s->max_params = FIO_HTTP_PARAMS_MAX_FIELDS;
   if (!s->ws_max_msg_size)
     s->ws_max_msg_size = FIO_HTTP_DEFAULT_WS_MAX_MSG_SIZE;
   if (!s->timeout)
@@ -360,8 +362,8 @@ SFUNC int fio_http_route FIO_NOOP(fio_http_listener_s *l,
     s.on_finish = p->settings.on_finish;
   if (!s.udata)
     s.udata = p->settings.udata;
-  if (!s.on_stop)
-    s.on_stop = p->settings.on_stop;
+  // if (!s.on_stop) /* Do not inherit the `on_stop` callback */
+  //   s.on_stop = p->settings.on_stop;
   if (!s.on_authenticate_sse)
     s.on_authenticate_sse = p->settings.on_authenticate_sse;
   if (!s.on_authenticate_websocket)
@@ -372,6 +374,8 @@ SFUNC int fio_http_route FIO_NOOP(fio_http_listener_s *l,
     s.max_line_len = p->settings.max_line_len;
   if (!s.max_body_size)
     s.max_body_size = p->settings.max_body_size;
+  if (!s.max_params)
+    s.max_params = p->settings.max_params;
   if (!s.ws_max_msg_size)
     s.ws_max_msg_size = p->settings.ws_max_msg_size;
   if (!s.timeout)
@@ -401,7 +405,7 @@ SFUNC int fio_http_route FIO_NOOP(fio_http_listener_s *l,
   }
   /* make sure we're not leaking memory when overwriting an existing route */
   if (r->s.on_http) {
-    if (r->s.on_stop != p->settings.on_stop || r->s.udata != p->settings.udata)
+    if (r->s.on_stop) /* routes never inherit `on_stop`: always stop */
       r->s.on_stop(&r->s);
     if (r->s.tls && (char *)r->s.tls == r->s.public_folder.buf) {
       FIO_LEAK_COUNTER_ON_FREE(fio___http_router_public_folder);
@@ -1006,8 +1010,15 @@ FIO_IFUNC fio_str_info_s fio___http_hmap_set2(fio___http_hmap_s *map,
   return r;
 
 remove_key:
-  if (add < 1)
+  if (add < 0) {
     fio___http_hmap_remove(map, key, NULL);
+    return r;
+  }
+  if (!add) { /* set_if_missing: an empty value returns the existing value */
+    o = fio___http_hmap_node2val_ptr(fio___http_hmap_get_ptr(map, key));
+    if (o && fio___http_sary_count(o))
+      r = fio_bstr_info(fio___http_sary_get(o, -1));
+  }
   return r;
 }
 
@@ -1123,6 +1134,7 @@ SFUNC fio_http_controller_s *fio___http_controller_validate(
     c = &FIO___MOCK_CONTROLLER;
   if (c->private_flags)
     return c;
+  c->private_flags = 256;
   if (!c->on_destroyed)
     c->on_destroyed = fio___mock_controller_cb;
   if (!c->send_headers)
@@ -1165,12 +1177,7 @@ struct fio_http_s {
   fio_keystr_s version;
   fio___http_hmap_s headers[2]; /* request, response */
   fio___http_cmap_s cookies[2]; /* read, write */
-  struct {
-    char *buf;
-    size_t len;
-    size_t pos;
-    int fd;
-  } body;
+  fio_data_s body;
 };
 
 #define HTTP_HDR_REQUEST(h)  (h->headers + 0)
@@ -1180,7 +1187,8 @@ struct fio_http_s {
 #define FIO_REF_INIT(h)                                                        \
   h = (fio_http_s) {                                                           \
     .controller = &FIO___MOCK_CONTROLLER, .writer = fio____http_write_start,   \
-    .received_at = fio_http_get_timestump(), .body.fd = -1                     \
+    .received_at = fio_http_get_timestump(),                                   \
+    .body = {.fd = -1, .limit = FIO_HTTP_BODY_RAM_LIMIT},                      \
   }
 #define FIO_REF_DESTROY(h) fio_http_destroy(&(h))
 SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
@@ -1198,9 +1206,7 @@ SFUNC fio_http_s *fio_http_destroy(fio_http_s *h) {
   fio___http_hmap_destroy(h->headers + 1);
   fio___http_cmap_destroy(h->cookies);
   fio___http_cmap_destroy(h->cookies + 1);
-  fio_bstr_free(h->body.buf);
-  if (h->body.fd != -1)
-    close(h->body.fd);
+  fio_data_destroy(&h->body);
   FIO_REF_INIT(*h);
   return h;
 }
@@ -1217,12 +1223,7 @@ SFUNC fio_http_s *fio_http_clear_response(fio_http_s *h, bool clear_body) {
   h->status = 0;
   if (!clear_body)
     return h;
-  fio_bstr_free(h->body.buf);
-  if (h->body.fd != -1)
-    close(h->body.fd);
-  h->body.buf = NULL;
-  h->body.len = h->body.pos = 0;
-  h->body.fd = -1;
+  fio_data_destroy(&h->body);
   return h;
 }
 
@@ -1370,7 +1371,9 @@ Handler State
 
 SFUNC int fio_http_is_clean(fio_http_s *h) {
   FIO_ASSERT_DEBUG(h, "NULL HTTP handler!");
-  return !(h->state & (~FIO___HTTP_STATE_COOKIES_PARSED));
+  /* headers sent (e.g., preset `content-length`, no finish) = not clean */
+  return !(h->state & (~FIO___HTTP_STATE_COOKIES_PARSED)) &&
+         h->writer == fio____http_write_start;
 }
 
 /** Returns true if the HTTP handle's response was sent. */
@@ -1995,223 +1998,116 @@ fio_http_set_cookie_each(fio_http_s *h,
 Peer Address
 ***************************************************************************** */
 
+/* Returns the address at the start of `v` (after an optional `"`), or an
+ * empty buffer. Ends at `"`, `,`, `;`, SP / HTAB or after 48 bytes. */
+FIO_SFUNC fio_buf_info_s fio___http_from_value(fio_str_info_s v) {
+  fio_buf_info_s r = FIO_BUF_INFO2(v.buf, 0);
+  if (v.len && v.buf[0] == '"')
+    r.buf = ++v.buf, --v.len;
+  while (r.len < v.len && r.len < 48 && v.buf[r.len] != '"' &&
+         v.buf[r.len] != ',' && v.buf[r.len] != ';' && v.buf[r.len] != ' ' &&
+         v.buf[r.len] != '\t')
+    ++r.len;
+  return r;
+}
+
+/* Returns the `for=` value of a `forwarded` header, or an empty buffer. */
+FIO_SFUNC fio_buf_info_s fio___http_from_forwarded(fio_str_info_s v) {
+  if (v.len > 1023)
+    v.len = 1023; /* limit possible attack surface */
+  for (size_t i = 0; i + 4 < v.len; ++i) {
+    if ((v.buf[i] | 32) != 'f' || (v.buf[i + 1] | 32) != 'o' ||
+        (v.buf[i + 2] | 32) != 'r' || v.buf[i + 3] != '=')
+      continue;
+    if (i && v.buf[i - 1] != ';' && v.buf[i - 1] != ',' &&
+        v.buf[i - 1] != ' ' && v.buf[i - 1] != '\t')
+      continue; /* part of another name (e.g., `xfor=`) */
+    return fio___http_from_value(FIO_STR_INFO2(v.buf + i + 4, v.len - i - 4));
+  }
+  return FIO_BUF_INFO2(NULL, 0);
+}
+
 /**
- * Writes peer address to `dest` starting with the `forwarded` header, with a
- * fallback to actual socket address and a final fallback to `"[unknown]"`.
+ * Writes peer address to `dest`: the `forwarded` header's `for=` value, then
+ * the first `x-forwarded-for` address, then the socket address, and finally
+ * `"[unknown]"`.
  *
- * If `unknown` is returned, the function returns -1. if `dest` capacity is too
- * small, the number of bytes required will be returned.
- *
- * If all goes well, this function returns 0.
+ * Returns 0 if a forwarded header was used, -1 if not. If `dest` is too small,
+ * nothing is written and the address length is returned.
  */
 SFUNC int fio_http_from(fio_str_info_s *dest, const fio_http_s *h) {
   int r = 0;
-  /* Guess IP address from headers (forwarded) where possible */
-  fio_str_info_s forwarded =
+  fio_buf_info_s buf = fio___http_from_forwarded(
       fio_http_request_header((fio_http_s *)h,
                               FIO_STR_INFO2((char *)"forwarded", 9),
-                              -1);
-  fio_buf_info_s buf;
-  char *end;
-  if (forwarded.len) {
-    forwarded.len &= 1023; /* limit possible attack surface */
-    for (; forwarded.len > 5;) {
-      if ((forwarded.buf[0] | 32) != 'f' || (forwarded.buf[1] | 32) != 'o' ||
-          (forwarded.buf[2] | 32) != 'r' || forwarded.buf[3] != '=') {
-        ++forwarded.buf;
-        --forwarded.len;
-        continue;
-      }
-      forwarded.buf += 4 + (forwarded.buf[4] == '"');
-      break;
-    }
-  client_address_found:
-    buf.buf = end = forwarded.buf;
-    while (*end && *end != '"' && *end != ',' && *end != ' ' && *end != ';' &&
-           (end - forwarded.buf) < 48)
-      ++end;
-    buf.len = (size_t)(end - forwarded.buf);
-  } else {
-    forwarded =
+                              -1));
+  if (!buf.len) {
+    fio_str_info_s xff =
         fio_http_request_header((fio_http_s *)h,
                                 FIO_STR_INFO2((char *)"x-forwarded-for", 15),
                                 -1);
-    if (forwarded.len) {
-      forwarded.buf += (forwarded.buf[0] == '"');
-      goto client_address_found;
-    }
-#if defined(H___FIO_SOCK___H)
-    if (!(buf = fio_sock_peer_addr(
-              fio_http_controller((fio_http_s *)h)->get_fd((fio_http_s *)h)))
-             .len)
-#endif
-      buf = FIO_BUF_INFO1((char *)"[unknown]");
+    if (xff.len > 1023)
+      xff.len = 1023;
+    buf = fio___http_from_value(xff);
+  }
+  if (!buf.len) {
     r = -1;
+#if defined(H___FIO_SOCK___H)
+    buf = fio_sock_peer_addr(
+        fio_http_controller((fio_http_s *)h)->get_fd((fio_http_s *)h));
+#endif
+    if (!buf.len)
+      buf = FIO_BUF_INFO1((char *)"[unknown]");
   }
   if (dest->capa > dest->len + buf.len) { /* enough space? */
     FIO_MEMCPY(dest->buf + dest->len, buf.buf, buf.len);
     dest->len += buf.len;
     dest->buf[dest->len] = 0;
   } else
-    r = (int)buf.len - (!buf.len);
+    r = (int)buf.len;
   return r;
 }
 
 /* *****************************************************************************
-Body Management - file descriptor
-***************************************************************************** */
-
-FIO_SFUNC fio_str_info_s fio___http_body_read_fd(fio_http_s *h, size_t len) {
-  h->body.buf = fio_bstr_len_set(h->body.buf, 0);
-  h->body.buf = fio_bstr_readfd(h->body.buf, h->body.fd, h->body.pos, len);
-  fio_str_info_s r = fio_bstr_info(h->body.buf);
-  h->body.pos += r.len;
-  return r;
-}
-FIO_SFUNC fio_str_info_s fio___http_body_read_until_fd(fio_http_s *h,
-                                                       char token,
-                                                       size_t limit) {
-  h->body.buf = fio_bstr_len_set(h->body.buf, 0);
-  h->body.buf =
-      fio_bstr_getdelim_fd(h->body.buf, h->body.fd, h->body.pos, token, limit);
-  fio_str_info_s r = fio_bstr_info(h->body.buf);
-  h->body.pos += r.len;
-  return r;
-}
-FIO_SFUNC void fio___http_body_expect_fd(fio_http_s *h, size_t len) {
-  (void)h, (void)len;
-}
-FIO_SFUNC void fio___http_body_write_fd(fio_http_s *h,
-                                        const void *data,
-                                        size_t len) {
-  ssize_t written = fio_fd_write(h->body.fd, data, len);
-  if (written > 0)
-    h->body.len += written;
-}
-
-/* *****************************************************************************
-Body Management - buffer
-***************************************************************************** */
-
-FIO_SFUNC int fio___http_body___move_buf2fd(fio_http_s *h) {
-  h->body.fd = fio_filename_tmp();
-  if (h->body.fd == -1) {
-#if 1
-    static int error_printed = 0;
-    if (!error_printed) {
-      error_printed = 1;
-      FIO_LOG_ERROR("fio_http_s couldn't open temporary file! (%d) %s",
-                    errno,
-                    strerror(errno));
-    }
-#endif
-    return -1;
-  }
-  fio_buf_info_s b = fio_bstr_buf(h->body.buf);
-  if (!b.len)
-    return 0;
-  ssize_t written = fio_fd_write(h->body.fd, b.buf, b.len);
-  if (written == (ssize_t)b.len)
-    return 0;
-  close(h->body.fd);
-  FIO_LOG_ERROR("fio_http_s couldn't transfer data to temporary file "
-                "(transferred %zd / %zu)",
-                written,
-                b.len);
-  return (h->body.fd = -1);
-}
-FIO_SFUNC fio_str_info_s fio___http_body_read_buf(fio_http_s *h, size_t len) {
-  fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), len);
-  h->body.pos += len;
-  return r;
-}
-FIO_SFUNC fio_str_info_s fio___http_body_read_until_buf(fio_http_s *h,
-                                                        char token,
-                                                        size_t limit) {
-  fio_str_info_s r = FIO_STR_INFO2((h->body.buf + h->body.pos), limit);
-  char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
-  if (end) {
-    ++end;
-    r.len = end - r.buf;
-    h->body.pos = end - h->body.buf;
-  } else
-    h->body.pos = h->body.len;
-  return r;
-}
-FIO_SFUNC void fio___http_body_expect_buf(fio_http_s *h, size_t len) {
-  if (len + h->body.len > FIO_HTTP_BODY_RAM_LIMIT) {
-    fio___http_body___move_buf2fd(h);
-    return;
-  }
-  h->body.buf = fio_bstr_reserve(h->body.buf, len);
-}
-FIO_SFUNC void fio___http_body_write_buf(fio_http_s *h,
-                                         const void *data,
-                                         size_t len) {
-  if (len + h->body.len > FIO_HTTP_BODY_RAM_LIMIT)
-    goto switch_to_fd;
-write_to_buf:
-  h->body.buf = fio_bstr_write(h->body.buf, data, len);
-  h->body.len += len;
-  return;
-switch_to_fd:
-  if (fio___http_body___move_buf2fd(h))
-    goto write_to_buf;
-  fio___http_body_write_fd(h, data, len);
-}
-
-/* *****************************************************************************
-Body Management - Public API
+Body Management - Public API (delegates to `fio_data_s`)
 ***************************************************************************** */
 
 /** Gets the body (payload) length associated with the HTTP handle. */
-SFUNC size_t fio_http_body_length(fio_http_s *h) { return h->body.len; }
+SFUNC size_t fio_http_body_length(fio_http_s *h) {
+  return fio_data_len(&h->body);
+}
 
 /**
  * If the body is stored in a temporary file, returns the file's handle.
  *
  * Otherwise returns -1.
  */
-SFUNC int fio_http_body_fd(fio_http_s *h) { return h->body.fd; }
+SFUNC int fio_http_body_fd(fio_http_s *h) { return fio_data_fd(&h->body); }
 
 /** Releases body (payload) resources, closing any temporary files. */
-SFUNC void fio_http_body_close(fio_http_s *h) {
-  fio_bstr_free(h->body.buf);
-  if (h->body.fd != -1)
-    close(h->body.fd);
-  h->body.buf = NULL;
-  h->body.len = h->body.pos = 0;
-  h->body.fd = -1;
+SFUNC void fio_http_body_close(fio_http_s *h) { fio_data_destroy(&h->body); }
+
+/** Saves the whole body to `filename` (atomic). Returns 0 or -1. */
+SFUNC int fio_http_body_save(fio_http_s *h, const char *filename) {
+  return fio_data_save(&h->body, filename);
 }
 
-/** Adjusts the body's reading position. Negative values start at the end. */
+/**
+ * Adjusts the body's reading position and returns the new position.
+ *
+ * `-n` is `length - n` (`-1` is the last byte), clamped to 0; any position at
+ * or past the end is EOF.
+ */
 SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
-  if (pos == SSIZE_MAX)
-    pos = h->body.pos;
-  if (pos < 0) {
-    pos += h->body.len;
-    if (pos < 0)
-      pos = 0;
-  }
-  if ((size_t)pos >= h->body.len)
-    pos = h->body.len;
-  h->body.pos = pos;
-  return pos;
+  return fio_data_seek(&h->body, pos);
 }
 
 /** Returns the body's reading position. */
-SFUNC size_t fio_http_body_pos(fio_http_s *h) { return h->body.pos; }
+SFUNC size_t fio_http_body_pos(fio_http_s *h) { return fio_data_pos(&h->body); }
 
 /** Reads up to `length` of data from the body, returns nothing on EOF. */
 SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
-  fio_str_info_s r = {0};
-  if (h->body.pos == h->body.len)
-    return r;
-  if (length > h->body.len - h->body.pos)
-    length = h->body.len - h->body.pos;
-  r = ((h->body.fd == -1) ? fio___http_body_read_buf
-                          : fio___http_body_read_fd)(h, length);
-  return r;
+  return fio_data_read(&h->body, length);
 }
 
 /**
@@ -2222,32 +2118,17 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *h, size_t length) {
 SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *h,
                                               char token,
                                               size_t limit) {
-  fio_str_info_s r = {0};
-  if (h->body.pos >= h->body.len)
-    return r;
-  if (!limit || limit > h->body.len || limit > (h->body.len - h->body.pos))
-    limit = h->body.len - h->body.pos;
-  if (!limit)
-    return r;
-  r = ((h->body.fd == -1) ? fio___http_body_read_until_buf
-                          : fio___http_body_read_until_fd)(h, token, limit);
-  if (!r.len)
-    r.buf = NULL;
-  return r;
+  return fio_data_read_until(&h->body, token, limit);
 }
 
 /** Allocates a body (payload) of (at least) the `expected_length`. */
 SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length) {
-  ((h->body.fd == -1) ? fio___http_body_expect_buf
-                      : fio___http_body_expect_fd)(h, expected_length);
+  fio_data_expect(&h->body, expected_length);
 }
 
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
-  if (!data || !len)
-    return;
-  ((h->body.fd == -1) ? fio___http_body_write_buf
-                      : fio___http_body_write_fd)(h, data, len);
+/** Writes `data` to the body (payload). Returns 0 on success, -1 on error. */
+SFUNC int fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
+  return fio_data_write(&h->body, data, len);
 }
 
 /* *****************************************************************************
@@ -2497,7 +2378,7 @@ SFUNC void fio_http_write FIO_NOOP(fio_http_s *h, fio_http_write_args_s args) {
   return;
 
 handle_error:
-  if (args.fd)
+  if ((unsigned)(args.fd + 1) > 1U && !args.copy)
     close(args.fd);
   if (args.dealloc && args.buf)
     args.dealloc((void *)args.buf);
@@ -2562,13 +2443,8 @@ SFUNC void fio_http_upgrade_websocket(fio_http_s *h) {
         h,
         FIO_STR_INFO2((char *)"sec-websocket-version", 21),
         0);
-    if (val.len != 2 || (val.buf[0] != '1' || val.buf[1] != '3')) {
-      fio_http_response_header_set(
-          h,
-          FIO_STR_INFO2((char *)"sec-websocket-version", 21),
-          FIO_STR_INFO2((char *)"13", 2));
-      fio_http_send_error_response(h, 400);
-    }
+    if (val.len != 2 || (val.buf[0] != '1' || val.buf[1] != '3'))
+      goto version_error;
   }
   h->status = 101;
   fio_http_response_header_set(h,
@@ -2611,6 +2487,13 @@ SFUNC void fio_http_upgrade_websocket(fio_http_s *h) {
   return;
 handshake_error:
   fio_http_send_error_response(h, 403);
+  return;
+version_error:
+  fio_http_response_header_set(
+      h,
+      FIO_STR_INFO2((char *)"sec-websocket-version", 21),
+      FIO_STR_INFO2((char *)"13", 2));
+  fio_http_send_error_response(h, 400);
   return;
 }
 
@@ -2955,160 +2838,83 @@ SFUNC void fio_http_write_log(fio_http_s *h) {
 ETag helper
 ***************************************************************************** */
 
-/** Returns true (1) if the ETag response matches an if-none-match request. */
-SFUNC int fio_http_etag_is_match(fio_http_s *h) {
-  fio_str_info_s method = fio_keystr_info(&h->method);
-  if ((method.len < 3) | (method.len > 4))
-    return 0;
-  if (!(((method.buf[0] | 32) == 'g') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 't')) &&
-      !(((method.buf[0] | 32) == 'h') & ((method.buf[1] | 32) == 'e') &
-        ((method.buf[2] | 32) == 'a') & ((method.buf[3] | 32) == 'd')))
-    return 0;
-  fio_str_info_s etag = fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
-                                             FIO_STR_INFO2((char *)"etag", 4),
-                                             0);
-  if (!etag.len)
-    return 0;
-  fio_str_info_s cond =
-      fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
-                           FIO_STR_INFO2((char *)"if-none-match", 13),
-                           0);
-  if (!cond.len)
-    return 0;
-  char *end = cond.buf + cond.len;
-  for (;;) {
-    cond.buf += (cond.buf[0] == ',');
-    while (cond.buf[0] == ' ')
-      ++cond.buf;
-    if (cond.buf > end || (size_t)(end - cond.buf) < (size_t)etag.len)
-      return 0;
-    if (FIO_MEMCMP(cond.buf, etag.buf, etag.len)) {
-      cond.buf = (char *)FIO_MEMCHR(cond.buf, ',', end - cond.buf);
-      if (!cond.buf)
-        return 0;
-      continue;
-    }
-    return 1;
+/** Drops the weak `W/` prefix, leaving the opaque-tag (RFC 9110 §8.8.3). */
+FIO_IFUNC fio_str_info_s fio___http_etag_opaque(fio_str_info_s t) {
+  if (t.len > 2 && t.buf[0] == 'W' && t.buf[1] == '/') {
+    t.buf += 2;
+    t.len -= 2;
   }
+  return t;
 }
 
-/* *****************************************************************************
-HTTP Body Parsing - Primitive Type Detection
-***************************************************************************** */
-
-/** Primitive type enum for value identification. */
-typedef enum {
-  FIO___HTTP_BODY_PRIM_STRING = 0, /* Not a recognized primitive */
-  FIO___HTTP_BODY_PRIM_NULL,       /* "null" or "nil" */
-  FIO___HTTP_BODY_PRIM_TRUE,       /* "true" */
-  FIO___HTTP_BODY_PRIM_FALSE,      /* "false" */
-  FIO___HTTP_BODY_PRIM_NUMBER,     /* Integer like "123", "-456" */
-  FIO___HTTP_BODY_PRIM_FLOAT,      /* Float like "1.5", "-3.14", "1e10" */
-} fio___http_body_primitive_e;
-
 /**
- * Identifies if a string represents a primitive value.
+ * Evaluates `If-None-Match` for a `GET` / `HEAD` request (RFC 9110 §13.1.2).
  *
- * Returns the primitive type and optionally parses the value.
- * If `i_out` is not NULL and type is NUMBER, stores parsed int64_t.
- * If `f_out` is not NULL and type is FLOAT, stores parsed double.
+ * Uses the weak comparison function (a `W/` prefix is ignored on both sides)
+ * and checks every list member of every `If-None-Match` line. A field value of
+ * `*` matches any current representation (even without an `etag`); `*` mixed
+ * with other members is invalid and never matches. Evaluated only when the
+ * response status is 2xx (RFC 9110 §13.2.1).
  */
-FIO_SFUNC fio___http_body_primitive_e
-fio___http_body_identify_primitive(fio_buf_info_s str,
-                                   int64_t *i_out,
-                                   double *f_out) {
-  if (!str.len || !str.buf)
-    return FIO___HTTP_BODY_PRIM_STRING;
-
-  /* Check for "null" (4 chars) - case insensitive */
-  if (str.len == 4) {
-    uint32_t w = fio_buf2u32u(str.buf) | 0x20202020UL;
-    if (w == (fio_buf2u32u("null") | 0x20202020UL))
-      return FIO___HTTP_BODY_PRIM_NULL;
-    if (w == (fio_buf2u32u("true") | 0x20202020UL))
-      return FIO___HTTP_BODY_PRIM_TRUE;
-  }
-
-  /* Check for "nil" (3 chars) - case insensitive */
-  if (str.len == 3) {
-    uint32_t w = (fio_buf2u16u(str.buf) | 0x2020) |
-                 ((uint32_t)(str.buf[2] | 0x20) << 16);
-    uint32_t nil = (fio_buf2u16u("ni") | 0x2020) | ((uint32_t)('l') << 16);
-    if (w == nil)
-      return FIO___HTTP_BODY_PRIM_NULL;
-  }
-
-  /* Check for "false" (5 chars) - case insensitive */
-  if (str.len == 5) {
-    uint32_t w0 = fio_buf2u32u(str.buf) | 0x20202020UL;
-    if (w0 == (fio_buf2u32u("fals") | 0x20202020UL) &&
-        ((str.buf[4] | 0x20) == 'e'))
-      return FIO___HTTP_BODY_PRIM_FALSE;
-  }
-
-  /* Check for numeric values */
-  {
-    const char *p = str.buf;
-    const char *end = str.buf + str.len;
-    size_t is_neg = (p[0] == '-');
-
-    /* Must start with digit or '-' followed by digit */
-    if (!(((size_t)(p[0] - '0') < 10) ||
-          (is_neg && str.len > 1 && ((size_t)(p[1] - '0') < 10))))
-      return FIO___HTTP_BODY_PRIM_STRING;
-
-    /* Scan to determine if integer or float */
-    size_t has_dot = 0, has_exp = 0;
-    p += is_neg;
-
-    /* Scan integer part */
-    while (p < end && ((size_t)(*p - '0') < 10))
-      ++p;
-
-    /* Check for decimal point */
-    if (p < end && *p == '.') {
-      has_dot = 1;
-      ++p;
-      /* Must have at least one digit after dot */
-      if (p >= end || ((size_t)(*p - '0') >= 10))
-        return FIO___HTTP_BODY_PRIM_STRING;
-      while (p < end && ((size_t)(*p - '0') < 10))
-        ++p;
+SFUNC int fio_http_etag_is_match(fio_http_s *h) {
+  if (!h || h->status < 200 || h->status > 299)
+    return 0;
+  if (!fio_http_method_is_get(h) && !fio_http_method_is_head(h))
+    return 0;
+  fio_str_info_s etag = fio___http_etag_opaque(
+      fio___http_hmap_get2(HTTP_HDR_RESPONSE(h),
+                           FIO_STR_INFO2((char *)"etag", 4),
+                           0));
+  { /* `*` is only valid as the whole field value */
+    fio_str_info_s v =
+        fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
+                             FIO_STR_INFO2((char *)"if-none-match", 13),
+                             0);
+    while (v.len && (v.buf[0] == ' ' || v.buf[0] == '\t')) {
+      ++v.buf;
+      --v.len;
     }
-
-    /* Check for exponent */
-    if (p < end && ((*p | 0x20) == 'e')) {
-      has_exp = 1;
-      ++p;
-      /* Optional sign */
-      p += (p < end && (*p == '+' || *p == '-'));
-      /* Must have at least one digit in exponent */
-      if (p >= end || ((size_t)(*p - '0') >= 10))
-        return FIO___HTTP_BODY_PRIM_STRING;
-      while (p < end && ((size_t)(*p - '0') < 10))
-        ++p;
-    }
-
-    /* If we didn't consume all characters, it's not a valid number */
-    if (p != end)
-      return FIO___HTTP_BODY_PRIM_STRING;
-
-    /* Parse and return appropriate type */
-    if (has_dot || has_exp) {
-      if (f_out) {
-        char *parse_ptr = str.buf;
-        *f_out = fio_atof(&parse_ptr);
+    while (v.len && (v.buf[v.len - 1] == ' ' || v.buf[v.len - 1] == '\t'))
+      --v.len;
+    if (v.len == 1 && v.buf[0] == '*')
+      return fio_http_request_header_count(
+                 h,
+                 FIO_STR_INFO2((char *)"if-none-match", 13)) == 1;
+  }
+  for (int32_t i = 0;; ++i) {
+    fio_str_info_s cond =
+        fio___http_hmap_get2(HTTP_HDR_REQUEST(h),
+                             FIO_STR_INFO2((char *)"if-none-match", 13),
+                             i);
+    if (!cond.buf)
+      return 0;
+    char *pos = cond.buf;
+    char *end = cond.buf + cond.len;
+    while (pos < end) {
+      if (pos[0] == ',' || pos[0] == ' ' || pos[0] == '\t') {
+        ++pos;
+        continue;
       }
-      return FIO___HTTP_BODY_PRIM_FLOAT;
+      char *tag = pos;
+      if (end - pos > 2 && pos[0] == 'W' && pos[1] == '/' && pos[2] == '"')
+        pos += 2;
+      if (pos[0] == '"') { /* quoted opaque-tag: may contain commas */
+        pos = (char *)FIO_MEMCHR(pos + 1, '"', (size_t)(end - (pos + 1)));
+        if (!pos)
+          break; /* malformed: unterminated entity-tag */
+        ++pos;
+      } else { /* a lenient unquoted tag (or an invalid `*` list member) */
+        while (pos < end && pos[0] != ',' && pos[0] != ' ' && pos[0] != '\t')
+          ++pos;
+      }
+      fio_str_info_s member =
+          fio___http_etag_opaque(FIO_STR_INFO2(tag, (size_t)(pos - tag)));
+      if (etag.len && member.len == etag.len &&
+          !FIO_MEMCMP(member.buf, etag.buf, etag.len))
+        return 1;
+      while (pos < end && pos[0] != ',') /* skip junk up to the next member */
+        ++pos;
     }
-
-    /* Integer */
-    if (i_out) {
-      char *parse_ptr = str.buf;
-      *i_out = fio_atol10(&parse_ptr);
-    }
-    return FIO___HTTP_BODY_PRIM_NUMBER;
   }
 }
 
@@ -3132,9 +2938,19 @@ fio___http_body_detect_content_type(fio_http_s *h) {
   if (!ct.len)
     return FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN;
 
+  while (ct.len && (*ct.buf == ' ' || *ct.buf == '\t')) {
+    ++ct.buf;
+    --ct.len;
+  }
+  size_t len = 0;
+  while (len < ct.len && ct.buf[len] != ';' && ct.buf[len] != ' ' &&
+         ct.buf[len] != '\t')
+    ++len;
+  ct.len = len;
+
   /* application/json */
-  if (ct.len >= 16) {
-    /* Check for "application/json" (case-insensitive for "application") */
+  if (ct.len == 16) {
+    /* Compare the complete JSON media type case-insensitively. */
     uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
     uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
     if (w0 == (fio_buf2u64u("applicat") | 0x2020202020202020ULL) &&
@@ -3142,8 +2958,24 @@ fio___http_body_detect_content_type(fio_http_s *h) {
       return FIO___HTTP_BODY_CONTENT_TYPE_JSON;
   }
 
+  /* text/json */
+  if (ct.len == 9 &&
+      (fio_buf2u64u(ct.buf) | 0x2020202020202020ULL) ==
+          fio_buf2u64u("text/jso") &&
+      (ct.buf[8] | 0x20) == 'n')
+    return FIO___HTTP_BODY_CONTENT_TYPE_JSON;
+
+  /* application/x-json */
+  if (ct.len == 18 &&
+      (fio_buf2u64u(ct.buf) | 0x2020202020202020ULL) ==
+          fio_buf2u64u("applicat") &&
+      (fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL) ==
+          fio_buf2u64u("ion/x-js") &&
+      (fio_buf2u16u(ct.buf + 16) | 0x2020) == fio_buf2u16u("on"))
+    return FIO___HTTP_BODY_CONTENT_TYPE_JSON;
+
   /* application/x-www-form-urlencoded */
-  if (ct.len >= 33) {
+  if (ct.len == 33) {
     uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
     uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
     uint64_t w2 = fio_buf2u64u(ct.buf + 16) | 0x2020202020202020ULL;
@@ -3156,7 +2988,7 @@ fio___http_body_detect_content_type(fio_http_s *h) {
   }
 
   /* multipart/form-data */
-  if (ct.len >= 19) {
+  if (ct.len == 19) {
     uint64_t w0 = fio_buf2u64u(ct.buf) | 0x2020202020202020ULL;
     uint64_t w1 = fio_buf2u64u(ct.buf + 8) | 0x2020202020202020ULL;
     if (w0 == (fio_buf2u64u("multipar") | 0x2020202020202020ULL) &&
@@ -3167,423 +2999,407 @@ fio___http_body_detect_content_type(fio_http_s *h) {
       return FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART;
   }
 
+  /* application/<non-empty subtype>+json */
+  if (ct.len > 17) {
+    const char *prefix = "application/";
+    const char *suffix = "+json";
+    size_t i = 0;
+    for (; i < 12 && ((ct.buf[i] | 0x20) == prefix[i]); ++i)
+      ;
+    if (i == 12) {
+      for (i = 0; i < 5 && ((ct.buf[ct.len - 5 + i] | 0x20) == suffix[i]); ++i)
+        ;
+      if (i == 5)
+        return FIO___HTTP_BODY_CONTENT_TYPE_JSON;
+    }
+  }
+
   return FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN;
 }
 
 /* *****************************************************************************
-HTTP Body Parsing - Stub Implementations
+Params Parsing - Shared Map Helpers
 ***************************************************************************** */
 
-/* *****************************************************************************
-JSON Body Parsing - Adapter Implementation
-***************************************************************************** */
-
-/**
- * Wrapper struct to hold HTTP body parse context for JSON adapter callbacks.
- * Passed as `udata` directly to `fio_json_parse()`.
- */
 typedef struct {
-  const fio_http_body_parse_callbacks_s *callbacks;
-  void *udata;
-} fio___http_json_adapter_s;
+  fio_buf_info_s seg[FIO_JSON_MAX_DEPTH]; /* slices into `name` */
+  uint32_t count;                         /* >= 1 on success */
+  uint8_t append; /* 1 if the name ended with a terminal `[]` */
+} fio___http_params_path_s;
 
-/* --- JSON to HTTP body adapter callbacks --- */
-
-FIO_SFUNC void *fio___http_json_on_null(void *udata) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_null)
-    return NULL;
-  return a->callbacks->on_null(a->udata);
+/** Splits a decoded name; invalid paths remain literal, -1 means too deep. */
+FIO_SFUNC int fio___http_params_path_parse(fio___http_params_path_s *p,
+                                           fio_buf_info_s name) {
+  size_t at = 0;
+  int too_deep = 0;
+  p->count = 0;
+  p->append = 0;
+  if (!name.len)
+    goto literal;
+  for (;;) {
+    size_t start;
+    if (at && name.buf[at] == '[') {
+      ++at;
+      start = at;
+      while (at < name.len && name.buf[at] != ']') {
+        if (name.buf[at] == '[')
+          goto literal;
+        ++at;
+      }
+      if (at == name.len)
+        goto literal;
+      if (at == start) {
+        if (at + 1 == name.len && p->count) {
+          p->append = 1;
+          return too_deep || p->count >= FIO_JSON_MAX_DEPTH ? -1 : 0;
+        }
+        goto literal;
+      }
+      if (p->count >= FIO_JSON_MAX_DEPTH)
+        too_deep = 1;
+      else
+        p->seg[p->count++] =
+            (fio_buf_info_s){.buf = name.buf + start, .len = at - start};
+      ++at; /* closing ']' */
+      if (at < name.len && name.buf[at] != '.' && name.buf[at] != '[')
+        goto literal;
+    } else {
+      if (at && name.buf[at] != '.')
+        goto literal;
+      if (at)
+        ++at;
+      start = at;
+      while (at < name.len && name.buf[at] != '.' && name.buf[at] != '[') {
+        if (name.buf[at] == ']')
+          goto literal;
+        ++at;
+      }
+      if (at == start)
+        goto literal;
+      if (p->count >= FIO_JSON_MAX_DEPTH)
+        too_deep = 1;
+      else
+        p->seg[p->count++] =
+            (fio_buf_info_s){.buf = name.buf + start, .len = at - start};
+    }
+    if (at == name.len)
+      return too_deep ? -1 : 0;
+  }
+literal:
+  p->seg[0] = name;
+  p->count = 1;
+  p->append = 0;
+  return 0;
 }
 
-FIO_SFUNC void *fio___http_json_on_true(void *udata) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_true)
-    return NULL;
-  return a->callbacks->on_true(a->udata);
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_null) ==
+                      offsetof(fio_json_parser_callbacks_s, on_null),
+                  "HTTP / JSON callback offset mismatch: on_null");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_true) ==
+                      offsetof(fio_json_parser_callbacks_s, on_true),
+                  "HTTP / JSON callback offset mismatch: on_true");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_false) ==
+                      offsetof(fio_json_parser_callbacks_s, on_false),
+                  "HTTP / JSON callback offset mismatch: on_false");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_number) ==
+                      offsetof(fio_json_parser_callbacks_s, on_number),
+                  "HTTP / JSON callback offset mismatch: on_number");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_float) ==
+                      offsetof(fio_json_parser_callbacks_s, on_float),
+                  "HTTP / JSON callback offset mismatch: on_float");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_string) ==
+                      offsetof(fio_json_parser_callbacks_s, on_string),
+                  "HTTP / JSON callback offset mismatch: on_string");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s,
+                           on_string_simple) ==
+                      offsetof(fio_json_parser_callbacks_s, on_string_simple),
+                  "HTTP / JSON callback offset mismatch: on_string_simple");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_map) ==
+                      offsetof(fio_json_parser_callbacks_s, on_map),
+                  "HTTP / JSON callback offset mismatch: on_map");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_array) ==
+                      offsetof(fio_json_parser_callbacks_s, on_array),
+                  "HTTP / JSON callback offset mismatch: on_array");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, map_push) ==
+                      offsetof(fio_json_parser_callbacks_s, map_push),
+                  "HTTP / JSON callback offset mismatch: map_push");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, array_push) ==
+                      offsetof(fio_json_parser_callbacks_s, array_push),
+                  "HTTP / JSON callback offset mismatch: array_push");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, is_array) ==
+                      offsetof(fio_json_parser_callbacks_s, is_array),
+                  "HTTP / JSON callback offset mismatch: is_array");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, is_map) ==
+                      offsetof(fio_json_parser_callbacks_s, is_map),
+                  "HTTP / JSON callback offset mismatch: is_map");
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s,
+                           free_unused_object) ==
+                      offsetof(fio_json_parser_callbacks_s, free_unused_object),
+                  "HTTP / JSON callback offset mismatch: free_unused_object");
+/* The HTTP table is passed to the JSON parser through a pointer cast; its
+ * head MUST keep the JSON table layout. */
+FIO_ASSERT_STATIC(offsetof(fio_http_params_parse_callbacks_s, on_file) ==
+                      offsetof(fio_json_parser_callbacks_s,
+                               free_unused_object) +
+                          sizeof(void *),
+                  "HTTP / JSON callback head size mismatch");
+FIO_ASSERT_STATIC(sizeof(fio_http_params_parse_callbacks_s) == 128,
+                  "HTTP params callback table should be 16 pointers");
+
+/* Views the HTTP callback table as the JSON table it starts with. */
+#define FIO___HTTP_PARAMS_JSON_CB(cb)                                          \
+  ((const fio_json_parser_callbacks_s *)(cb))
+
+/* Creates the root map. Returns 0 or an unchanged callback error. */
+FIO_SFUNC int fio___http_params_map_new(
+    const fio_http_params_parse_callbacks_s *cb,
+    void *udata,
+    void **map) {
+  fio_json_obj_result_s r =
+      fio_json_resolve_on_map(FIO___HTTP_PARAMS_JSON_CB(cb),
+                              udata,
+                              NULL,
+                              (fio_buf_info_s){0});
+  *map = r.err ? NULL : r.obj;
+  return r.err;
 }
 
-FIO_SFUNC void *fio___http_json_on_false(void *udata) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_false)
-    return NULL;
-  return a->callbacks->on_false(a->udata);
+/* Creates an owned String value for decoded form text. */
+FIO_IFUNC fio_json_obj_result_s
+fio___http_params_string(const fio_http_params_parse_callbacks_s *cb,
+                         void *udata,
+                         fio_buf_info_s text) {
+  return (cb->on_string_simple ? cb->on_string_simple : cb->on_string)(udata,
+                                                                       text);
 }
 
-FIO_SFUNC void *fio___http_json_on_number(void *udata, int64_t i) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_number)
-    return NULL;
-  return a->callbacks->on_number(a->udata, i);
+/* Stores an owned form value (taken even on error) at its decoded, possibly
+ * nested field path. Returns 0 or an error (callback errors unchanged). */
+FIO_SFUNC int fio___http_params_store(
+    const fio_http_params_parse_callbacks_s *cb,
+    void *udata,
+    void *root,
+    fio_buf_info_s name,
+    void *value) {
+  const fio_json_parser_callbacks_s *json = FIO___HTTP_PARAMS_JSON_CB(cb);
+  fio_json_obj_result_s c = {.obj = root};
+  fio___http_params_path_s path;
+  if (fio___http_params_path_parse(&path, name)) {
+    FIO_LOG_SECURITY("HTTP params name depth limit exceeded (%u)",
+                     (unsigned)FIO_JSON_MAX_DEPTH);
+    c.err = FIO_HTTP_PARAMS_PARSE_DEPTH;
+    goto error;
+  }
+  for (uint32_t i = 0; i + 1 < path.count; ++i) {
+    c = fio_json_resolve_on_map(json, udata, c.obj, path.seg[i]);
+    if (c.err)
+      goto error;
+  }
+  if (path.append) {
+    c = fio_json_resolve_on_array(json, udata, c.obj, path.seg[path.count - 1]);
+    if (c.err)
+      goto error;
+    return cb->array_push(udata, c.obj, value); /* takes `value` */
+  }
+  return fio_json_resolve_map_push(json,
+                                   udata,
+                                   c.obj,
+                                   path.seg[path.count - 1],
+                                   value); /* takes `value` */
+error:
+  cb->free_unused_object(udata, value);
+  return c.err;
 }
 
-FIO_SFUNC void *fio___http_json_on_float(void *udata, double f) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_float)
-    return NULL;
-  return a->callbacks->on_float(a->udata, f);
-}
-
-FIO_STATIC_SAFE_ALLOC_DEF(fio___http_json_on_string_alloc, char, 4096, 32)
-/** Escaped string - needs unescaping before passing to callback */
-FIO_SFUNC void *fio___http_json_on_string(void *udata,
-                                          const void *start,
-                                          size_t len) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_string)
-    return NULL;
-  /* Unescape JSON string */
-  fio_str_info_s unescaped = FIO_STR_INFO3(NULL, 0, 4095);
-  do {
-    unescaped.buf = fio___http_json_on_string_alloc_try();
-  } while (!unescaped.buf);
-  char *org = unescaped.buf;
-  fio_string_write_unescape(&unescaped, FIO_STRING_ALLOC_COPY, start, len);
-  void *result =
-      a->callbacks->on_string(a->udata, unescaped.buf, unescaped.len);
-  if (unescaped.buf == org)
-    fio___http_json_on_string_alloc_free(org);
-  else
-    FIO_STRING_FREE(unescaped.buf);
-  return result;
-}
-
-/** Simple (unescaped) string - pass through directly */
-FIO_SFUNC void *fio___http_json_on_string_simple(void *udata,
-                                                 const void *start,
-                                                 size_t len) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_string)
-    return NULL;
-  return a->callbacks->on_string(a->udata, start, len);
+/* Builds a parse result; on error `map` is the caller-owned partial root. */
+FIO_IFUNC fio_http_params_parse_result_s
+fio___http_params_finish(void *map, size_t consumed, size_t count, int err) {
+  fio_http_params_parse_result_s r = {
+      .result = map,
+      .consumed = consumed,
+      .count = count,
+      .err = err,
+  };
+  return r;
 }
 
 /**
- * Note: The JSON parser manages parent-child relationships via map_push/
- * array_push callbacks. The `parent` parameter is passed as NULL since the
- * JSON parser handles nesting internally and will call map_set/array_push
- * with the correct container.
+ * Reads the whole body (from its start) to `body`.
+ *
+ * A spilled body is memory mapped where possible; a short read (i.e., low
+ * memory without mapping) returns -1.
  */
-FIO_SFUNC void *fio___http_json_on_map(void *udata, void *ctx, void *at) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_map)
-    return NULL;
-  return a->callbacks->on_map(a->udata, NULL);
-  (void)ctx;
-  (void)at;
-}
-
-FIO_SFUNC void *fio___http_json_on_array(void *udata, void *ctx, void *at) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->on_array)
-    return NULL;
-  return a->callbacks->on_array(a->udata, NULL);
-  (void)ctx;
-  (void)at;
-}
-
-FIO_SFUNC int fio___http_json_map_push(void *udata,
-                                       void *ctx,
-                                       void *key,
-                                       void *value) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->map_set)
-    return -1;
-  return a->callbacks->map_set(a->udata, ctx, key, value);
-}
-
-FIO_SFUNC int fio___http_json_array_push(void *udata, void *ctx, void *value) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (!a || !a->callbacks->array_push)
-    return -1;
-  return a->callbacks->array_push(a->udata, ctx, value);
-}
-
-FIO_SFUNC int fio___http_json_array_finished(void *udata, void *ctx) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (a && a->callbacks->array_done)
-    a->callbacks->array_done(a->udata, ctx);
-  return 0;
-}
-
-FIO_SFUNC int fio___http_json_map_finished(void *udata, void *ctx) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (a && a->callbacks->map_done)
-    a->callbacks->map_done(a->udata, ctx);
-  return 0;
-}
-
-FIO_SFUNC void fio___http_json_free_unused(void *udata, void *ctx) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (a && a->callbacks->free_unused)
-    a->callbacks->free_unused(a->udata, ctx);
-}
-
-FIO_SFUNC void *fio___http_json_on_error(void *udata, void *ctx) {
-  fio___http_json_adapter_s *a = (fio___http_json_adapter_s *)udata;
-  if (a && a->callbacks->on_error)
-    return a->callbacks->on_error(a->udata, ctx);
-  return NULL;
-}
-
-/** Static callback adapter mapping JSON parser to HTTP body parse callbacks.
- * All optional fields (is_array, is_map) are explicitly set to the noop so
- * fio___json_callbacks_validate never needs to write to this struct, making
- * it safe to declare const (placed in read-only memory / .rodata). */
-static const fio_json_parser_callbacks_s fio___http_json_adapter_callbacks = {
-    .on_null = fio___http_json_on_null,
-    .on_true = fio___http_json_on_true,
-    .on_false = fio___http_json_on_false,
-    .on_number = fio___http_json_on_number,
-    .on_float = fio___http_json_on_float,
-    .on_string = fio___http_json_on_string,
-    .on_string_simple = fio___http_json_on_string_simple,
-    .on_map = fio___http_json_on_map,
-    .on_array = fio___http_json_on_array,
-    .map_push = fio___http_json_map_push,
-    .array_push = fio___http_json_array_push,
-    .array_finished = fio___http_json_array_finished,
-    .map_finished = fio___http_json_map_finished,
-    .is_array = fio___json_callback_noop,
-    .is_map = fio___json_callback_noop,
-    .free_unused_object = fio___http_json_free_unused,
-    .on_error = fio___http_json_on_error,
-};
-
-FIO_SFUNC fio_http_body_parse_result_s
-fio___http_body_parse_json(fio_http_s *h,
-                           const fio_http_body_parse_callbacks_s *callbacks,
-                           void *udata) {
-  fio_http_body_parse_result_s result = {.result = NULL,
-                                         .consumed = 0,
-                                         .err = 0};
-
-  /* Seek to body start */
+FIO_SFUNC int fio___http_body_read_all(fio_http_s *h, fio_str_info_s *body) {
+  size_t len = fio_http_body_length(h);
   fio_http_body_seek(h, 0);
+  *body = fio_http_body_read(h, len);
+  if (body->len == len)
+    return 0;
+  FIO_LOG_ERROR("HTTP body couldn't be read whole for parsing (%zu of %zu)",
+                body->len,
+                len);
+  return -1;
+}
 
-  /* Read entire body */
-  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
-  if (!body.len || !body.buf) {
-    /* Empty body - not necessarily an error, but nothing to parse */
+FIO_SFUNC fio_http_params_parse_result_s
+fio___http_body_parse_json(fio_http_s *h,
+                           const fio_http_params_parse_callbacks_s *callbacks,
+                           void *udata) {
+  fio_http_params_parse_result_s result = {.result = NULL,
+                                           .consumed = 0,
+                                           .err = 0};
+  fio_str_info_s body;
+  if (fio___http_body_read_all(h, &body)) {
+    result.err = FIO_HTTP_PARAMS_PARSE_IO;
     return result;
   }
-
-  /* Build per-call adapter on the stack — holds callbacks + caller's udata */
-  fio___http_json_adapter_s adapter = {
-      .callbacks = callbacks,
-      .udata = udata,
-  };
-
-  /* Parse JSON, passing &adapter as udata so every callback receives it */
-  fio_json_result_s json_result = fio_json_parse(
-      (fio_json_parser_callbacks_s *)&fio___http_json_adapter_callbacks,
-      &adapter,
-      body.buf,
-      body.len);
-
-  /* Map results */
-  result.result = json_result.ctx;
-  result.consumed = json_result.stop_pos;
-  result.err = json_result.err;
-
+  if (!body.len || !body.buf)
+    return result; /* empty body - nothing to parse */
+  fio_json_result_s r = fio_json_parse(FIO___HTTP_PARAMS_JSON_CB(callbacks),
+                                       udata,
+                                       NULL,
+                                       body.buf,
+                                       body.len);
+  result.result = r.ctx; /* caller owned, the partial root on error */
+  result.consumed = r.stop_pos;
+  result.err = r.err;
   return result;
+}
+
+/** Checks the JSON prefix only. Returns -1 on a failed body read. */
+FIO_SFUNC int fio___http_json_is_object(fio_http_s *h) {
+  size_t remaining = fio_http_body_length(h);
+  int first = 1;
+  fio_http_body_seek(h, 0);
+  while (remaining) {
+    size_t wanted = remaining < 256 ? remaining : 256;
+    fio_str_info_s body = fio_http_body_read(h, wanted);
+    if (body.len != wanted || !body.buf)
+      return -1;
+    const unsigned char *p = (const unsigned char *)body.buf;
+    size_t i = 0;
+    if (first && body.len >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF)
+      i = 3;
+    first = 0;
+    for (; i < body.len; ++i) {
+      if (p[i] != ' ' && p[i] != '\t' && p[i] != '\r' && p[i] != '\n')
+        return p[i] == '{';
+    }
+    remaining -= body.len;
+  }
+  return 0;
 }
 
 /* *****************************************************************************
 URL-Encoded Body Parsing - Adapter Implementation
 ***************************************************************************** */
 
-/** Adapter context for URL-encoded parsing. */
+/** Per-call field count and configured limit. */
 typedef struct {
-  const fio_http_body_parse_callbacks_s *callbacks;
-  void *udata;
-  void *map;
-  int err;
-} fio___http_urlenc_adapter_s;
+  size_t count;
+  size_t limit;
+} fio___http_params_field_state_s;
 
-/** Adapter callback for URL-encoded on_pair. */
-FIO_SFUNC void *fio___http_urlenc_on_pair(void *udata_,
-                                          fio_buf_info_s name,
-                                          fio_buf_info_s value) {
-  fio___http_urlenc_adapter_s *a = (fio___http_urlenc_adapter_s *)udata_;
-  if (!a || a->err || !a->callbacks)
-    return NULL;
-
-  const fio_http_body_parse_callbacks_s *cb = a->callbacks;
-
-  /* Decode name */
-  FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
-  fio_string_write_url_dec(&decoded_name,
-                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
-                           name.buf,
-                           name.len);
-
-  /* Decode value */
-  FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
-  fio_string_write_url_dec(&decoded_value,
-                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
-                           value.buf,
-                           value.len);
-
-  /* Create key string object */
-  void *key_obj = NULL;
-  if (cb->on_string) {
-    key_obj = cb->on_string(a->udata, decoded_name.buf, decoded_name.len);
-  }
-
-  /* Create value object - attempt primitive detection */
-  void *value_obj = NULL;
-  int64_t i_val = 0;
-  double f_val = 0.0;
-  fio___http_body_primitive_e prim =
-      fio___http_body_identify_primitive(FIO_STR2BUF_INFO(decoded_value),
-                                         &i_val,
-                                         &f_val);
-
-  switch (prim) {
-  case FIO___HTTP_BODY_PRIM_NULL:
-    if (cb->on_null)
-      value_obj = cb->on_null(a->udata);
-    break;
-  case FIO___HTTP_BODY_PRIM_TRUE:
-    if (cb->on_true)
-      value_obj = cb->on_true(a->udata);
-    break;
-  case FIO___HTTP_BODY_PRIM_FALSE:
-    if (cb->on_false)
-      value_obj = cb->on_false(a->udata);
-    break;
-  case FIO___HTTP_BODY_PRIM_NUMBER:
-    if (cb->on_number)
-      value_obj = cb->on_number(a->udata, i_val);
-    break;
-  case FIO___HTTP_BODY_PRIM_FLOAT:
-    if (cb->on_float)
-      value_obj = cb->on_float(a->udata, f_val);
-    break;
-  case FIO___HTTP_BODY_PRIM_STRING: /* fall through */
-  default:
-    if (cb->on_string)
-      value_obj = cb->on_string(a->udata, decoded_value.buf, decoded_value.len);
-    break;
-  }
-
-  /* Insert into map */
-  if (a->map && cb->map_set) {
-    int set_err = cb->map_set(a->udata, a->map, key_obj, value_obj);
-    if (set_err) {
-      /* On error, free unused objects if possible */
-      if (cb->free_unused) {
-        if (key_obj)
-          cb->free_unused(a->udata, key_obj);
-        if (value_obj)
-          cb->free_unused(a->udata, value_obj);
-      }
-      a->err = 1;
-    }
-  } else {
-    /* No map or no map_set - free created objects */
-    if (cb->free_unused) {
-      if (key_obj)
-        cb->free_unused(a->udata, key_obj);
-      if (value_obj)
-        cb->free_unused(a->udata, value_obj);
-    }
-  }
-
-  /* Free decoded buffers if they were reallocated */
-  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_name))
-    FIO_STRING_FREE(decoded_name.buf);
-  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_value))
-    FIO_STRING_FREE(decoded_value.buf);
-
-  /* Return non-NULL to continue parsing, NULL to stop */
-  return a->err ? NULL : a;
+FIO_SFUNC size_t fio___http_params_limit(fio_http_s *h) {
+  fio_http_settings_s *s = fio_http_settings(h);
+  return s && s->max_params ? s->max_params : FIO_HTTP_PARAMS_MAX_FIELDS;
 }
 
-/** Adapter callback for URL-encoded on_error (optional). */
-FIO_SFUNC void fio___http_urlenc_on_error(void *udata_) {
+FIO_SFUNC int fio___http_params_overflow(
+    fio___http_params_field_state_s *fields) {
+  FIO_LOG_WARNING("HTTP params field limit exceeded (%zu)", fields->limit);
+  return FIO_HTTP_PARAMS_PARSE_ERROR;
+}
+
+/** Adapter context for URL-encoded parsing. */
+typedef struct {
+  const fio_http_params_parse_callbacks_s *callbacks;
+  void *udata;
+  void *map;
+  fio___http_params_field_state_s *fields;
+} fio___http_urlenc_adapter_s;
+
+/** Adapter callback for URL-encoded on_pair (errors pass through). */
+FIO_SFUNC int fio___http_urlenc_on_pair(void *udata_,
+                                        fio_buf_info_s name,
+                                        fio_buf_info_s value) {
   fio___http_urlenc_adapter_s *a = (fio___http_urlenc_adapter_s *)udata_;
-  if (a)
-    a->err = 1;
+  if (a->fields->count >= a->fields->limit)
+    return fio___http_params_overflow(a->fields);
+  ++a->fields->count;
+  /* Decoded names are borrowed only for this callback. */
+  fio_json_obj_result_s v =
+      fio___http_params_string(a->callbacks, a->udata, value);
+  return v.err ? v.err
+               : fio___http_params_store(a->callbacks,
+                                         a->udata,
+                                         a->map,
+                                         name,
+                                         v.obj);
 }
 
 /** Static adapter callbacks for URL-encoded parsing. */
 static const fio_url_encoded_parser_callbacks_s
     fio___http_urlenc_adapter_callbacks = {
         .on_pair = fio___http_urlenc_on_pair,
-        .on_error = fio___http_urlenc_on_error,
 };
 
-FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_urlencoded(
-    fio_http_s *h,
-    const fio_http_body_parse_callbacks_s *callbacks,
-    void *udata) {
-  fio_http_body_parse_result_s result = {.result = NULL,
-                                         .consumed = 0,
-                                         .err = 0};
-
-  if (!callbacks) {
-    result.err = -1;
-    return result;
-  }
-
-  /* Seek to body start */
-  fio_http_body_seek(h, 0);
-
-  /* Read entire body */
-  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
-  if (!body.len || !body.buf) {
-    /* Empty body - return empty map or nothing */
-    if (callbacks->on_map) {
-      result.result = callbacks->on_map(udata, NULL);
-      if (result.result && callbacks->map_done)
-        callbacks->map_done(udata, result.result);
-    }
-    return result;
-  }
-
-  /* Create the top-level map container */
-  void *map = NULL;
-  if (callbacks->on_map) {
-    map = callbacks->on_map(udata, NULL);
-    if (!map) {
-      result.err = -1;
-      return result;
-    }
-  }
-
-  /* Set up adapter context */
+/** Parses URL-encoded data into an existing map. Returns non-zero on error. */
+FIO_SFUNC int fio___http_params_fill_urlencoded(
+    fio_str_info_s data,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata,
+    void *map,
+    size_t *consumed,
+    fio___http_params_field_state_s *fields) {
+  if (!data.len || !data.buf)
+    return FIO_HTTP_PARAMS_PARSE_SUCCESS;
   fio___http_urlenc_adapter_s adapter = {
       .callbacks = callbacks,
       .udata = udata,
       .map = map,
-      .err = 0,
+      .fields = fields,
   };
-
-  /* Parse URL-encoded data */
-  fio_url_encoded_result_s urlenc_result =
+  fio_url_encoded_result_s r =
       fio_url_encoded_parse(&fio___http_urlenc_adapter_callbacks,
                             &adapter,
-                            body.buf,
-                            body.len);
+                            data.buf,
+                            data.len);
+  *consumed += r.consumed;
+  return r.err;
+}
 
-  /* Map results */
-  result.consumed = urlenc_result.consumed;
-  result.err = adapter.err ? -1 : urlenc_result.err;
+/** Parses URL-encoded data into a new map (shared by body and query). */
+FIO_SFUNC fio_http_params_parse_result_s fio___http_parse_urlencoded_buf(
+    fio_str_info_s data,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata,
+    size_t limit) {
+  size_t consumed = 0;
+  fio___http_params_field_state_s fields = {.limit = limit};
+  void *map = NULL;
+  if (!callbacks)
+    return (fio_http_params_parse_result_s){.err = FIO_HTTP_PARAMS_PARSE_ERROR};
+  int err = fio___http_params_map_new(callbacks, udata, &map);
+  if (!err)
+    err = fio___http_params_fill_urlencoded(data,
+                                            callbacks,
+                                            udata,
+                                            map,
+                                            &consumed,
+                                            &fields);
+  return fio___http_params_finish(map, consumed, fields.count, err);
+}
 
-  /* Finalize the map */
-  if (map) {
-    if (result.err && callbacks->on_error) {
-      result.result = callbacks->on_error(udata, map);
-    } else {
-      if (callbacks->map_done)
-        callbacks->map_done(udata, map);
-      result.result = map;
-    }
-  }
-
-  return result;
+FIO_SFUNC fio_http_params_parse_result_s fio___http_body_parse_urlencoded(
+    fio_http_s *h,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata,
+    size_t limit) {
+  fio_str_info_s body;
+  if (fio___http_body_read_all(h, &body))
+    return (fio_http_params_parse_result_s){.err = FIO_HTTP_PARAMS_PARSE_IO};
+  return fio___http_parse_urlencoded_buf(body, callbacks, udata, limit);
 }
 
 /* *****************************************************************************
@@ -3592,11 +3408,13 @@ Multipart Body Parsing - Adapter Context
 
 /** Context passed to multipart parser callbacks. */
 typedef struct {
-  const fio_http_body_parse_callbacks_s *callbacks;
+  const fio_http_params_parse_callbacks_s *callbacks;
   void *udata;
-  void *map;         /* The result map being built */
-  void *current_key; /* Key for current field (string object) */
-  int err;           /* Error flag */
+  void *map; /* The result map being built */
+  fio_str_info_s current_name;
+  char name_storage[1024];
+  fio___http_params_field_state_s *fields;
+  int err;
 } fio___http_multipart_adapter_s;
 
 /* *****************************************************************************
@@ -3612,116 +3430,122 @@ FIO_SFUNC void *fio___http_multipart_on_field(void *udata,
   if (!a || a->err || !a->callbacks)
     return NULL;
 
-  /* Create key string from field name */
-  void *key = NULL;
-  if (a->callbacks->on_string)
-    key = a->callbacks->on_string(a->udata, name.buf, name.len);
-  if (!key)
-    return NULL;
-
-  /* Create value string */
-  void *val = NULL;
-  if (a->callbacks->on_string)
-    val = a->callbacks->on_string(a->udata, value.buf, value.len);
-
-  if (!val) {
-    if (a->callbacks->free_unused)
-      a->callbacks->free_unused(a->udata, key);
+  if (a->fields->count >= a->fields->limit) {
+    a->err = fio___http_params_overflow(a->fields);
     return NULL;
   }
-
-  /* Insert into map */
-  if (a->map && a->callbacks->map_set) {
-    if (a->callbacks->map_set(a->udata, a->map, key, val)) {
-      a->err = -1;
-      if (a->callbacks->free_unused) {
-        a->callbacks->free_unused(a->udata, key);
-        a->callbacks->free_unused(a->udata, val);
-      }
-    }
-  } else {
-    /* No map - free the objects */
-    if (a->callbacks->free_unused) {
-      a->callbacks->free_unused(a->udata, key);
-      a->callbacks->free_unused(a->udata, val);
-    }
-  }
+  ++a->fields->count;
+  fio_json_obj_result_s v =
+      fio___http_params_string(a->callbacks, a->udata, value);
+  a->err = v.err ? v.err
+                 : fio___http_params_store(a->callbacks,
+                                           a->udata,
+                                           a->map,
+                                           name,
+                                           v.obj);
 
   (void)content_type;
   return NULL;
 }
 
 /** Called when a file upload starts. */
-FIO_SFUNC void *fio___http_multipart_on_file_start(
-    void *udata,
-    fio_buf_info_s name,
-    fio_buf_info_s filename,
-    fio_buf_info_s content_type) {
+FIO_SFUNC void *fio___http_multipart_on_file_start(void *udata,
+                                                   fio_buf_info_s name,
+                                                   fio_buf_info_s filename,
+                                                   fio_buf_info_s content_type,
+                                                   fio_buf_info_s headers) {
   fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
   if (!a || a->err || !a->callbacks)
     return NULL;
-
-  /* Store key for later insertion */
-  if (a->callbacks->on_string)
-    a->current_key = a->callbacks->on_string(a->udata, name.buf, name.len);
-
-  /* Call user's on_file callback */
-  void *file_ctx = NULL;
-  if (a->callbacks->on_file) {
-    fio_str_info_s name_s = {.buf = name.buf, .len = name.len};
-    fio_str_info_s filename_s = {.buf = filename.buf, .len = filename.len};
-    fio_str_info_s ct_s = {.buf = content_type.buf, .len = content_type.len};
-    file_ctx = a->callbacks->on_file(a->udata, name_s, filename_s, ct_s);
+  if (a->fields->count >= a->fields->limit) {
+    a->err = fio___http_params_overflow(a->fields);
+    return NULL;
   }
+  ++a->fields->count;
+  fio___http_params_path_s path;
+  if (fio___http_params_path_parse(&path, name)) {
+    FIO_LOG_WARNING("HTTP params name depth limit exceeded (%u)",
+                    (unsigned)FIO_JSON_MAX_DEPTH);
+    a->err = FIO_HTTP_PARAMS_PARSE_DEPTH;
+    return NULL;
+  }
+  if (!name.buf || !name.len || !filename.buf || !a->callbacks->on_file)
+    return NULL; /* skip unusable uploads */
+  for (size_t i = filename.len; i; --i) {
+    if (filename.buf[i - 1] == '/' || filename.buf[i - 1] == '\\') {
+      filename.buf += i;
+      filename.len -= i;
+      break;
+    }
+  }
+  if (!filename.len)
+    return NULL;
 
+  /* Call user's on_file callback - NULL skips the file */
+  fio_str_info_s name_s = {.buf = name.buf, .len = name.len};
+  fio_str_info_s filename_s = {.buf = filename.buf, .len = filename.len};
+  fio_str_info_s ct_s = {.buf = content_type.buf, .len = content_type.len};
+  fio_str_info_s headers_s = {.buf = headers.buf, .len = headers.len};
+  void *file_ctx =
+      a->callbacks->on_file(a->udata, name_s, filename_s, ct_s, headers_s);
+
+  /* Multipart name points into the input buffer, which may be reused before
+   * on_file_end; keep an adapter-owned copy across stream chunks. */
+  if (file_ctx) {
+    a->current_name =
+        FIO_STR_INFO3(a->name_storage, 0, sizeof(a->name_storage));
+    fio_string_write(&a->current_name,
+                     FIO_STRING_ALLOC_COPY,
+                     name.buf,
+                     name.len);
+    if (a->current_name.len != name.len) {
+      a->err = FIO_HTTP_PARAMS_PARSE_ERROR;
+      if (a->current_name.buf != a->name_storage)
+        FIO_STRING_FREE2(a->current_name);
+      a->current_name = (fio_str_info_s){0};
+    }
+  }
   return file_ctx;
 }
 
-/** Called with file data chunk. */
+/** Called with file data chunk (skipped files have a NULL context). */
 FIO_SFUNC int fio___http_multipart_on_file_data(void *udata,
                                                 void *file_ctx,
                                                 fio_buf_info_s data) {
   fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
   if (!a || a->err || !a->callbacks)
     return -1;
-
-  if (a->callbacks->on_file_data)
-    return a->callbacks->on_file_data(a->udata, file_ctx, data);
-
-  return 0;
+  if (!file_ctx || !a->callbacks->on_file_data)
+    return 0;
+  /* an abort fails the parse (the error is kept) and frees the upload */
+  a->err = a->callbacks->on_file_data(a->udata, file_ctx, data);
+  return a->err;
 }
 
-/** Called when file upload ends. */
+/** Called when file upload ends (skipped files have a NULL context). The owned
+ * file object is stored, or freed if parsing failed (e.g., truncation). */
 FIO_SFUNC void fio___http_multipart_on_file_end(void *udata, void *file_ctx) {
   fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
-  if (!a || !a->callbacks)
+  if (!a || !a->callbacks || !file_ctx)
     return;
-
-  /* Notify user that file is done */
-  if (a->callbacks->on_file_done)
-    a->callbacks->on_file_done(a->udata, file_ctx);
-
-  /* Insert file handle into map with stored key */
-  if (a->map && a->current_key && file_ctx && a->callbacks->map_set) {
-    if (a->callbacks->map_set(a->udata, a->map, a->current_key, file_ctx)) {
-      a->err = -1;
-      if (a->callbacks->free_unused) {
-        a->callbacks->free_unused(a->udata, a->current_key);
-        a->callbacks->free_unused(a->udata, file_ctx);
-      }
-    }
-  } else if (a->current_key && a->callbacks->free_unused) {
-    /* No map or no file_ctx - free the key */
-    a->callbacks->free_unused(a->udata, a->current_key);
-  }
-  a->current_key = NULL;
+  if (!a->err)
+    a->err = fio___http_params_store(a->callbacks,
+                                     a->udata,
+                                     a->map,
+                                     FIO_STR2BUF_INFO(a->current_name),
+                                     file_ctx);
+  else
+    a->callbacks->free_unused_object(a->udata, file_ctx);
+  if (a->current_name.buf && a->current_name.buf != a->name_storage)
+    FIO_STRING_FREE2(a->current_name);
+  a->current_name = (fio_str_info_s){0};
 }
 
 /** Called on parse error. */
 FIO_SFUNC void fio___http_multipart_on_error(void *udata) {
   fio___http_multipart_adapter_s *a = (fio___http_multipart_adapter_s *)udata;
-  if (a)
-    a->err = -1;
+  if (a && !a->err)
+    a->err = FIO_HTTP_PARAMS_PARSE_ERROR;
 }
 
 /** Static callback adapter mapping multipart parser to HTTP body parse. */
@@ -3813,82 +3637,116 @@ fio___http_multipart_extract_boundary(fio_str_info_s content_type) {
 Multipart Body Parsing - Main Implementation
 ***************************************************************************** */
 
-FIO_SFUNC fio_http_body_parse_result_s fio___http_body_parse_multipart(
+#ifndef FIO___HTTP_PARAMS_CHUNK
+/** Multipart bodies are fed to the parser in chunks of this size. */
+#define FIO___HTTP_PARAMS_CHUNK (1UL << 16)
+#endif
+
+/**
+ * Parses a multipart body into an existing map, reading the body in chunks so
+ * file uploads are streamed (never fully loaded into memory).
+ *
+ * Returns non-zero on error.
+ */
+FIO_SFUNC int fio___http_params_fill_multipart(
     fio_http_s *h,
-    const fio_http_body_parse_callbacks_s *callbacks,
-    void *udata) {
-  fio_http_body_parse_result_s result = {.result = NULL,
-                                         .consumed = 0,
-                                         .err = 0};
-
-  if (!h || !callbacks) {
-    result.err = -1;
-    return result;
-  }
-
-  /* Get Content-Type header to extract boundary */
-  fio_str_info_s content_type =
-      fio_http_request_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0);
-
-  /* Extract boundary from Content-Type */
-  fio_buf_info_s boundary = fio___http_multipart_extract_boundary(content_type);
-  if (!boundary.buf || !boundary.len) {
-    result.err = -1;
-    if (callbacks->on_error)
-      result.result = callbacks->on_error(udata, NULL);
-    return result;
-  }
-
-  /* Seek to body start */
-  fio_http_body_seek(h, 0);
-
-  /* Read entire body */
-  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
-  if (!body.len || !body.buf) {
-    /* Empty body - not necessarily an error */
-    return result;
-  }
-
-  /* Create result map */
-  void *map = NULL;
-  if (callbacks->on_map)
-    map = callbacks->on_map(udata, NULL);
-
-  /* Set up adapter context */
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata,
+    void *map,
+    size_t *consumed,
+    fio___http_params_field_state_s *fields) {
+  fio_buf_info_s boundary = fio___http_multipart_extract_boundary(
+      fio_http_request_header(h, FIO_STR_INFO2((char *)"content-type", 12), 0));
+  if (!boundary.buf || !boundary.len)
+    return FIO_HTTP_PARAMS_PARSE_ERROR;
   fio___http_multipart_adapter_s adapter = {
       .callbacks = callbacks,
       .udata = udata,
       .map = map,
-      .current_key = NULL,
-      .err = 0,
+      .fields = fields,
+      .current_name = {0},
+      .err = FIO_HTTP_PARAMS_PARSE_SUCCESS,
   };
-
-  /* Parse multipart data */
-  fio_multipart_result_s mp_result =
-      fio_multipart_parse(&fio___http_multipart_adapter_callbacks,
-                          &adapter,
-                          boundary,
-                          body.buf,
-                          body.len);
-
-  /* Check for errors */
-  if (mp_result.err || adapter.err) {
-    result.err = mp_result.err ? mp_result.err : adapter.err;
-    if (callbacks->on_error)
-      result.result = callbacks->on_error(udata, map);
-    else
-      result.result = map; /* Return partial result */
-    result.consumed = mp_result.consumed;
-    return result;
+  fio_multipart_stream_s stream = {0};
+  char *pending = NULL; /* unconsumed bytes (body reads may reuse memory) */
+  int err = -2;
+  fio_http_body_seek(h, 0);
+  for (;;) {
+    fio_str_info_s chunk = fio_http_body_read(h, FIO___HTTP_PARAMS_CHUNK);
+    if (!chunk.len) {
+      if (fio_http_body_pos(h) < fio_http_body_length(h))
+        err = FIO_HTTP_PARAMS_PARSE_IO;
+      break;
+    }
+    fio_buf_info_s in = FIO_STR2BUF_INFO(chunk);
+    size_t old_len = fio_bstr_len(pending);
+    if (old_len) {
+      pending = fio_bstr_write(pending, chunk.buf, chunk.len);
+      if (fio_bstr_len(pending) != old_len + chunk.len) {
+        err = FIO_HTTP_PARAMS_PARSE_ERROR;
+        break;
+      }
+      in = fio_bstr_buf(pending);
+    }
+    fio_multipart_result_s r =
+        fio_multipart_stream_parse(&stream,
+                                   &fio___http_multipart_adapter_callbacks,
+                                   &adapter,
+                                   boundary,
+                                   in.buf,
+                                   in.len);
+    *consumed += r.consumed;
+    err = r.err;
+    if (adapter.err || err != -2)
+      break;
+    /* keep the unconsumed tail for the next round */
+    size_t keep = in.len - r.consumed;
+    if (in.buf == pending) {
+      FIO_MEMMOVE(pending, pending + r.consumed, keep);
+      pending = fio_bstr_len_set(pending, keep);
+    } else {
+      pending = fio_bstr_len_set(pending, 0);
+      pending = fio_bstr_write(pending, in.buf + r.consumed, keep);
+      if (fio_bstr_len(pending) != keep) {
+        err = FIO_HTTP_PARAMS_PARSE_ERROR;
+        break;
+      }
+    }
   }
+  fio_bstr_free(pending);
+  if (err == -2) /* ordinary EOF before the closing boundary */
+    err = FIO_HTTP_PARAMS_PARSE_ERROR;
+  if (err && !adapter.err) /* an open (incomplete) file is freed, not kept */
+    adapter.err = err;
+  /* Closing is a no-op unless a file is open (truncation or another error). */
+  fio_multipart_stream_close(&stream,
+                             &fio___http_multipart_adapter_callbacks,
+                             &adapter);
+  if (adapter.current_name.buf &&
+      adapter.current_name.buf != adapter.name_storage)
+    FIO_STRING_FREE2(adapter.current_name);
+  return adapter.err ? adapter.err : err;
+}
 
-  /* Finalize map */
-  if (map && callbacks->map_done)
-    callbacks->map_done(udata, map);
-
-  result.result = map;
-  result.consumed = mp_result.consumed;
-  return result;
+FIO_SFUNC fio_http_params_parse_result_s fio___http_body_parse_multipart(
+    fio_http_s *h,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata,
+    size_t limit) {
+  size_t consumed = 0;
+  fio___http_params_field_state_s fields = {.limit = limit};
+  void *map = NULL;
+  if (!fio_http_body_length(h))
+    return (fio_http_params_parse_result_s){0}; /* empty body - not an error */
+  int err = fio___http_params_map_new(callbacks, udata, &map);
+  if (!err)
+    err = fio___http_params_fill_multipart(h,
+                                           callbacks,
+                                           udata,
+                                           map,
+                                           &consumed,
+                                           &fields);
+  return fio___http_params_finish(map, consumed, fields.count, err);
 }
 
 /* *****************************************************************************
@@ -3901,17 +3759,24 @@ HTTP Body Parsing - Main Implementation
  * Supports JSON, URL-encoded, and multipart/form-data bodies.
  * Calls the appropriate callbacks for each element found.
  */
-SFUNC fio_http_body_parse_result_s
-fio_http_body_parse(fio_http_s *h,
-                    const fio_http_body_parse_callbacks_s *callbacks,
-                    void *udata) {
-  fio_http_body_parse_result_s result = {.result = NULL,
-                                         .consumed = 0,
-                                         .err = 0};
+SFUNC fio_http_params_parse_result_s fio_http_body_parse
+FIO_NOOP(fio_http_s *h, fio_http_params_parse_args_s args) {
+  fio_http_params_parse_result_s result = {.result = NULL,
+                                           .consumed = 0,
+                                           .err = 0};
+  const fio_http_params_parse_callbacks_s *callbacks = args.callbacks;
+  void *udata = args.udata;
 
   if (!h || !callbacks) {
-    result.err = -1;
+    result.err = FIO_HTTP_PARAMS_PARSE_ERROR;
     return result;
+  }
+  size_t position = fio_http_body_pos(h);
+  const size_t limit = args.limit ? args.limit : fio___http_params_limit(h);
+
+  if (fio_json_callbacks_validate(FIO___HTTP_PARAMS_JSON_CB(callbacks))) {
+    result.err = FIO_HTTP_PARAMS_PARSE_ERROR;
+    goto done;
   }
 
   /* Detect content type from header */
@@ -3921,22 +3786,129 @@ fio_http_body_parse(fio_http_s *h,
   /* Route to appropriate parser */
   switch (content_type) {
   case FIO___HTTP_BODY_CONTENT_TYPE_JSON:
-    return fio___http_body_parse_json(h, callbacks, udata);
+    result = fio___http_body_parse_json(h, callbacks, udata);
+    break;
 
   case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED:
-    return fio___http_body_parse_urlencoded(h, callbacks, udata);
+    result = fio___http_body_parse_urlencoded(h, callbacks, udata, limit);
+    break;
 
   case FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART:
-    return fio___http_body_parse_multipart(h, callbacks, udata);
+    result = fio___http_body_parse_multipart(h, callbacks, udata, limit);
+    break;
 
   case FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN: /* fall through */
   default:
-    /* Unknown content type - return error */
-    result.err = -1;
-    if (callbacks->on_error)
-      result.result = callbacks->on_error(udata, NULL);
-    return result;
+    /* Unknown content type - return error (no root was created) */
+    result.err = FIO_HTTP_PARAMS_PARSE_ERROR;
+    break;
   }
+done:
+  fio_http_body_seek(h, (ssize_t)position);
+  return result;
+}
+
+/* *****************************************************************************
+HTTP Query Parsing
+***************************************************************************** */
+
+/** Parses the HTTP query string as URL-encoded data into a map. */
+SFUNC fio_http_params_parse_result_s fio_http_query_parse
+FIO_NOOP(fio_http_s *h, fio_http_params_parse_args_s args) {
+  if (!h || !args.callbacks)
+    return (fio_http_params_parse_result_s){.err = FIO_HTTP_PARAMS_PARSE_ERROR};
+  if (fio_json_callbacks_validate(FIO___HTTP_PARAMS_JSON_CB(args.callbacks)))
+    return (fio_http_params_parse_result_s){.err = FIO_HTTP_PARAMS_PARSE_ERROR};
+  return fio___http_parse_urlencoded_buf(
+      fio_http_query(h),
+      args.callbacks,
+      args.udata,
+      args.limit ? args.limit : fio___http_params_limit(h));
+}
+
+/* *****************************************************************************
+HTTP Params Parsing (query + body)
+***************************************************************************** */
+
+/** Parses the query and then the body (if any) into a single map. A JSON
+ * object body updates the map in place (the map is the explicit JSON root). */
+SFUNC fio_http_params_parse_result_s fio_http_params_parse
+FIO_NOOP(fio_http_s *h, fio_http_params_parse_args_s args) {
+  size_t consumed = 0;
+  fio___http_params_field_state_s fields = {0};
+  void *map = NULL;
+  int err;
+  const fio_http_params_parse_callbacks_s *callbacks = args.callbacks;
+  void *udata = args.udata;
+  if (!h || !callbacks)
+    return (fio_http_params_parse_result_s){.err = FIO_HTTP_PARAMS_PARSE_ERROR};
+  fields.limit = args.limit ? args.limit : fio___http_params_limit(h);
+  size_t position = fio_http_body_pos(h);
+  if (fio_json_callbacks_validate(FIO___HTTP_PARAMS_JSON_CB(callbacks))) {
+    err = FIO_HTTP_PARAMS_PARSE_ERROR;
+    goto finish;
+  }
+  err = fio___http_params_map_new(callbacks, udata, &map);
+  if (err)
+    goto finish;
+  err = fio___http_params_fill_urlencoded(fio_http_query(h),
+                                          callbacks,
+                                          udata,
+                                          map,
+                                          &consumed,
+                                          &fields);
+  if (err || !fio_http_body_length(h))
+    goto finish;
+
+  switch (fio___http_body_detect_content_type(h)) {
+  case FIO___HTTP_BODY_CONTENT_TYPE_JSON: {
+    int is_object = fio___http_json_is_object(h);
+    if (is_object < 0)
+      err = FIO_HTTP_PARAMS_PARSE_IO;
+    else if (is_object > 0) {
+      fio_str_info_s body;
+      if (fio___http_body_read_all(h, &body)) {
+        err = FIO_HTTP_PARAMS_PARSE_IO;
+        break;
+      }
+      /* `map` is the explicit root: updated in place, kept on error. */
+      fio_json_result_s r = fio_json_parse(FIO___HTTP_PARAMS_JSON_CB(callbacks),
+                                           udata,
+                                           map,
+                                           body.buf,
+                                           body.len);
+      consumed += r.stop_pos;
+      err = r.err;
+    }
+    break;
+  }
+  case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED: {
+    fio_str_info_s body;
+    if (fio___http_body_read_all(h, &body))
+      err = FIO_HTTP_PARAMS_PARSE_IO;
+    else
+      err = fio___http_params_fill_urlencoded(body,
+                                              callbacks,
+                                              udata,
+                                              map,
+                                              &consumed,
+                                              &fields);
+    break;
+  }
+  case FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART:
+    err = fio___http_params_fill_multipart(h,
+                                           callbacks,
+                                           udata,
+                                           map,
+                                           &consumed,
+                                           &fields);
+    break;
+  case FIO___HTTP_BODY_CONTENT_TYPE_UNKNOWN: /* fall through */
+  default: break; /* unknown / missing Content-Type: body is not params */
+  }
+finish:
+  fio_http_body_seek(h, (ssize_t)position);
+  return fio___http_params_finish(map, consumed, fields.count, err);
 }
 
 /* *****************************************************************************
@@ -4780,6 +4752,8 @@ remove_mime:
 /** Finds the Mime-Type associated with the file extension (if registered). */
 SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len) {
   fio_str_info_s r = {0};
+  if (file_ext_len > 7)
+    return r;
   fio___http_mime_info_s tmp, *val;
   tmp.ext = 0;
   FIO_MEMCPY(&tmp.ext, file_ext, file_ext_len);

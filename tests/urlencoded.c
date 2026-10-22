@@ -12,16 +12,16 @@ typedef struct {
 } test_ctx_s;
 
 /* Callback that prints pairs */
-static void *on_pair_print(void *udata,
-                           fio_buf_info_s name,
-                           fio_buf_info_s value) {
+static int on_pair_print(void *udata,
+                         fio_buf_info_s name,
+                         fio_buf_info_s value) {
   test_ctx_s *ctx = (test_ctx_s *)udata;
   (void)name;  /* Used only in debug logging */
   (void)value; /* Used only in debug logging */
   ctx->count++;
   if (ctx->stop_at >= 0 && ctx->count >= ctx->stop_at)
-    return NULL; /* Stop parsing */
-  return udata;
+    return -42; /* Stop parsing (error passes through) */
+  return 0;
 }
 
 /* Context for value verification test */
@@ -34,9 +34,9 @@ typedef struct {
 } verify_ctx_s;
 
 /* Callback for value verification */
-static void *on_pair_verify(void *udata,
-                            fio_buf_info_s name,
-                            fio_buf_info_s value) {
+static int on_pair_verify(void *udata,
+                          fio_buf_info_s name,
+                          fio_buf_info_s value) {
   verify_ctx_s *ctx = (verify_ctx_s *)udata;
   if (name.len == ctx->expected_name_len &&
       FIO_MEMCMP(name.buf, ctx->expected_name, name.len) == 0 &&
@@ -44,7 +44,7 @@ static void *on_pair_verify(void *udata,
       FIO_MEMCMP(value.buf, ctx->expected_value, value.len) == 0) {
     ctx->verified = 1;
   }
-  return NULL; /* Stop after first pair */
+  return 7; /* Stop after first pair */
 }
 
 /* Context for name-only test */
@@ -53,16 +53,16 @@ typedef struct {
 } name_only_ctx_s;
 
 /* Callback for name-only test */
-static void *on_pair_name_only(void *udata,
-                               fio_buf_info_s name,
-                               fio_buf_info_s value) {
+static int on_pair_name_only(void *udata,
+                             fio_buf_info_s name,
+                             fio_buf_info_s value) {
   name_only_ctx_s *ctx = (name_only_ctx_s *)udata;
   /* For "nameonly", value should have len=0 */
   if (name.len == 8 && FIO_MEMCMP(name.buf, "nameonly", 8) == 0 &&
       value.len == 0) {
     ctx->name_only_correct = 1;
   }
-  return udata;
+  return 0;
 }
 
 /* Test helper macro */
@@ -130,8 +130,8 @@ int main(void) {
              2,
              strlen("name=value&&foo=bar"));
 
-  /* URL-encoded data (not decoded by parser) */
-  TEST_PARSE("URL-encoded data (not decoded)",
+  /* URL-encoded data */
+  TEST_PARSE("URL-encoded data",
              "name=hello%20world&foo=bar%26baz",
              2,
              strlen("name=hello%20world&foo=bar%26baz"));
@@ -167,29 +167,48 @@ int main(void) {
     const char *data = "a=1&b=2&c=3&d=4";
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&callbacks, &ctx, data, strlen(data));
-    if (r.count != 2) {
-      fprintf(stderr, "  FAIL: expected count=2, got %zu\n", r.count);
-      return 1;
-    }
-    if (r.err != 1) {
-      fprintf(stderr, "  FAIL: expected err=1, got %d\n", r.err);
-      return 1;
-    }
+    /* The failed pair (b=2) is excluded from count and consumed. */
+    FIO_ASSERT(ctx.count == 2 && r.count == 1 && r.consumed == 4 &&
+                   r.err == -42,
+               "callback stop: count=%zu consumed=%zu err=%d",
+               r.count,
+               r.consumed,
+               r.err);
   }
 
-  /* Test with NULL callbacks (should use no-op) */
+  /* Stop on the first pair, after empty pairs: only the skipped '&'s count. */
   {
-    const char *data = "a=1&b=2";
+    test_ctx_s ctx = {.count = 0, .stop_at = 1};
+    const char *data = "&&a=1&b=2";
     fio_url_encoded_result_s r =
-        fio_url_encoded_parse(NULL, NULL, data, strlen(data));
-    if (r.count != 2) {
-      fprintf(stderr, "  FAIL: expected count=2, got %zu\n", r.count);
-      return 1;
+        fio_url_encoded_parse(&callbacks, &ctx, data, strlen(data));
+    FIO_ASSERT(r.count == 0 && r.consumed == 2 && r.err == -42,
+               "first pair stop: count=%zu consumed=%zu err=%d",
+               r.count,
+               r.consumed,
+               r.err);
+  }
+
+  /* NULL callbacks or NULL on_pair: counting-only mode (no decoding). */
+  {
+    static const fio_url_encoded_parser_callbacks_s no_pair = {0};
+    const char *data = "&a=1&&b=%ZZ&c&";
+    for (int i = 0; i < 2; ++i) {
+      fio_url_encoded_result_s r = fio_url_encoded_parse(i ? &no_pair : NULL,
+                                                         NULL,
+                                                         data,
+                                                         strlen(data));
+      FIO_ASSERT(r.count == 3 && r.consumed == strlen(data) && !r.err,
+                 "counting mode (%d): count=%zu consumed=%zu err=%d",
+                 i,
+                 r.count,
+                 r.consumed,
+                 r.err);
     }
   }
 
-  /* Plus sign as space (parser doesn't decode, just finds boundaries) */
-  TEST_PARSE("Plus sign in value (not decoded)",
+  /* Plus sign as space */
+  TEST_PARSE("Plus sign in value",
              "name=hello+world&foo=bar",
              2,
              strlen("name=hello+world&foo=bar"));
@@ -232,8 +251,7 @@ int main(void) {
              3,
              strlen("color=red&color=blue&color=green"));
 
-  /* Malformed percent encoding - parser doesn't validate, just finds boundaries
-   */
+  /* Malformed percent encoding remains literal. */
   TEST_PARSE("Incomplete percent encoding (%)",
              "name=hello%&foo=bar",
              2,
@@ -363,10 +381,53 @@ int main(void) {
     fio_url_encoded_result_s r =
         fio_url_encoded_parse(&verify_callbacks, &vctx, data, strlen(data));
     FIO_ASSERT(vctx.verified == 1, "Callback value verification failed");
-    FIO_ASSERT(r.count == 1, "Verify test: expected count=1, got %zu", r.count);
-    FIO_ASSERT(r.err == 1,
-               "Verify test: expected err=1 (stopped), got %d",
-               r.err);
+    FIO_ASSERT(r.count == 0 && r.consumed == 0,
+               "Verify test: failed pair must not count (count=%zu, "
+               "consumed=%zu)",
+               r.count,
+               r.consumed);
+    FIO_ASSERT(r.err == 7, "Verify test: expected err=7, got %d", r.err);
+  }
+
+  /* Verify decoded callback bytes, including binary data and permissive input.
+   */
+  {
+    static const fio_url_encoded_parser_callbacks_s verify_callbacks = {
+        .on_pair = on_pair_verify,
+    };
+    static const struct {
+      const char *input;
+      const char *name;
+      size_t name_len;
+      const char *value;
+      size_t value_len;
+    } cases[] = {
+        {"first+name=hello%20world", "first name", 10, "hello world", 11},
+        {"%26%3d=%2b+%26%3D", "&=", 2, "+ &=", 4},
+        {"%2526=%252B%2B+", "%26", 3, "%2B+ ", 5},
+        {"%00key=a%00b", "\0key", 4, "a\0b", 3},
+        {"%E6%97%A5=%E6%9C%AC", "\xE6\x97\xA5", 3, "\xE6\x9C\xAC", 3},
+        {"a%ZZ%=b%2%GG", "a%ZZ%", 5, "b%2%GG", 6},
+        {"%u0041=%u20AC", "A", 1, "\xE2\x82\xAC", 3},
+        {"name+only", "name only", 9, "", 0},
+        {"=%2B", "", 0, "+", 1},
+        {"=", "", 0, "", 0},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+      verify_ctx_s ctx = {.expected_name = cases[i].name,
+                          .expected_name_len = cases[i].name_len,
+                          .expected_value = cases[i].value,
+                          .expected_value_len = cases[i].value_len};
+      fio_url_encoded_result_s r =
+          fio_url_encoded_parse(&verify_callbacks,
+                                &ctx,
+                                cases[i].input,
+                                strlen(cases[i].input));
+      FIO_ASSERT(ctx.verified, "Decoded pair mismatch (case %zu)", i);
+      FIO_ASSERT(r.err == 7 && !r.count && !r.consumed,
+                 "Decoded callback stop result mismatch (case %zu)",
+                 i);
+    }
   }
 
   /* Test that value without = has correct empty value pointer */

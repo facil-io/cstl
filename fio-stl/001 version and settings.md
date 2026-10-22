@@ -8,16 +8,11 @@ For core types and everyday helpers, see [`./000 core.md`](./000%20core.md). Thi
 
 facil.io follows [semantic versioning](https://semver.org). These macros are defined in [`./000 core.h`](./000%20core.h) and can be used to detect the library version at compile time.
 
-- **`FIO_VERSION_MAJOR`** — Major version. API/ABI breaking changes bump this.  
-  Default: `0`
-- **`FIO_VERSION_MINOR`** — Minor version. Significant features or deprecations. May break ABI.  
-  Default: `8`
-- **`FIO_VERSION_PATCH`** — Patch version. Bug fixes and small additions.  
-  Default: `0`
-- **`FIO_VERSION_BUILD`** — Optional build metadata, such as `"rc.02"`.  
-  Default: `"rc.02"`
-- **`FIO_VERSION_STRING`** — Full version as a string literal, built from the macros above. The guard is `#ifdef FIO_VERSION_BUILD`, so the build metadata is included whenever `FIO_VERSION_BUILD` is defined, including when defined as an empty string: `"0.8.0-rc.02"`. If `FIO_VERSION_BUILD` is undefined, the string reads `"0.8.0"`.  
-  Because [`./000 core.h`](./000%20core.h) unconditionally `#define`s `FIO_VERSION_BUILD "rc.02"` before the `#ifdef` guard, omitting the suffix requires `#undef FIO_VERSION_BUILD` before inclusion, not merely leaving it undefined.
+- **`FIO_VERSION_MAJOR`** — Major version. API/ABI breaking changes bump this.
+- **`FIO_VERSION_MINOR`** — Minor version. Significant features or deprecations. May break ABI.
+- **`FIO_VERSION_PATCH`** — Patch version. Bug fixes and small additions.
+- **`FIO_VERSION_BUILD`** — Optional build metadata, such as `"rc.02"`.
+- **`FIO_VERSION_STRING`** — Full version as a string literal, built from the macros above. The guard is `#ifdef FIO_VERSION_BUILD`, so the build metadata is included whenever `FIO_VERSION_BUILD` is defined, including when defined as an empty string. For example: `"0.8.0"` or `"0.8.0-rc.02"`.
 
 Override these only when you are vendoring a fork or need to report a custom build string.
 

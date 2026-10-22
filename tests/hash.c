@@ -693,9 +693,11 @@ FIO_SFUNC int fio___test_risky256_collisions(void) {
           N,
           (N < (1 << 20)) ? " [DEBUG reduced]" : "");
 
-  /* Allocate hash storage */
-  fio_u256 *hashes =
-      (fio_u256 *)FIO_MEM_REALLOC(NULL, 0, sizeof(fio_u256) * N, 0);
+  /* Allocate hash storage. `fio_u256` requires 32 byte alignment (the
+   * compiler may use aligned 32 byte vector moves, e.g. AVX `vmovdqa`), while
+   * plain `FIO_MEM_REALLOC` may only guarantee 16 bytes. */
+  fio_u256 *hashes = NULL;
+  FIO_MEM_REALLOC_ALIGNED(hashes, 0, sizeof(fio_u256) * N, 0, 32);
   FIO_ASSERT_ALLOC(hashes);
 
   /* Generate random hashes */
@@ -760,7 +762,7 @@ FIO_SFUNC int fio___test_risky256_collisions(void) {
     ++failures;
 
   FIO_MEM_FREE(keys64, sizeof(uint64_t) * N);
-  FIO_MEM_FREE(hashes, sizeof(fio_u256) * N);
+  FIO_MEM_FREE_ALIGNED(hashes, sizeof(fio_u256) * N);
   return failures;
 }
 

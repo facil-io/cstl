@@ -852,16 +852,16 @@ write_called_after_close:
 io_error_null:
   FIO_LOG_ERROR("(%d) `fio_write2` called for invalid IO (NULL)", FIO___IO.pid);
 do_nothing:
+  /* CRT file fd — never a socket; close always correct */
+  if (!args.buf && (unsigned)(args.fd + 1) > 1 && !args.copy)
+    close((int)args.fd);
+  /* De-alloc if required */
   if (args.dealloc) {
     union {
       void *ptr;
       void (*fn)(void *);
     } u = {.fn = args.dealloc};
     fio___io_defer_no_wakeup(fio___io_write2_dealloc_task, u.ptr, args.buf);
-    if ((unsigned)(args.fd + 1) > 1)
-      close(
-          (int)args.fd); /* CRT file fd (from open/fio_filename_tmp) — never
-                            a socket; CRT close() is correct on all platforms */
   }
 }
 
@@ -1356,6 +1356,8 @@ struct fio_io_tls_s {
   fio___io_tls_cert_map_s cert;
   fio___io_tls_alpn_map_s alpn;
   fio___io_tls_trust_map_s trust;
+  /** SNI host name for client connections (empty = send no SNI). */
+  fio_keystr_s sni;
   uint8_t trust_sys; /** Set to 1 if system certificate registry is trusted */
 };
 
@@ -1377,6 +1379,7 @@ struct fio_io_tls_s {
                          FIO_STRING_FREE_KEY);                                 \
       fio_keystr_destroy(&tls.cert.ary[i].pk_password, FIO_STRING_FREE_KEY);   \
     }                                                                          \
+    fio_keystr_destroy(&tls.sni, FIO_STRING_FREE_KEY);                         \
     fio___io_tls_alpn_map_destroy(&tls.alpn);                                  \
     fio___io_tls_trust_map_destroy(&tls.trust);                                \
     fio___io_tls_cert_map_destroy(&tls.cert);                                  \
@@ -1563,7 +1566,7 @@ SFUNC fio_io_tls_s *fio_io_tls_alpn_add(fio_io_tls_s *t,
     return t;
   if (!on_selected)
     on_selected = fio_io_noop;
-  size_t pr_name_len = strlen(protocol_name);
+  size_t pr_name_len = FIO_STRLEN(protocol_name);
   if (pr_name_len > 255) {
     FIO_LOG_ERROR(
         "fio_io_tls_alpn_add called with name longer than 255 chars!");
@@ -1637,6 +1640,48 @@ SFUNC fio_io_tls_s *fio_io_tls_trust_add(fio_io_tls_s *t,
 replace_old:
   fio_keystr_destroy(&old->nm, FIO_STRING_FREE_KEY);
   *old = o;
+  return t;
+}
+
+/** Returns true if `host` is an IP literal rather than a DNS host name. */
+FIO_IFUNC int fio___io_tls_is_ip_literal(const char *host, size_t len) {
+  /* RFC 6066, section 3: SNI carries DNS host names only, never IP literals. */
+  if (!host || !len)
+    return 1;
+  if (host[0] == '[')
+    return 1; /* bracketed IPv6 */
+  int has_colon = 0, has_name_char = 0;
+  for (size_t i = 0; i < len; ++i) {
+    const char c = (char)(host[i] | 32);
+    has_colon |= (host[i] == ':');
+    has_name_char |= (c >= 'a' && c <= 'z');
+  }
+  if (has_colon)
+    return 1; /* IPv6 */
+  /* only digits and dots => IPv4 (a DNS name has at least one letter) */
+  return !has_name_char;
+}
+
+/**
+ * Sets the SNI (Server Name Indication) host name a TLS client should send
+ * during the handshake (RFC 6066).
+ *
+ * `fio_io_connect` sets this automatically from the URL's host name, so
+ * manual calls are rarely needed.
+ *
+ * NULL / empty host names and IP literals (IPv4 / IPv6) are silently
+ * ignored, leaving any previously set name untouched.
+ */
+SFUNC fio_io_tls_s *fio_io_tls_sni_set(fio_io_tls_s *t,
+                                       const char *hostname,
+                                       size_t len) {
+  if (!t || !hostname || !len || len > 255 ||
+      fio___io_tls_is_ip_literal(hostname, len))
+    return t;
+  fio_keystr_s nm = fio_keystr_init(FIO_STR_INFO2((char *)hostname, len),
+                                    FIO_STRING_ALLOC_KEY);
+  fio_keystr_destroy(&t->sni, FIO_STRING_FREE_KEY);
+  t->sni = nm;
   return t;
 }
 
@@ -1814,6 +1859,7 @@ FIO_SFUNC void fio___io_after_fork(void *ignr_) {
   FIO___IO.pid = fio_thread_getpid();
   FIO___IO.io_thread = 0; /* forked child has a new reactor thread */
   FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  FIO___IO.lock = FIO___LOCK_INIT; /* better leak the lock, avoid UB */
   fio_queue_perform_all(&FIO___IO.queue);
   FIO_LIST_EACH(fio_io_protocol_s,
                 reserved.protocols,

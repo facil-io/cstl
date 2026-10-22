@@ -47,9 +47,11 @@ Result container for `fio_aton`. Read the union member that matches `is_float`, 
 FIO_SFUNC fio_aton_s fio_aton(char **pstr);
 ```
 
-Auto-detects integers and floats. Skips leading whitespace, recognizes `0x` / `0b` / octal prefixes, and accepts `inf`, `infinity`, and `nan`. Updates `*pstr` to the first unconverted character. Sets `.err` on overflow or bad format.
+Auto-detects integers and floats. Skips leading whitespace, recognizes `0x` / `0b` / octal prefixes (`x` / `b` without the zero also work), and accepts `inf`, `infinity`, and `nan`. Updates `*pstr` to the first unconverted character. Sets `.err` on overflow or bad format; input with no digits (such as `-`, `.` or `e5`) sets `.err` and leaves `*pstr` unchanged. An exponent marker without digits (the `e` in `1e`) isn't consumed, as with `strtod`.
 
-**Note:** not an exact `strtod` replacement; rounding differences are possible.
+Binary followed by `f` (`0b...f`) is read as a float's raw IEEE 754 bits, which is exact and keeps the sign and NaN payload; `fio_ftoa(dest, num, 2)` writes this format. Without the `f`, binary is an integer. A leading `-` negates binary integers and flips the sign bit of `0b...f` floats. `nan` returns the standard quiet NaN (`0x7FF8000000000000`, or `0xFFF8000000000000` for `-nan`); C's `nan(...)` payload syntax isn't supported, so use `0b...f` to carry a payload.
+
+Decimal floats are correctly rounded, matching `strtod` bit for bit (Clinger fast path + Eisel-Lemire; inputs with over 19 significant digits that could round either way defer to `strtod`). A leading zero followed by a fraction or exponent is decimal, not octal (`012.5` is `12.5`, as in C). Hex floats (`0x1.8p1`) are supported but not guaranteed correctly rounded beyond 64 mantissa bits.
 
 ### Strict, Bounded Parsing (wire-safe)
 
@@ -89,7 +91,7 @@ Parses an unsigned `uint64_t`, hex digits only - unlike `fio_atol16u`, a `0x` pr
 SFUNC int64_t fio_atol(char **pstr);
 ```
 
-Parses a signed `int64_t`. Accepts base 10, octal (`0...`), hex (`0x...` or `x...`), and binary (`0b...` or `b...`). Updates `*pstr` past the number.
+Parses a signed `int64_t`. Accepts base 10, octal (`0...`), hex (`0x...` or `x...`), and binary (`0b...` or `b...`). A prefix counts only when a valid digit follows it, so `"0x"` reads as `0` and stops at the `x`. Updates `*pstr` past the number.
 
 #### `fio_atof`
 
@@ -97,7 +99,7 @@ Parses a signed `int64_t`. Accepts base 10, octal (`0...`), hex (`0x...` or `x..
 SFUNC double fio_atof(char **pstr);
 ```
 
-Parses a double. Wraps `strtod` for most inputs. The source also attempts to accept a raw `0b...` binary bit-pattern, but the detection condition looks fragile.
+Parses a double using `fio_aton`, so results are correctly rounded and don't depend on the C locale. Unlike `fio_aton`, leading zeros are decimal (`"0123"` is `123.0`), and binary (`0b...`, with or without the `f` suffix, after an optional sign) is always read as raw IEEE 754 bits. Integers are converted to `double`. On a format error it returns `0` without moving `*pstr`, like `strtod`. Unlike `strtod`, it doesn't set `errno` to `ERANGE` and doesn't accept `nan(...)`.
 
 #### `fio_ftoa`
 
@@ -105,7 +107,7 @@ Parses a double. Wraps `strtod` for most inputs. The source also attempts to acc
 SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base);
 ```
 
-Writes `num` to `dest` in `base` (2, 10, or 16; unsupported bases silently fall back to 10). No prefixes are added. Returns bytes written excluding NUL.
+Writes `num` to `dest` in `base` (2, 10, or 16; unsupported bases silently fall back to 10). Base 2 writes the raw IEEE 754 bits as `0b...f`, which `fio_aton` and `fio_atof` read back exactly. Base 16 writes a C99 `%a` hex float (such as `-0x1.8p+0`, or `0x0.0000000000001p-1022` for the smallest subnormal), which `strtod`, `fio_aton` and `fio_atof` read back exactly. `inf` and `nan` print as `Infinity` and `NaN` in bases 10 and 16. Returns bytes written excluding NUL.
 
 **Note:** provide at least 130 bytes for base 2. Special values `inf` and `nan` produce `"Infinity"` / `"NaN"`.
 

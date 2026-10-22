@@ -65,9 +65,6 @@
 #if defined(FIO_HTTP1_PARSER)
 #include "004 http1 parser.h"
 #endif
-#ifdef FIO_JSON
-#include "004 json.h"
-#endif
 #ifdef FIO_SOCK
 #include "004 sock.h"
 #endif
@@ -79,9 +76,6 @@
 #endif
 #ifdef FIO_RESP3
 #include "004 resp3.h"
-#endif
-#ifdef FIO_URL_ENCODED
-#include "004 urlencoded.h"
 #endif
 #ifdef FIO_MULTIPART
 #include "004 multipart.h"
@@ -101,8 +95,17 @@
 #include "011 string core.h"
 #endif
 
+#ifdef FIO_DATA
+#include "012 data.h"
+#endif
 #ifdef FIO_GFM
 #include "012 gfm.h"
+#endif
+#ifdef FIO_JSON
+#include "012 json.h"
+#endif
+#ifdef FIO_URL_ENCODED
+#include "012 urlencoded.h"
 #endif
 
 #if defined(FIO_POLL) && !defined(FIO___RECURSIVE_INCLUDE)
@@ -260,6 +263,13 @@
 #include "434 websocket.h"
 #include "438 http.h"
 #include "439 http.h"
+#endif
+
+/* HTTP <=> FIOBJ bridge: compiled once both modules were included (any order)
+ */
+#if defined(H___FIO_HTTP_API___H) && defined(H___FIO_FIOBJ___H) &&             \
+    !defined(FIO___RECURSIVE_INCLUDE)
+#include "440 http fiobj.h"
 #endif
 
 #ifndef FIO___DEV___

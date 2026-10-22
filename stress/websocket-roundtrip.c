@@ -145,10 +145,18 @@ static void ws_rt_client_message(fio_http_s *h, fio_buf_info_s msg,
     fclose(file);
     fio_http_write(h, .fd = fd, .offset = sizeof(prefix),
                    .len = sizeof(ws_rt_large), .copy = (phase == 8));
-    /* HTTP generic writes always close the supplied descriptor, even when
-     * copy=1. Its payload has already been copied into the masked frame. */
-    if (fcntl(fd, F_GETFD) != -1 || errno != EBADF)
-      ws_rt_fail("client fd", "descriptor not closed", fd, 0);
+    /* Ownership (fio_http_write_args_s): without `copy` the descriptor is
+     * closed; with `copy` it stays caller-owned. The client path has already
+     * read the payload into the masked frame, so closing it here is safe. */
+    if (phase == 7) {
+      if (fcntl(fd, F_GETFD) != -1 || errno != EBADF)
+        ws_rt_fail("client fd", "descriptor not closed", fd, 0);
+    } else {
+      if (fcntl(fd, F_GETFD) == -1)
+        ws_rt_fail("client fd copy", "descriptor closed", 0, fd);
+      else
+        close(fd);
+    }
   } else {
     /* A short fd read must never enqueue a partial frame, and must release
      * the descriptor before returning. */

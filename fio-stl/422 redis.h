@@ -232,7 +232,8 @@ typedef struct {
 
 /** Redis connection state, observed from the IO thread. */
 typedef enum {
-  /** The engine stopped after a failed HELLO handshake (or NULL was queried). */
+  /** The engine stopped after a failed HELLO handshake (or NULL was queried).
+   */
   FIO_REDIS_STATE_ERROR,
   /** No socket is attached, or the RESP3 HELLO handshake is still pending. */
   FIO_REDIS_STATE_CONNECTING,
@@ -288,8 +289,7 @@ SFUNC void fio_redis_free(fio_pubsub_engine_s *engine);
  * This function must be called from the IO thread. Commands can be sent in
  * every state: they queue until the RESP3 HELLO handshake completes.
  */
-SFUNC fio_redis_state_e
-fio_redis_state(fio_pubsub_engine_s const *engine);
+SFUNC fio_redis_state_e fio_redis_state(fio_pubsub_engine_s const *engine);
 
 /**
  * Sends a Redis command through the engine's connection.
@@ -1239,10 +1239,8 @@ FIO_SFUNC int fio___redis_verb_should_wait(const uint8_t *cmd, size_t len) {
   if (!p || (size_t)(p - cmd) + 4 >= len || p[1] != '$')
     return 1;
   const uint8_t *vlen_s = p + 2;
-  const uint8_t *vlen_e = (const uint8_t *)FIO_MEMCHR(
-      vlen_s,
-      '\n',
-      len - (size_t)(vlen_s - cmd));
+  const uint8_t *vlen_e =
+      (const uint8_t *)FIO_MEMCHR(vlen_s, '\n', len - (size_t)(vlen_s - cmd));
   if (!vlen_e || (vlen_e - vlen_s) < 2 || vlen_e[-1] != '\r')
     return 1;
   size_t vlen = 0;
@@ -1260,8 +1258,7 @@ FIO_SFUNC int fio___redis_verb_should_wait(const uint8_t *cmd, size_t len) {
     if (no_wait[i].len != vlen)
       continue;
     size_t c = 0;
-    while (c < vlen &&
-           (uint8_t)(verb[c] & 0xDF) == (uint8_t)no_wait[i].verb[c])
+    while (c < vlen && (uint8_t)(verb[c] & 0xDF) == (uint8_t)no_wait[i].verb[c])
       ++c; /* case-insensitive (ASCII upper) */
     if (c == vlen)
       return 0;
@@ -1610,8 +1607,8 @@ FIO_SFUNC void fio___redis_attach_cmd_task(void *engine_, void *cmd_) {
   /* Add command to queue and try to send.
    * Classify should_wait from the command verb at accept time: every
    * command flows through the same two-type queue discipline. */
-  cmd->should_wait = (uint8_t)fio___redis_verb_should_wait(cmd->cmd,
-                                                           cmd->cmd_len);
+  cmd->should_wait =
+      (uint8_t)fio___redis_verb_should_wait(cmd->cmd, cmd->cmd_len);
   FIO_LIST_PUSH(&r->cmd_queue, &cmd->node);
   fio___redis_send_next_cmd(r);
   fio___redis_free(r); /* Release the reference held for this deferred task */
@@ -1736,8 +1733,7 @@ FIO_SFUNC void fio___redis_on_hello_reply(fio_pubsub_engine_s *e,
  * queue to distinguish a TCP connection awaiting `HELLO 3` from a RESP3-ready
  * connection. Commands may be sent regardless of the returned state.
  */
-SFUNC fio_redis_state_e
-fio_redis_state(fio_pubsub_engine_s const *engine) {
+SFUNC fio_redis_state_e fio_redis_state(fio_pubsub_engine_s const *engine) {
   if (!engine)
     return FIO_REDIS_STATE_ERROR;
   fio_redis_engine_s const *r = (fio_redis_engine_s const *)engine;
@@ -1785,14 +1781,15 @@ typedef struct {
  * Channel names that don't fit in half the buffer require a dynamic
  * allocation and are sent as a separate SUBSCRIBE/PSUBSCRIBE message.
  */
-FIO_SFUNC void fio___redis_resubscribe_batch(fio___redis_resubscribe_sink_s sink) {
+FIO_SFUNC void fio___redis_resubscribe_batch(
+    fio___redis_resubscribe_sink_s sink) {
   uint8_t *buf = fio___redis_resubscribe_buf(0);
   const size_t half = FIO___REDIS_RESUBSCRIBE_BUF_CAPA / 2;
   size_t used = 0;
   for (int is_pattern = 0; is_pattern < 2; ++is_pattern) {
-    fio___pubsub_channel_map_s *map =
-        is_pattern ? &FIO___PUBSUB_POSTOFFICE.patterns
-                   : &FIO___PUBSUB_POSTOFFICE.channels;
+    fio___pubsub_channel_map_s *map = is_pattern
+                                          ? &FIO___PUBSUB_POSTOFFICE.patterns
+                                          : &FIO___PUBSUB_POSTOFFICE.channels;
     const char *verb = is_pattern ? "PSUBSCRIBE" : "SUBSCRIBE";
     const size_t verb_len = is_pattern ? 10 : 9;
     FIO_MAP_EACH(fio___pubsub_channel_map, map, i) {
@@ -1806,11 +1803,11 @@ FIO_SFUNC void fio___redis_resubscribe_batch(fio___redis_resubscribe_sink_s sink
         }
         uint8_t *solo = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, need, 0);
         if (solo) {
-          size_t len = fio___redis_write_sub_cmd(solo,
-                                                 verb,
-                                                 verb_len,
-                                                 FIO_BUF_INFO2(ch->name,
-                                                               ch->name_len));
+          size_t len =
+              fio___redis_write_sub_cmd(solo,
+                                        verb,
+                                        verb_len,
+                                        FIO_BUF_INFO2(ch->name, ch->name_len));
           sink.on_write(sink.udata, solo, len);
           FIO_MEM_FREE(solo, need);
         }
@@ -1823,8 +1820,7 @@ FIO_SFUNC void fio___redis_resubscribe_batch(fio___redis_resubscribe_sink_s sink
       used += fio___redis_write_sub_cmd(buf + used,
                                         verb,
                                         verb_len,
-                                        FIO_BUF_INFO2(ch->name,
-                                                      ch->name_len));
+                                        FIO_BUF_INFO2(ch->name, ch->name_len));
     }
   }
   if (used)
@@ -2714,7 +2710,7 @@ SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
   size_t port_len = 4; /* strlen("6379") */
 
   if (args.url && args.url[0]) {
-    fio_url_s u = fio_url_parse(args.url, strlen(args.url));
+    fio_url_s u = fio_url_parse(args.url, FIO_STRLEN(args.url));
     if (u.host.buf && u.host.len) {
       host = u.host.buf;
       host_len = u.host.len;
@@ -2733,7 +2729,7 @@ SFUNC fio_pubsub_engine_s *fio_redis_new FIO_NOOP(fio_redis_args_s args) {
 
   size_t auth_len = args.auth_len;
   if (args.auth && !auth_len)
-    auth_len = strlen(args.auth);
+    auth_len = FIO_STRLEN(args.auth);
 
   /* Pre-compute the HELLO 3 handshake command (auth folds into HELLO).
    * Exact sizing (no estimates); auth failure is a hard engine error. */

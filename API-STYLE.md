@@ -32,7 +32,7 @@ fio_thread_mutex_lock(...)
 | `fio_str_info_s` | `011 string core.h` |
 | `fio_buf_info_s` | `000 core.h` |
 | `fio_url_s` | `002 url.h` |
-| `fio_json_parser_s` | `004 json.h` |
+| `fio_json_parser_s` | `012 json.h` |
 | `fio_cli_arg_e` | `005 cli.h` |
 
 **Exception:** `fio_socket_i` in `004 sock.h` is a typedef (SOCKET on Windows, int on POSIX). Ends in `_i` rather than `_s` to indicate scalar identity.
@@ -173,8 +173,8 @@ For encode/decode functions where 0 is a valid result.
 |----------|-------------|------|
 | `fio_url_decode()` | `size_t` | `002 url.h` |
 | `fio_url_encode()` | `size_t` | `002 url.h` |
-| `fio_json_unescape()` | `size_t` | `004 json.h` |
-| `fio_json_escape()` | `size_t` | `004 json.h` |
+| `fio_json_unescape()` | `size_t` | `012 json.h` |
+| `fio_json_escape()` | `size_t` | `012 json.h` |
 
 **E. Multi-state integer (0/1/-1)**
 
@@ -253,7 +253,7 @@ int fio_xxx_parser_feed(fio_xxx_parser_s *parser, const char *data, size_t len);
 ```
 
 **Modules using this pattern:**
-- `004 json.h`
+- `012 json.h`
 - `004 multipart.h`
 - `004 resp3.h`
 - `004 urlencoded.h`

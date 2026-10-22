@@ -31,8 +31,158 @@ FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
   return 0;
 }
 
+/* FIOBJ_T_DATA: a fio_data_s store spilling to a temporary file */
+FIO_SFUNC void FIO_NAME_TEST(stl, fiobj_data)(void) {
+  fprintf(stderr, "* Testing FIOBJ Data (FIOBJ_T_DATA)\n");
+  FIOBJ a = fiobj_data_new(16); /* tiny RAM limit: spills quickly */
+  FIOBJ b = fiobj_data_new(0);
+  FIO_ASSERT(FIOBJ_TYPE(a) == FIOBJ_T_DATA && FIOBJ_TYPE_CLASS(a) == FIOBJ_T_OTHER,
+             "fiobj_data_new type");
+  FIO_ASSERT(fiobj_data_ptr(a) && !fiobj_data_ptr(fiobj_true()) &&
+                 !fiobj_data_ptr(FIOBJ_INVALID),
+             "fiobj_data_ptr type checks");
+  FIO_ASSERT(!fiobj_data_filename(a).buf && !fiobj_data_type(a).buf &&
+                 !fiobj_data_headers(a).buf,
+             "unset upload metadata");
+  fiobj_data_filename_set(a, FIO_STR_INFO1("upload.txt"));
+  fiobj_data_type_set(a, FIO_STR_INFO1("text/plain"));
+  fiobj_data_headers_set(a, FIO_STR_INFO1("X-Test: yes\r\n"));
+  fio_str_info_s fn = fiobj_data_filename(a);
+  fio_str_info_s ty = fiobj_data_type(a);
+  fio_str_info_s hd = fiobj_data_headers(a);
+  FIO_ASSERT(fn.buf && fn.len == 10 && !memcmp(fn.buf, "upload.txt", 10) &&
+                 fn.buf[fn.len] == 0 && ty.buf && ty.len == 10 &&
+                 !memcmp(ty.buf, "text/plain", 10) && ty.buf[ty.len] == 0 &&
+                 hd.buf && hd.len == 13 &&
+                 !memcmp(hd.buf, "X-Test: yes\r\n", 13) && hd.buf[hd.len] == 0,
+             "upload metadata round trip and termination");
+  fiobj_data_filename_set(a, (fio_str_info_s){.buf = "", .len = 0});
+  fn = fiobj_data_filename(a);
+  FIO_ASSERT(fn.buf && !fn.len && !fn.buf[0], "empty metadata is set");
+  fiobj_data_filename_set(a, FIO_STR_INFO1("new.txt"));
+  fn = fiobj_data_filename(a);
+  FIO_ASSERT(fn.buf && fn.len == 7 && !memcmp(fn.buf, "new.txt", 7),
+             "overwrite metadata");
+  fiobj_data_filename_set(a, (fio_str_info_s){0});
+  fiobj_data_type_set(a, (fio_str_info_s){0});
+  fiobj_data_headers_set(a, (fio_str_info_s){0});
+  FIO_ASSERT(!fiobj_data_filename(a).buf && !fiobj_data_type(a).buf &&
+                 !fiobj_data_headers(a).buf,
+             "clear metadata");
+  FIOBJ str = fiobj_str_new_cstr("hi", 2);
+  fiobj_data_filename_set(str, FIO_STR_INFO1("file"));
+  fiobj_data_type_set(str, FIO_STR_INFO1("type"));
+  fiobj_data_headers_set(str, FIO_STR_INFO1("headers"));
+  FIO_ASSERT(!fiobj_data_filename(str).buf && !fiobj_data_type(str).buf &&
+                 !fiobj_data_headers(str).buf,
+             "non-Data metadata calls");
+  fiobj_free(str);
+  fiobj_data_filename_set(a, FIO_STR_INFO1("last"));
+  const char *txt = "Hello \"Data\" store, spilling past the RAM limit.";
+  size_t len = strlen(txt);
+  FIO_ASSERT(!fio_data_write(fiobj_data_ptr(a), txt, len), "write a");
+  FIO_ASSERT(!fio_data_write(fiobj_data_ptr(b), txt, len), "write b");
+  FIO_ASSERT(fio_data_fd(fiobj_data_ptr(a)) != -1 &&
+                 fio_data_fd(fiobj_data_ptr(b)) == -1,
+             "a should spill to a file, b should stay in RAM");
+  fio_str_info_s sa = fiobj2cstr(a);
+  FIO_ASSERT(sa.len == len && !memcmp(sa.buf, txt, len) &&
+                 fiobj_data_ptr(a) && fiobj_data_filename(a).len == 4,
+             "fiobj2cstr and fiobj_data_ptr after metadata");
+  FIO_ASSERT(fiobj2i(a) == (intptr_t)len, "fiobj2i is the length");
+  FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(a, b), "equal content should be equal");
+  fio_data_write(fiobj_data_ptr(b), "!", 1);
+  FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(a, b), "different content");
+  /* reading position is preserved by fiobj2cstr / eq */
+  fio_data_seek(fiobj_data_ptr(a), 6);
+  (void)fiobj2cstr(a);
+  FIO_ASSERT(fio_data_pos(fiobj_data_ptr(a)) == 6, "position preserved");
+  /* JSON output renders the content as a String; hashes hold Data objects */
+  FIOBJ h = fiobj_hash_new();
+  fiobj_hash_set2(h, "d", 1, fiobj_dup(a));
+  FIOBJ json = fiobj2json(FIOBJ_INVALID, h, 0);
+  fio_str_info_s js = fiobj2cstr(json);
+  const char *expect =
+      "{\"d\":\"Hello \\\"Data\\\" store, spilling past the RAM limit.\"}";
+  FIO_ASSERT(js.len == strlen(expect) && !memcmp(js.buf, expect, js.len),
+             "Data JSON: %s",
+             js.buf);
+  fiobj_free(json);
+  fiobj_free(h);
+  fiobj_free(a);
+  fiobj_free(b);
+  FIOBJ e = fiobj_data_new(0);
+  FIO_ASSERT(fiobj2cstr(e).buf && !fiobj2cstr(e).len, "empty Data to_s");
+  fiobj_free(e);
+}
+
+/* FIOBJ_T_DATA: larger content (many 4096 byte compare chunks), RAM vs file */
+FIO_SFUNC void FIO_NAME_TEST(stl, fiobj_data_large)(void) {
+  fprintf(stderr, "* Testing FIOBJ Data equality / fiobj2cstr (RAM vs file)\n");
+  const size_t len = (4096 * 5) + 123;
+  char *src = (char *)malloc(len);
+  FIO_ASSERT_ALLOC(src);
+  for (size_t i = 0; i < len; ++i)
+    src[i] = (char)('a' + ((i * 7) % 26));
+  FIOBJ ram = fiobj_data_new(len);   /* stays in RAM */
+  FIOBJ file = fiobj_data_new(1000); /* spills */
+  fio_data_s *dr = fiobj_data_ptr(ram), *df = fiobj_data_ptr(file);
+  for (size_t i = 0; i < len; i += 1000) {
+    size_t l = (len - i) < 1000 ? (len - i) : 1000;
+    FIO_ASSERT(!fio_data_write(dr, src + i, l) &&
+                   !fio_data_write(df, src + i, l),
+               "Data write failed");
+  }
+  FIO_ASSERT(fio_data_fd(dr) == -1 && fio_data_fd(df) != -1, "Data modes");
+  fio_data_seek(dr, 17);
+  fio_data_seek(df, -100);
+  const size_t pf = fio_data_pos(df);
+  FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(ram, file) &&
+                 FIO_NAME_BL(fiobj, eq)(file, ram),
+             "RAM and spilled Data with equal content should be equal");
+  FIO_ASSERT(fio_data_pos(dr) == 17 && fio_data_pos(df) == pf,
+             "eq should preserve reading positions");
+  fio_str_info_s s = fiobj2cstr(file);
+  FIO_ASSERT(s.len == len && !memcmp(s.buf, src, len),
+             "fiobj2cstr of spilled Data (len %zu)",
+             s.len);
+  FIO_ASSERT(fio_data_pos(df) == pf, "fiobj2cstr should preserve position");
+#if FIO___DATA_MMAP
+  FIO_ASSERT(df->map == 1 && s.buf == df->buf,
+             "fiobj2cstr of spilled Data should point into the mapping");
+#endif
+  /* appending invalidates the mapping: the new content is visible */
+  FIO_ASSERT(!fio_data_write(df, "+", 1), "Data append failed");
+  s = fiobj2cstr(file);
+  FIO_ASSERT(s.len == len + 1 && !memcmp(s.buf, src, len) && s.buf[len] == '+',
+             "fiobj2cstr after append (len %zu)",
+             s.len);
+  FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(ram, file), "appended Data differs");
+  FIO_ASSERT(!fio_data_write(dr, "+", 1) && FIO_NAME_BL(fiobj, eq)(ram, file),
+             "equal again after the same append");
+  s = fiobj2cstr(ram);
+  FIO_ASSERT(s.len == len + 1 && !memcmp(s.buf, src, len), "fiobj2cstr RAM");
+  s = fiobj2cstr(ram);
+  FIO_ASSERT(s.len == len + 1 && !memcmp(s.buf, src, len),
+             "fiobj2cstr RAM Data");
+  /* a difference in the last chunk */
+  FIOBJ other = fiobj_data_new(1000);
+  FIO_ASSERT(!fio_data_write(fiobj_data_ptr(other), src, len) &&
+                 !fio_data_write(fiobj_data_ptr(other), "#", 1),
+             "Data write failed");
+  FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(ram, other) &&
+                 !FIO_NAME_BL(fiobj, eq)(other, file),
+             "Data differing in the last byte should differ");
+  fiobj_free(other);
+  fiobj_free(ram);
+  fiobj_free(file);
+  free(src);
+}
+
 int main(void) {
   FIOBJ o = FIOBJ_INVALID;
+  FIO_NAME_TEST(stl, fiobj_data)();
+  FIO_NAME_TEST(stl, fiobj_data_large)();
   if (!FIOBJ_MARK_MEMORY_ENABLED) {
     FIO_LOG_WARNING("FIOBJ defined without allocation counter. "
                     "Tests might not be complete.");
@@ -186,6 +336,44 @@ int main(void) {
     fiobj_free(o);
     fiobj_free(j);
     o = FIOBJ_INVALID;
+  }
+  {
+    /* Hash updates pass the Hash to fio_json_parse as the explicit root. */
+    FIOBJ h = fiobj_hash_new();
+    FIOBJ items = fiobj_array_new();
+    fiobj_array_push(items, fiobj_num_new(1));
+    fiobj_hash_set2(h, "items", 5, items);
+    fiobj_hash_set2(h, "keep", 4, fiobj_str_new_cstr("yes", 3));
+    char update[] = "{\"items\":[2],\"nested\":{\"x\":3}}";
+    size_t used = fiobj_hash_update_json2(h, update, FIO_STRLEN(update));
+    FIO_ASSERT(used == FIO_STRLEN(update) && FIOBJ_TYPE(h) == FIOBJ_T_HASH,
+               "JSON Hash update failed or consumed the root");
+    items = fiobj_hash_get2(h, "items", 5);
+    FIO_ASSERT(FIOBJ_TYPE(items) == FIOBJ_T_ARRAY &&
+                   fiobj_array_count(items) == 2 &&
+                   fiobj2i(fiobj_array_get(items, 1)) == 2,
+               "JSON Hash update must append to an existing Array");
+    FIOBJ nested = fiobj_hash_get2(h, "nested", 6);
+    FIO_ASSERT(FIOBJ_TYPE(nested) == FIOBJ_T_HASH &&
+                   fiobj2i(fiobj_hash_get2(nested, "x", 1)) == 3,
+               "JSON Hash update must merge nested maps");
+
+    char malformed[] = "{\"partial\":4,\"broken\":";
+    used = fiobj_hash_update_json2(h, malformed, FIO_STRLEN(malformed));
+    FIO_ASSERT(used && FIOBJ_TYPE(h) == FIOBJ_T_HASH &&
+                   fiobj2i(fiobj_hash_get2(h, "partial", 7)) == 4 &&
+                   fiobj_hash_get2(h, "keep", 4) != FIOBJ_INVALID,
+               "JSON Hash update error must retain partial caller data");
+    char scalar[] = "42";
+    FIO_ASSERT(fiobj_hash_update_json2(h, scalar, 2) == 2 &&
+                   FIOBJ_TYPE(h) == FIOBJ_T_HASH,
+               "scalar JSON update must not consume the Hash");
+    char array[] = "[9]";
+    fiobj_hash_update_json2(h, array, 3);
+    FIO_ASSERT(FIOBJ_TYPE(h) == FIOBJ_T_HASH &&
+                   fiobj_hash_get2(h, "keep", 4) != FIOBJ_INVALID,
+               "Array JSON update must not consume or replace the Hash");
+    fiobj_free(h);
   }
   {
     FIOBJ a1 = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();

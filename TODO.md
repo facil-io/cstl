@@ -10,7 +10,7 @@ Single source of truth for all pending work. Completed items go to git history /
 - **Location**: `fio-stl/431 http handle.h` (line ~3175 TODO marker)
 - `application/x-www-form-urlencoded` — standard form submission
 - `multipart/form-data` — file uploads (parser exists in `004 multipart.h`)
-- `application/json` — JSON body (parser exists in `004 json.h`, needs integration)
+- `application/json` — JSON body (parser exists in `012 json.h`, needs integration)
 
 ## Medium Priority
 

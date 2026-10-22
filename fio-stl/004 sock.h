@@ -329,7 +329,8 @@ FIO_IFUNC void fio_sock_address_free(struct addrinfo *a);
  *
  * Buffer lengths are limited to 63 bytes.
  *
- * This function is limited in its thread safety to 128 threads / calls.
+ * Results use a ring of 128 static 64-byte slots: the 129th call reuses the
+ * first slot. Copy the result if you need to keep it.
  */
 SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s);
 
@@ -875,7 +876,7 @@ SFUNC size_t fio_sock_maximize_limits(size_t max_limit) {
 SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
   /* Unix socket */
   struct sockaddr_un addr = {0};
-  size_t addr_len = strlen(address);
+  size_t addr_len = FIO_STRLEN(address);
   if (addr_len >= sizeof(addr.sun_path)) {
     FIO_LOG_ERROR(
         "(fio_sock_open_unix) address too long (%zu bytes > %zu bytes).",
@@ -937,21 +938,9 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
     }
   } else {
     unlink(addr.sun_path);
-    int btmp; // the bind result
-#if !defined(FIO_SOCK_AVOID_UMASK) && !defined(FIO_OS_WIN)
-    if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
-      int umask_org = umask(0x1FF);
-      btmp = fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-      int old_err = errno;
-      umask(umask_org);
-      errno = old_err;
-      FIO_LOG_DEBUG("umask was used temporarily for Unix Socket (was 0x%04X)",
-                    umask_org);
-    } else
-#endif /* FIO_SOCK_AVOID_UMASK */
-      /* else */ btmp =
-          fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-    if (btmp == -1) {
+    /* no `umask` games (process-global, races other threads): public sockets
+     * are opened up with `chmod` after `bind`. */
+    if (fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       FIO_LOG_ERROR("couldn't bind unix socket to %s\n\terrno(%d): %s",
                     address,
                     errno,
@@ -960,7 +949,7 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
       // unlink(addr.sun_path);
       return FIO_SOCKET_INVALID;
     }
-#ifndef FIO_OS_WIN
+#if !FIO_OS_WIN /* FIO_OS_WIN is always defined (0 / 1) */
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
       fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
@@ -987,6 +976,8 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
 Peer Address
 ***************************************************************************** */
 
+FIO_STATIC_ALLOC_DEF(fio___sock_peer_addr_buffer, char, 64, 128)
+
 /**
  * Returns a human readable address representation of the socket's peer address.
  *
@@ -994,13 +985,11 @@ Peer Address
  *
  * Buffer lengths are limited to 63 bytes.
  *
- * This function is limited in its thread safety to 128 threads / calls.
+ * Results use a ring of 128 static 64-byte slots: the 129th call reuses the
+ * first slot. Copy the result if you need to keep it.
  */
 SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s) {
-  static char buffer[8129]; /* 64 byte per buffer x 128 threads */
-  static unsigned pos = 0;
-  fio_buf_info_s r =
-      FIO_BUF_INFO2(buffer + (fio_atomic_add(&pos, 63) & 127), 0);
+  fio_buf_info_s r = FIO_BUF_INFO2(fio___sock_peer_addr_buffer(1), 0);
   struct sockaddr addr[8] = {0};
   socklen_t len = sizeof(addr);
   if (!FIO_SOCK_FD_ISVALID(s))

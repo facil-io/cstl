@@ -1293,6 +1293,17 @@ FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
 
   SSL_set_ex_data(ssl, 0, (void *)io);
 
+  /* Send the SNI host name for client connections (RFC 6066). */
+  if (!SSL_is_server(ssl) && ctx_parent->tls) {
+    fio_buf_info_s sni = fio_keystr_buf(&ctx_parent->tls->sni);
+    if (sni.buf && sni.len && sni.len < 256) {
+      char sni_buf[256];
+      FIO_MEMCPY(sni_buf, sni.buf, sni.len);
+      sni_buf[sni.len] = 0;
+      SSL_set_tlsext_host_name(ssl, sni_buf);
+    }
+  }
+
   /* Initiate handshake — OpenSSL writes handshake data into enc_buf via wbio */
   if (SSL_is_server(ssl))
     SSL_accept(ssl);

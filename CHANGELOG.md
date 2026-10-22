@@ -1,6 +1,87 @@
 # Change Log
 
-### 0.8.2 - Unreleased
+### 0.8.3 - 2026-10-26
+
+**Security**: (`sha2`) SHA-384 and SHA-512 returned wrong digests for inputs 112 bytes past a multiple of 128. This failed about 1 in 128 TLS 1.3 handshakes using `TLS_AES_256_GCM_SHA384`, and affected HMAC / HKDF with SHA-384 / SHA-512 for those lengths.
+
+**Security**: (`http`) `fio_http_mimetype` overflowed a stack buffer for file extensions longer than 7 bytes, such as a static file request for `notes.markdown_old`. Long extensions now return an empty MIME type.
+
+**Security**: (`string core`) `fio_string_write_escape`, used for JSON output, could write past its buffer when the input ended in a truncated UTF-8 sequence. Truncated bytes are now escaped as `\xXX`.
+
+**Fix**: (`http`) `fio_http_etag_is_match` follows RFC 9110 §13.1.2: weak comparison, every `If-None-Match` tag is checked, and `*` matches. Only 2xx `GET` / `HEAD` responses become `304`, and a tag that only shares a prefix with the `etag` no longer matches.
+
+**Fix**: (`http`) `fio_http_upgrade_websocket` no longer upgrades after sending `400` for an unsupported `Sec-WebSocket-Version`.
+
+**Fix**: (`http`) `*_header_set_if_missing` with an empty value no longer removes an existing header.
+
+**Fix**: (`http`) `fio_http_write` with `copy` set no longer closes `fd` on error paths, WebSocket client writes or SSE.
+
+**Fix**: (`io`) `fio_io_write2` on a `NULL` IO now closes `fd` when `copy` isn't set, even without a `dealloc` callback.
+
+**Fix**: (`http`) `fio_http_is_clean` returns false once headers were sent.
+
+**Fix**: (`http`) `fio_http_from` falls back to `x-forwarded-for` when a `forwarded` header has no `for=`, handles `forwarded` headers of 1024 bytes or more, and no longer reads `xfor=` as `for=`.
+
+**Fix**: (`http`) `FIO_HTTP_PATH_EACH` decodes a `%xx` at the end of the path.
+
+**Fix**: (`http`) `fio_http_body_read_until` on a RAM body stops after `limit` bytes when the token isn't found, instead of jumping to the end of the body.
+
+**Fix**: (`http`) returning `NULL` from `on_file` skips the upload: `on_file_data` isn't called.
+
+**Fix**: (`http` client) requests include the URL query string. RAM request bodies are no longer sent as an offset from the handle's address (undefined behavior).
+
+**Fix**: (`multipart`) `fio_multipart_parse` no longer returns `consumed == 0` when the input ends right after a delimiter, which made callers report complete parts twice.
+
+**Fix**: (`json`) `FIO_JSON_MAX_DEPTH` allows the full number of nesting levels, counting the root as level 1; one level was lost before. `0` selects the default (128).
+
+**Fix**: (`atol`) `fio_aton` rounds decimal floats correctly, matching `strtod`; results were up to 2 ulps off, and extreme values became `0` or `inf`. `fio_aton` and `fio_atol` now follow the documented formats: `012.5` is decimal, bare `x1F` is hex, `b101` is binary, and input without digits isn't consumed.
+
+**Fix**: (`files`) `fio_filename_tmp` no longer leaves temporary files behind. Files are unlinked right after opening (POSIX) or opened delete-on-close (Windows).
+
+**Fix**: (`files`) `fio_fd_read` returns `0`, not `(size_t)-1`, when its `lseek` fallback fails. On Windows, `fio_filename_make_path` sets `errno` on failure.
+
+**Fix**: (`sock`) public Unix sockets (`FIO_SOCK_UNIX`) are `0777` again, so other users can connect; an always-false guard skipped the `chmod`. Socket creation no longer changes the process-wide `umask`, which raced other threads, and `FIO_SOCK_AVOID_UMASK` is deprecated.
+
+**Fix**: (`sock`) back-to-back `fio_sock_peer_addr` calls no longer overwrite each other's results.
+
+**API**: (`data`) new Data Store module (`FIO_DATA`): a seekable buffer that keeps data in RAM up to a limit, then moves it to an anonymous temporary file. Spilled data is read through a memory mapping, write errors are sticky (`fio_data_is_error`), and `fio_data_save` saves the content atomically. HTTP bodies use it.
+
+**API**: (`fiobj`) added `FIOBJ_T_DATA` (`fiobj_data_new`, `fiobj_data_ptr`), which wraps a `fio_data_s` and holds upload metadata (`fiobj_data_filename`, `fiobj_data_type`, `fiobj_data_headers`).
+
+**API**: (`http`) added `fio_http_query_parse` and `fio_http_params_parse`, which parse the query and body into one map. Field names may be nested (`user[name]`, `tags[]`), and the `max_params` setting limits the fields parsed per call (default 4096). Also added `fio_http_body_save`.
+
+**API**: (`http` + `fiobj`) added `fio_http_params2FIOBJ`, which returns the request params as a FIOBJ Hash or merges them into an existing one. File uploads become `FIOBJ_T_DATA` objects. It's available once both modules are included, in any order.
+
+**API**: (`http`) breaking: params parsing uses the JSON callback contract, so callback errors are returned unchanged and the caller owns the result, which is partial on error. The types are renamed `fio_http_params_parse_callbacks_s` / `fio_http_params_parse_result_s`, `on_error` and `on_file_done` were removed, `on_file` receives the raw part headers, and the parse functions take named arguments (`.callbacks`, `.udata`, `.limit`). Text values are always Strings, so URL-encoded bodies no longer guess types. Upload file names lose their path components.
+
+**API**: (`http`) breaking: `fio_http_body_write` returns `int` (`-1` on error), and an HTTP/1.1 server responds `500` when it can't store a request body. Negative `fio_http_body_seek` positions count back like `lseek(SEEK_END)`, so `-1` is the last byte; the `SSIZE_MAX` "keep position" value was removed.
+
+**API**: (`http`) breaking: routes no longer inherit the listener's `on_stop`, which could free shared `udata` more than once. `connect_timeout` is now a `uint16_t` in milliseconds, so timeouts above 255 ms work.
+
+**API**: (`json`) breaking: new callback contract. Callbacks return result structs with an `int err` that `fio_json_parse` returns unchanged, push callbacks always take ownership of the value, keys arrive decoded, and `on_map` / `on_array` place the new container in its parent and hand back any value they replace. `on_error`, `map_finished` and `array_finished` were removed: the caller owns the result, which is partial on error. `fio_json_parse` takes a `const` callback table and an optional `root` to update in place. Added `fio_json_resolve_*` helpers for the shared conflict rules, `fio_json_callbacks_validate`, and `FIO_JSON_ERROR_GENERIC` / `FIO_JSON_ERROR_NESTING`; numbers always use `fio_aton` (`FIO_JSON_USE_FIO_ATON` was removed).
+
+**API**: (`fiobj`) `fiobj_hash_update_json` merges nested objects and appends nested arrays instead of replacing them.
+
+**API**: (`urlencoded`) breaking: `fio_url_encoded_parse` decodes names and values before calling `on_pair`. Remove any decoding in your callbacks. `on_pair` returns an `int`: `0` continues, and any other value stops parsing and is returned unchanged in `result.err` (the parser's own error is `-1`, on allocation failure). `on_error` was removed, and `udata` is passed unchanged. On error, `consumed` and `count` exclude the failed pair. A `NULL` `on_pair` only counts pairs, without decoding.
+
+**API**: (`multipart`) added `fio_multipart_stream_parse` and `fio_multipart_stream_close`, which stream file parts in chunks. HTTP uses them, so uploads are never fully loaded into memory. Breaking: `on_file_start` receives the raw part headers.
+
+**API**: (`files`) `fio_filename_overwrite` replaces the file atomically: it writes a sibling file, calls `fsync` and renames it. New files get mode `0666` minus the `umask`. Added `fio_fd_save`, which does the same from a file descriptor.
+
+**API**: (`atol`) `fio_atof` uses `fio_aton`, so results are correctly rounded and locale independent. `fio_ftoa` base 16 writes C99 `%a` hex floats and base 2 writes the raw bits (`0b...f`); both read back exactly.
+
+**API**: (`io`) TLS clients send SNI. `fio_io_connect` sets it from the URL host name, and `fio_io_tls_sni_set` sets it directly. IP literals are skipped, as RFC 6066 requires.
+
+**API**: (`str`) added `fio_string2primitive`, which detects `null`, `true`, `false` and numerals in a String.
+
+**API**: (`core`) added `FIO_STR_INFO_TMP_RESET`, which resets a `FIO_STR_INFO_TMP_VAR`.
+
+**Update**: (`atol`, `string core`, `json`) `fio_ftoa` base 10 is about 4x faster, `fio_aton` up to 2x faster, and JSON string escaping and scanning about 2x faster.
+
+**Update**: (`http`) rewrote the HTTP API documentation, with exact signatures, return values, ownership and limits.
+
+
+### 0.8.2 - 2026-10-22
 
 **Security**: (`ipc`) cluster peers must complete the UUID handshake before any other message is handled. Messages sent before the handshake are rejected. A peer is refused when its UUID is zero, equals this instance's UUID, or was already connected. Each instance now draws a non-zero UUID at startup.
 

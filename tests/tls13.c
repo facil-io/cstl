@@ -699,6 +699,58 @@ FIO_SFUNC void test_tls13_io_functions(void) {
 }
 
 /* *****************************************************************************
+SNI host name resolution for client contexts (RFC 6066)
+***************************************************************************** */
+FIO_SFUNC void test_tls13_sni_from_tls_object(void) {
+  fio_io_functions_s fn = fio_tls13_io_functions();
+
+  /* an explicit SNI host name is preferred over certificate names */
+  {
+    fio_io_tls_s *tls = fio_io_tls_new();
+    fio_io_tls_cert_add(tls, "cert-name.example", NULL, NULL, NULL);
+    fio_io_tls_sni_set(tls, "explicit.example.com", 20);
+    fio___tls13_context_s *ctx =
+        (fio___tls13_context_s *)fn.build_context(tls, 1);
+    FIO_ASSERT(ctx != NULL, "client build_context failed");
+    FIO_ASSERT(!FIO_MEMCMP(ctx->server_name, "explicit.example.com", 21),
+               "explicit SNI should be preferred, got: %s",
+               ctx->server_name);
+    fio___tls13_free_context_task(ctx, NULL);
+    fio_io_tls_free(tls);
+  }
+
+  /* legacy fallback: the first certificate name is used when no SNI was set */
+  {
+    fio_io_tls_s *tls = fio_io_tls_new();
+    fio_io_tls_cert_add(tls, "cert-name.example", NULL, NULL, NULL);
+    fio___tls13_context_s *ctx =
+        (fio___tls13_context_s *)fn.build_context(tls, 1);
+    FIO_ASSERT(ctx != NULL, "client build_context failed");
+    FIO_ASSERT(!FIO_MEMCMP(ctx->server_name, "cert-name.example", 18),
+               "certificate name fallback failed, got: %s",
+               ctx->server_name);
+    fio___tls13_free_context_task(ctx, NULL);
+    fio_io_tls_free(tls);
+  }
+
+  /* IP literals are ignored by fio_io_tls_sni_set, so no SNI is sent */
+  {
+    fio_io_tls_s *tls = fio_io_tls_new();
+    fio_io_tls_sni_set(tls, "192.168.0.1", 11);
+    FIO_ASSERT(fio_keystr_buf(&tls->sni).len == 0,
+               "IP literal must not be stored as SNI");
+    fio___tls13_context_s *ctx =
+        (fio___tls13_context_s *)fn.build_context(tls, 1);
+    FIO_ASSERT(ctx != NULL, "client build_context failed");
+    FIO_ASSERT(ctx->server_name[0] == 0,
+               "no SNI should be sent for IP literals, got: %s",
+               ctx->server_name);
+    fio___tls13_free_context_task(ctx, NULL);
+    fio_io_tls_free(tls);
+  }
+}
+
+/* *****************************************************************************
 Client certificate trust verification (mTLS)
 ***************************************************************************** */
 
@@ -1007,6 +1059,7 @@ int main(void) {
   test_tls13_large_transfer();
   test_tls13_context_overhead();
   test_tls13_io_functions();
+  test_tls13_sni_from_tls_object();
   test_tls13_peer_info_next();
   return 0;
 }

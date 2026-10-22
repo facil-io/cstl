@@ -1,6 +1,26 @@
 #ifndef H___TEST_HELPERS___H
 #define H___TEST_HELPERS___H
 
+/* *****************************************************************************
+Opt-in file I/O hooks (define TEST_FD_HOOKS before including this file)
+***************************************************************************** */
+#ifdef TEST_FD_HOOKS
+#include <stdint.h>
+#include <sys/types.h>
+static ssize_t test_fd_pread_hook(int fd, void *buf, size_t len, off_t at);
+static int test_fd_fsync_hook(int fd);
+static ssize_t test_fd_copy_range_hook(int in,
+                                       int64_t *in_at,
+                                       int out,
+                                       int64_t *out_at,
+                                       size_t len);
+#define FIO___FD_PREAD(fd, buf, len, at)                                       \
+  test_fd_pread_hook((fd), (buf), (len), (at))
+#define FIO___FILENAME_FSYNC(fd) test_fd_fsync_hook((fd))
+#define FIO___FILENAME_COPY_RANGE(in, in_at, out, out_at, len)                 \
+  test_fd_copy_range_hook((in), (in_at), (out), (out_at), (len))
+#endif /* TEST_FD_HOOKS */
+
 #define FIO_LOG
 #define FIO_CORE
 #include "fio-stl/include.h"
@@ -244,5 +264,170 @@ FIO_SFUNC void fio_test_hash_function(fio__hashing_func_fn h,
   }
   FIO_MEM_FREE(buffer_mem, (buffer_len + mem_alignment_offset) + 64);
 }
+
+/* *****************************************************************************
+Test-owned temporary folder helpers (POSIX only)
+***************************************************************************** */
+#if FIO_OS_POSIX
+#include <dirent.h>
+
+/** Counts the entries of folder `path` (without `.` / `..`); -1 on error. */
+FIO_SFUNC long test_dir_count(const char *path) {
+  DIR *dir = opendir(path);
+  if (!dir)
+    return -1;
+  long count = 0;
+  for (struct dirent *e; (e = readdir(dir));) {
+    if (e->d_name[0] == '.' &&
+        (!e->d_name[1] || (e->d_name[1] == '.' && !e->d_name[2])))
+      continue;
+    ++count;
+  }
+  closedir(dir);
+  return count;
+}
+
+/** Sets `TMPDIR` to `path`, returning the old value (free with restore). */
+FIO_SFUNC char *test_tmpdir_set(const char *path) {
+  const char *old = getenv("TMPDIR");
+  char *r = old ? strdup(old) : NULL;
+  FIO_ASSERT(!setenv("TMPDIR", path, 1), "setenv(TMPDIR) failed");
+  return r;
+}
+
+/** Restores the `TMPDIR` value returned by `test_tmpdir_set`. */
+FIO_SFUNC void test_tmpdir_restore(char *old) {
+  if (old) {
+    setenv("TMPDIR", old, 1);
+    free(old);
+  } else {
+    unsetenv("TMPDIR");
+  }
+}
+#endif /* FIO_OS_POSIX */
+
+/* *****************************************************************************
+Opt-in file I/O hooks - implementation (see TEST_FD_HOOKS above)
+***************************************************************************** */
+#ifdef TEST_FD_HOOKS
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
+
+/** `FIO___FD_PREAD` hook state (reset with `test_fd_hooks_reset`). */
+static struct {
+  size_t eintr;      /* the next `eintr` calls fail with EINTR */
+  size_t max;        /* > 0: max bytes per call (partial reads) */
+  int64_t fail_at;   /* >= 0: reads stop at this offset (short read) */
+  int fail_errno;    /* at `fail_at`: 0 = EOF (returns 0), else -1 + errno */
+  size_t calls;      /* calls made */
+  size_t eintr_seen; /* EINTR failures injected */
+} test_fd_read;
+
+/** `FIO___FILENAME_FSYNC` hook state. */
+static struct {
+  int fail_errno; /* != 0: fsync fails with this errno */
+  size_t calls;
+} test_fd_fsync;
+
+/** `FIO___FILENAME_COPY_RANGE` hook state. */
+static struct {
+  int emulate;    /* 1: pread + pwrite; 0: Linux syscall (else ENOSYS) */
+  size_t limit;   /* stop after `limit` bytes (total, see `fail_errno`) */
+  int fail_errno; /* at `limit`: 0 = returns 0 (EOF like), else -1 + errno */
+  size_t max;     /* > 0: max bytes per call */
+  size_t calls;   /* calls made */
+  size_t bytes;   /* bytes copied */
+} test_fd_copy;
+
+/** Resets all file I/O hooks (no injected failures). */
+FIO_SFUNC void test_fd_hooks_reset(void) {
+  FIO_MEMSET(&test_fd_read, 0, sizeof(test_fd_read));
+  FIO_MEMSET(&test_fd_fsync, 0, sizeof(test_fd_fsync));
+  FIO_MEMSET(&test_fd_copy, 0, sizeof(test_fd_copy));
+  test_fd_read.fail_at = -1;
+  test_fd_copy.limit = (size_t)-1;
+}
+FIO_CONSTRUCTOR(test_fd_hooks_init) { test_fd_hooks_reset(); }
+
+static ssize_t test_fd_pread_hook(int fd, void *buf, size_t len, off_t at) {
+  ++test_fd_read.calls;
+  if (test_fd_read.eintr) {
+    --test_fd_read.eintr;
+    ++test_fd_read.eintr_seen;
+    errno = EINTR;
+    return -1;
+  }
+  if (test_fd_read.fail_at >= 0 && at >= 0 &&
+      (int64_t)at + (int64_t)len > test_fd_read.fail_at) {
+    if ((int64_t)at >= test_fd_read.fail_at) {
+      if (!test_fd_read.fail_errno)
+        return 0;
+      errno = test_fd_read.fail_errno;
+      return -1;
+    }
+    len = (size_t)(test_fd_read.fail_at - (int64_t)at);
+  }
+  if (test_fd_read.max && len > test_fd_read.max)
+    len = test_fd_read.max;
+  return fio___fd_pread(fd, buf, len, at);
+}
+
+static int test_fd_fsync_hook(int fd) {
+  ++test_fd_fsync.calls;
+  if (test_fd_fsync.fail_errno) {
+    errno = test_fd_fsync.fail_errno;
+    return -1;
+  }
+#if FIO_OS_WIN
+  return _commit(fd);
+#else
+  return fsync(fd);
+#endif
+}
+
+static ssize_t test_fd_copy_range_hook(int in,
+                                       int64_t *in_at,
+                                       int out,
+                                       int64_t *out_at,
+                                       size_t len) {
+  ++test_fd_copy.calls;
+  if (test_fd_copy.limit != (size_t)-1) {
+    if (test_fd_copy.bytes >= test_fd_copy.limit) {
+      if (!test_fd_copy.fail_errno)
+        return 0;
+      errno = test_fd_copy.fail_errno;
+      return -1;
+    }
+    if (len > test_fd_copy.limit - test_fd_copy.bytes)
+      len = test_fd_copy.limit - test_fd_copy.bytes;
+  }
+  if (test_fd_copy.max && len > test_fd_copy.max)
+    len = test_fd_copy.max;
+  ssize_t r = -1;
+  if (test_fd_copy.emulate) {
+    char tmp[4096];
+    if (len > sizeof(tmp))
+      len = sizeof(tmp);
+    r = fio___fd_pread(in, tmp, len, (off_t)*in_at);
+    if (r > 0)
+      r = pwrite(out, tmp, (size_t)r, (off_t)*out_at);
+    if (r > 0) {
+      *in_at += r;
+      *out_at += r;
+    }
+  } else {
+#if defined(__linux__) && defined(SYS_copy_file_range)
+    r = (ssize_t)syscall(SYS_copy_file_range, in, in_at, out, out_at, len, 0U);
+#else
+    errno = ENOSYS;
+    (void)in, (void)in_at, (void)out, (void)out_at;
+#endif
+  }
+  if (r > 0)
+    test_fd_copy.bytes += (size_t)r;
+  return r;
+}
+#endif /* TEST_FD_HOOKS */
 
 #endif

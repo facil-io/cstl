@@ -908,13 +908,23 @@ FIO_SFUNC void *fio___tls13_build_context(fio_io_tls_s *tls,
 
   /* For client, extract server name from TLS object for SNI */
   if (is_client) {
-    FIO_IMAP_EACH(fio___io_tls_cert_map, &tls->cert, i) {
-      fio_buf_info_s nm = fio_keystr_buf(&tls->cert.ary[i].nm);
-      if (nm.buf && nm.len > 0 && nm.len < sizeof(ctx->server_name)) {
-        FIO_MEMCPY(ctx->server_name, nm.buf, nm.len);
-        ctx->server_name[nm.len] = '\0';
-        FIO_LOG_DEBUG2("TLS 1.3: extracted SNI hostname: %s", ctx->server_name);
-        break;
+    /* Prefer the explicit SNI host name (set from the URL by fio_io_connect). */
+    fio_buf_info_s sni = fio_keystr_buf(&tls->sni);
+    if (sni.buf && sni.len && sni.len < sizeof(ctx->server_name)) {
+      FIO_MEMCPY(ctx->server_name, sni.buf, sni.len);
+      ctx->server_name[sni.len] = '\0';
+      FIO_LOG_DEBUG2("TLS 1.3: extracted SNI hostname: %s", ctx->server_name);
+    } else {
+      /* Fall back to the first certificate name (legacy behavior). */
+      FIO_IMAP_EACH(fio___io_tls_cert_map, &tls->cert, i) {
+        fio_buf_info_s nm = fio_keystr_buf(&tls->cert.ary[i].nm);
+        if (nm.buf && nm.len > 0 && nm.len < sizeof(ctx->server_name)) {
+          FIO_MEMCPY(ctx->server_name, nm.buf, nm.len);
+          ctx->server_name[nm.len] = '\0';
+          FIO_LOG_DEBUG2("TLS 1.3: extracted SNI hostname: %s",
+                         ctx->server_name);
+          break;
+        }
       }
     }
 #if defined(H___FIO_X509___H) && defined(H___FIO_PEM___H)

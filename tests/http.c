@@ -482,6 +482,107 @@ static void test_listen_and_route(void) {
   fio_io_listen_stop((fio_io_listener_s *)l);
 }
 
+static size_t test_on_stop_listener_calls;
+static size_t test_on_stop_route_calls;
+static void test_on_stop_listener(fio_http_settings_s *s) {
+  FIO_ASSERT(s->udata == (void *)(uintptr_t)0xABCD,
+             "listener on_stop: unexpected udata %p",
+             s->udata);
+  ++test_on_stop_listener_calls;
+}
+static void test_on_stop_route(fio_http_settings_s *s) {
+  FIO_ASSERT(s->udata == (void *)(uintptr_t)0x1111 ||
+                 s->udata == (void *)(uintptr_t)0x2222,
+             "route on_stop: unexpected udata %p",
+             s->udata);
+  ++test_on_stop_route_calls;
+}
+
+static void test_on_stop_not_inherited(void) {
+  fprintf(stderr, "  * on_stop: routes don't inherit the listener's\n");
+  test_on_stop_listener_calls = test_on_stop_route_calls = 0;
+  fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                           .udata = (void *)(uintptr_t)0xABCD,
+                                           .on_http = test_http_noop_on_http,
+                                           .on_stop = test_on_stop_listener);
+  FIO_ASSERT(l, "on_stop: listener creation failed");
+  /* inherits udata, but not on_stop */
+  FIO_ASSERT(!fio_http_route(l, "/a", .on_http = test_http_noop_on_http),
+             "on_stop: route /a failed");
+  FIO_ASSERT(fio_http_route_settings(l, "/a")->on_stop !=
+                 test_on_stop_listener,
+             "on_stop: route /a inherited the listener's on_stop");
+  FIO_ASSERT(!fio_http_route(l,
+                             "/b",
+                             .udata = (void *)(uintptr_t)0x1111,
+                             .on_http = test_http_noop_on_http,
+                             .on_stop = test_on_stop_route),
+             "on_stop: route /b failed");
+  /* replacing a route stops the old one */
+  FIO_ASSERT(!fio_http_route(l,
+                             "/b",
+                             .udata = (void *)(uintptr_t)0x2222,
+                             .on_http = test_http_noop_on_http,
+                             .on_stop = test_on_stop_route),
+             "on_stop: replacing route /b failed");
+  FIO_ASSERT(test_on_stop_route_calls == 1,
+             "on_stop: replaced route should stop once (%zu)",
+             test_on_stop_route_calls);
+  FIO_ASSERT(!test_on_stop_listener_calls,
+             "on_stop: listener stopped too early");
+  /* explicitly sharing the listener's on_stop (and udata) is still stopped
+   * on replacement, as it is on release */
+  for (int i = 0; i < 2; ++i)
+    FIO_ASSERT(!fio_http_route(l,
+                               "/c",
+                               .on_http = test_http_noop_on_http,
+                               .on_stop = test_on_stop_listener),
+               "on_stop: route /c failed");
+  FIO_ASSERT(test_on_stop_listener_calls == 1,
+             "on_stop: replaced route /c should stop once (%zu)",
+             test_on_stop_listener_calls);
+  fio_io_listen_stop((fio_io_listener_s *)l);
+  fprintf(stderr,
+          "    (after listen_stop: listener %zu, routes %zu)\n",
+          test_on_stop_listener_calls,
+          test_on_stop_route_calls);
+  FIO_ASSERT(test_on_stop_listener_calls == 3,
+             "on_stop: listener + /c on_stop should run once each (%zu)",
+             test_on_stop_listener_calls);
+  FIO_ASSERT(test_on_stop_route_calls == 2,
+             "on_stop: route on_stop should run once more (%zu)",
+             test_on_stop_route_calls);
+}
+
+static void test_max_params_settings(void) {
+  fprintf(stderr, "  * max_params listener and route settings\n");
+  fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                           .on_http = test_http_noop_on_http,
+                                           .max_params = 3);
+  FIO_ASSERT(l, "max_params: listener creation failed");
+  FIO_ASSERT(fio_http_listener_settings(l)->max_params == 3,
+             "max_params: listener setting lost");
+  FIO_ASSERT(!fio_http_route(l, "/small", .on_http = test_http_noop_on_http),
+             "max_params: inherited route creation failed");
+  FIO_ASSERT(fio_http_route_settings(l, "/small")->max_params == 3,
+             "max_params: route did not inherit listener limit");
+  FIO_ASSERT(!fio_http_route(l,
+                             "/large",
+                             .on_http = test_http_noop_on_http,
+                             .max_params = 5),
+             "max_params: overridden route creation failed");
+  FIO_ASSERT(fio_http_route_settings(l, "/large")->max_params == 5,
+             "max_params: route override lost");
+  fio_io_listen_stop((fio_io_listener_s *)l);
+
+  l = fio_http_listen("tcp://127.0.0.1:0", .on_http = test_http_noop_on_http);
+  FIO_ASSERT(l, "max_params: default listener creation failed");
+  FIO_ASSERT(fio_http_listener_settings(l)->max_params ==
+                 FIO_HTTP_PARAMS_MAX_FIELDS,
+             "max_params: default listener limit mismatch");
+  fio_io_listen_stop((fio_io_listener_s *)l);
+}
+
 static void test_settings_and_io_queries(void) {
   fprintf(stderr, "  * settings and IO queries on unconnected handle\n");
 
@@ -1860,6 +1961,188 @@ static void test_http_client_server_roundtrip(void) {
 }
 #undef TEST_RT_BODY
 
+/* Live request handles resolve the parser's limit from their route settings. */
+static struct {
+  unsigned port;
+  volatile int server_calls;
+  volatile int client_calls;
+  volatile int failed;
+  volatile int timed_out;
+  volatile int active;
+} test_params_live;
+
+static fio_json_obj_result_s test_params_scalar(void *udata) {
+  return (fio_json_obj_result_s){.obj = udata};
+}
+static fio_json_obj_result_s test_params_number(void *udata, int64_t n) {
+  (void)n;
+  return (fio_json_obj_result_s){.obj = udata};
+}
+static fio_json_obj_result_s test_params_float(void *udata, double n) {
+  (void)n;
+  return (fio_json_obj_result_s){.obj = udata};
+}
+static fio_json_obj_result_s test_params_string(void *udata,
+                                                fio_buf_info_s s) {
+  (void)s;
+  return (fio_json_obj_result_s){.obj = udata};
+}
+static fio_json_push_result_s test_params_map(void *udata,
+                                              void *parent,
+                                              fio_buf_info_s key) {
+  (void)udata, (void)parent, (void)key;
+  void *root = malloc(1);
+  FIO_ASSERT(root, "max_params: root allocation failed");
+  return (fio_json_push_result_s){.obj = root};
+}
+static fio_json_obj_result_s test_params_map_push(void *udata,
+                                                  void *map,
+                                                  fio_buf_info_s key,
+                                                  void *value) {
+  (void)map, (void)key, (void)value;
+  ++*(int *)udata;
+  return (fio_json_obj_result_s){0};
+}
+static int test_params_array_push(void *udata, void *array, void *value) {
+  (void)udata, (void)array, (void)value;
+  return 0;
+}
+static int test_params_is_map(void *udata, void *obj) {
+  (void)udata, (void)obj;
+  return 1;
+}
+static int test_params_is_array(void *udata, void *obj) {
+  (void)udata, (void)obj;
+  return 0;
+}
+static void test_params_free_unused(void *udata, void *obj) {
+  (void)udata, (void)obj;
+}
+static const fio_http_params_parse_callbacks_s test_params_callbacks = {
+    .on_null = test_params_scalar,
+    .on_true = test_params_scalar,
+    .on_false = test_params_scalar,
+    .on_number = test_params_number,
+    .on_float = test_params_float,
+    .on_string = test_params_string,
+    .on_string_simple = test_params_string,
+    .on_map = test_params_map,
+    .on_array = test_params_map,
+    .map_push = test_params_map_push,
+    .array_push = test_params_array_push,
+    .is_map = test_params_is_map,
+    .is_array = test_params_is_array,
+    .free_unused_object = test_params_free_unused,
+};
+
+static void test_params_server_on_http(fio_http_s *h) {
+  int stored = 0; /* stored fields */
+  fio_http_params_parse_result_s r =
+      fio_http_params_parse(h,
+                            .callbacks = &test_params_callbacks,
+                            .udata = &stored);
+  fio_str_info_s original_path = fio_http_opath(h);
+  int big = original_path.len == 4 && !FIO_MEMCMP(original_path.buf, "/big", 4);
+  int expected = big ? 4 : 3;
+  /* the result is the (partial) root on success and on error: we free it */
+  if (stored != expected || !r.result ||
+      (!!r.err != (test_params_live.server_calls == 1 && !big))) {
+    test_params_live.failed = 1;
+  }
+  free(r.result);
+  fio_http_status_set(h, r.err ? 400 : 200);
+  fio_http_write(h, .buf = (char *)(big ? "4" : "3"), .len = 1, .finish = 1);
+  ++test_params_live.server_calls;
+}
+
+static void test_params_client_on_http(fio_http_s *h) {
+  int index = test_params_live.client_calls++;
+  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  if (index >= 3 || fio_http_status(h) != (index == 1 ? 400 : 200) ||
+      body.len != 1 || body.buf[0] != (index == 2 ? '4' : '3')) {
+    test_params_live.failed = 1;
+  }
+  if (index >= 2) {
+    fio_io_stop();
+    return;
+  }
+  /* request 2 sets the query on the handle; request 3 sends it in the URL */
+  char url[128];
+  fio_http_s *request = NULL;
+  int len;
+  if (index == 0) {
+    len = snprintf(url,
+                   sizeof(url),
+                   "http://127.0.0.1:%u/p",
+                   test_params_live.port);
+    request = fio_http_new();
+    fio_http_query_set(request, FIO_STR_INFO1((char *)"a=1&b=2&c=3&d=4"));
+  } else {
+    len = snprintf(url,
+                   sizeof(url),
+                   "http://127.0.0.1:%u/big?a=1&b=2&c=3&d=4",
+                   test_params_live.port);
+  }
+  if (len < 0 || (size_t)len >= sizeof(url) ||
+      !fio_http_connect(url, request, .on_http = test_params_client_on_http)) {
+    test_params_live.failed = 1;
+    fio_io_stop();
+  }
+}
+
+static int test_params_timeout(void *arg1, void *arg2) {
+  (void)arg1, (void)arg2;
+  if (test_params_live.active) {
+    test_params_live.timed_out = 1;
+    fio_io_stop();
+  }
+  return -1;
+}
+
+static void test_http_live_max_params(void) {
+  fprintf(stderr, "  * live max_params listener and route limits\n");
+  static fio_io_async_s worker = FIO_IO_ASYN_INIT;
+  fio_io_async_attach(&worker, 1);
+  FIO_MEMSET(&test_params_live, 0, sizeof(test_params_live));
+  fio_io_run_every(.fn = test_params_timeout, .every = 3000, .repetitions = 1);
+  fio_http_listener_s *l =
+      fio_http_listen("tcp://127.0.0.1:0",
+                      .on_http = test_params_server_on_http,
+                      .queue = &worker,
+                      .max_params = 3);
+  FIO_ASSERT(l, "max_params: live listener failed");
+  FIO_ASSERT(!fio_http_route(l,
+                             "/big",
+                             .on_http = test_params_server_on_http,
+                             .max_params = 10),
+             "max_params: live route failed");
+  test_params_live.port = test_ws_listener_port(l);
+  FIO_ASSERT(test_params_live.port, "max_params: port discovery failed");
+  char url[128];
+  snprintf(url,
+           sizeof(url),
+           "http://127.0.0.1:%u/p?a=1&b=2&c=3",
+           test_params_live.port);
+  FIO_ASSERT(fio_http_connect(url,
+                              NULL,
+                              .on_http = test_params_client_on_http,
+                              .queue = &worker),
+             "max_params: client connect failed");
+  test_params_live.active = 1;
+  fio_io_start(0);
+  test_params_live.active = 0;
+  fio_io_listen_stop((fio_io_listener_s *)l);
+  FIO_ASSERT(!test_params_live.timed_out,
+             "max_params: live roundtrip timed out");
+  FIO_ASSERT(!test_params_live.failed,
+             "max_params: parser result/status/field count mismatch");
+  FIO_ASSERT(test_params_live.server_calls == 3 &&
+                 test_params_live.client_calls == 3,
+             "max_params: expected three server and client callbacks (%d/%d)",
+             test_params_live.server_calls,
+             test_params_live.client_calls);
+}
+
 /* ===========================================================================
    Client: interim 1xx responses and HEAD responses (live reactor)
 
@@ -3034,6 +3317,85 @@ static void test_http_server_h1_framing(void) {
 }
 
 /* ===========================================================================
+   Server: a request body that can't be stored -> 500 + close (live reactor)
+
+   `TMPDIR` names a missing folder, so the body can't spill past the RAM limit.
+   The body is exactly one byte past the limit, so the failing chunk is the
+   last one and the server has read everything (no TCP reset on close).
+   ===========================================================================
+ */
+
+#if FIO_OS_POSIX
+static void test_http_server_body_store_failure(void) {
+  fprintf(stderr, "  * server body storage failure -> 500 + close\n");
+  static fio_io_protocol_s raw_client;
+  const size_t body_len = (size_t)FIO_HTTP_BODY_RAM_LIMIT + 1;
+  char head[160];
+  int head_len = snprintf(head,
+                          sizeof(head),
+                          "POST /upload HTTP/1.1\r\nHost: x\r\n"
+                          "Content-Length: %zu\r\n\r\n",
+                          body_len);
+  char *request = (char *)malloc((size_t)head_len + body_len + 1);
+  FIO_ASSERT_ALLOC(request);
+  FIO_MEMCPY(request, head, (size_t)head_len);
+  FIO_MEMSET(request + head_len, 'a', body_len);
+  request[head_len + body_len] = 0;
+
+  raw_client = (fio_io_protocol_s){
+      .on_attach = test_h1f_client_on_attach,
+      .on_data = test_h1f_client_on_data,
+      .on_close = test_h1f_client_on_close,
+      .on_timeout = fio_io_touch,
+      .timeout = 10000,
+  };
+  FIO_MEMSET(&test_h1f, 0, sizeof(test_h1f));
+  test_h1f.client_fd = FIO_SOCKET_INVALID;
+  test_h1f.generation = (uintptr_t)0xDA7A;
+  test_h1f.request = request;
+  char *old_tmpdir = test_tmpdir_set("tmp/test-http-no-such-folder/nope");
+  fio_io_run_every(.fn = test_h1f_timeout,
+                   .udata1 = (void *)test_h1f.generation,
+                   .every = 3000,
+                   .repetitions = 1);
+  fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                           .on_http = test_h1f_server_on_http,
+                                           .log = 0);
+  FIO_ASSERT(l, "body store failure: listener failed");
+  unsigned port = test_ws_listener_port(l);
+  FIO_ASSERT(port, "body store failure: listener port discovery failed");
+  char url[128];
+  snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", port);
+  FIO_ASSERT(fio_io_connect(url,
+                            .protocol = &raw_client,
+                            .on_failed = test_h1f_client_on_failed),
+             "body store failure: raw connect failed");
+  test_h1f.active = 1;
+  fio_io_start(0);
+  test_h1f.active = 0;
+  fio_io_listen_stop((fio_io_listener_s *)l);
+  fio_queue_perform_all(fio_io_queue());
+  test_tmpdir_restore(old_tmpdir);
+  free(request);
+
+  FIO_ASSERT(!test_h1f.connect_failed && !test_h1f.overflow,
+             "body store failure: connect / capture failure");
+  FIO_ASSERT(!test_h1f.timed_out,
+             "body store failure: server kept the connection open:\n%s",
+             test_h1f.wire);
+  FIO_ASSERT(!test_h1f.paths[0],
+             "body store failure: request dispatched (%s)",
+             test_h1f.paths);
+  FIO_ASSERT(!strncmp(test_h1f.wire, "HTTP/1.1 500 ", 13) &&
+                 test_h1f_count("HTTP/1.") == 1,
+             "body store failure: expected a single 500 response:\n%s",
+             test_h1f.wire);
+  FIO_ASSERT(test_h1f.client_closes == 1 && test_h1f.eof,
+             "body store failure: raw peer must observe clean EOF");
+}
+#endif /* FIO_OS_POSIX */
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -3097,6 +3459,8 @@ int main(void) {
   test_http_method_helpers();
   test_resource_action();
   test_listen_and_route();
+  test_on_stop_not_inherited();
+  test_max_params_settings();
   test_settings_and_io_queries();
   test_static_file_response();
   test_error_response();
@@ -3112,10 +3476,14 @@ int main(void) {
   test_static_compress_attached_readonly();
   test_static_compress_detached_creation();
   test_http_client_server_roundtrip();
+  test_http_live_max_params();
   test_http_client_interim_and_head();
   test_http_server_rejects_response();
   test_http_server_close_pipeline();
   test_http_server_h1_framing();
+#if FIO_OS_POSIX
+  test_http_server_body_store_failure();
+#endif
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

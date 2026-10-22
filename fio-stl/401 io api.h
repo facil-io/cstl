@@ -857,6 +857,20 @@ SFUNC fio_io_tls_s *fio_io_tls_trust_add(fio_io_tls_s *,
                                          const char *public_cert_file);
 
 /**
+ * Sets the SNI (Server Name Indication) host name a TLS client should send
+ * during the handshake (RFC 6066).
+ *
+ * `fio_io_connect` sets this automatically from the URL's host name, so
+ * manual calls are rarely needed.
+ *
+ * NULL / empty host names and IP literals (IPv4 / IPv6) are silently
+ * ignored, leaving any previously set name untouched.
+ */
+SFUNC fio_io_tls_s *fio_io_tls_sni_set(fio_io_tls_s *tls,
+                                       const char *hostname,
+                                       size_t hostname_len);
+
+/**
  * Returns the number of `fio_io_tls_cert_add` instructions.
  *
  * This could be used when deciding if to add a NULL instruction (self-signed).

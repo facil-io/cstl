@@ -10,6 +10,7 @@ All roundtrips use in-process loopback or socketpair; no external processes.
 #include "test-helpers.h"
 
 #define FIO_SOCK
+#define FIO_FILES
 #include FIO_INCLUDE_FILE
 
 #if defined(_WIN32)
@@ -74,6 +75,32 @@ static void test_sock_open_and_readwrite(void) {
 
   fio_buf_info_s peer = fio_sock_peer_addr(cl);
   FIO_ASSERT(peer.buf && peer.len, "peer address should be available");
+  FIO_ASSERT(peer.len == 9 && !memcmp(peer.buf, "127.0.0.1", 9) &&
+                 !peer.buf[9],
+             "peer address should be \"127.0.0.1\", got \"%.*s\"",
+             (int)peer.len,
+             peer.buf);
+  { /* 128 calls in a row use 128 separate (non-overlapping) slots */
+    fio_buf_info_s r[128];
+    for (size_t i = 0; i < 128; ++i)
+      r[i] = fio_sock_peer_addr(i & 1 ? accepted : cl);
+    for (size_t i = 0; i < 128; ++i) {
+      FIO_ASSERT(r[i].len == 9 && !memcmp(r[i].buf, "127.0.0.1", 9),
+                 "peer_addr result %zu overwritten: \"%.*s\"",
+                 i,
+                 (int)r[i].len,
+                 r[i].buf);
+      for (size_t j = 0; j < i; ++j) {
+        size_t d = (size_t)(r[i].buf > r[j].buf ? r[i].buf - r[j].buf
+                                                : r[j].buf - r[i].buf);
+        FIO_ASSERT(d >= 64,
+                   "peer_addr results %zu and %zu overlap (%zu bytes apart)",
+                   j,
+                   i,
+                   d);
+      }
+    }
+  }
 
   fio_sock_close(accepted);
   fio_sock_close(cl);
@@ -306,6 +333,135 @@ static void test_sock_unix(void) {
 #endif
 }
 
+#if defined(AF_UNIX) && !defined(_WIN32)
+#include <grp.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+
+/**
+ * Connects to the Unix socket at `path` from a child process (optionally
+ * running as `uid` / `gid`; -1 keeps the current ids). Returns 0 if connected,
+ * otherwise the child's `errno` (or 255 if the child couldn't run / drop ids).
+ */
+static int test_sock_unix_connect_as(const char *path, long uid, long gid) {
+  pid_t pid = fork();
+  FIO_ASSERT(pid != -1, "fork failed: %s", strerror(errno));
+  if (!pid) {
+    if (uid != -1) {
+      if (setgroups(0, NULL) || setgid((gid_t)gid) || setuid((uid_t)uid))
+        _exit(255);
+    }
+    struct sockaddr_un a = {0};
+    a.sun_family = AF_UNIX;
+    FIO_MEMCPY(a.sun_path, path, strlen(path) + 1);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd == -1)
+      _exit(255);
+    int r = connect(fd, (struct sockaddr *)&a, sizeof(a));
+    int e = r ? (errno & 127) : 0;
+    close(fd);
+    _exit(r ? (e ? e : 254) : 0);
+  }
+  int status = 0;
+  while (waitpid(pid, &status, 0) == -1 && errno == EINTR)
+    ;
+  return WIFEXITED(status) ? WEXITSTATUS(status) : 255;
+}
+
+/** Returns the socket file's permission bits (or -1). */
+static int test_sock_unix_mode(const char *path) {
+  struct stat st;
+  if (stat(path, &st) || !S_ISSOCK(st.st_mode))
+    return -1;
+  return (int)(st.st_mode & 0777);
+}
+
+/*
+ * Public Unix sockets (FIO_SOCK_UNIX) are 0777: any process / user may connect.
+ * Private ones (FIO_SOCK_UNIX_PRIVATE) keep the process umask. File saves
+ * (fio_filename_overwrite / fio_filename_tmp) never touch the umask or socket
+ * modes. When running as root, a second uid (nobody, 65534) checks access.
+ */
+static void test_sock_unix_permissions(void) {
+#if defined(P_tmpdir) && !defined(__MINGW32__)
+  static const char *const path = P_tmpdir "/tmp_sock_perm_facil_io_cstl.sock";
+  static const char *const file = P_tmpdir "/tmp_sock_perm_facil_io_cstl.txt";
+#else
+  static const char *const path = "./tmp_sock_perm_facil_io_cstl.sock";
+  static const char *const file = "./tmp_sock_perm_facil_io_cstl.txt";
+#endif
+  const long other = 65534; /* nobody */
+  const int as_root = !geteuid();
+  const mode_t um_org = umask(077); /* owner-only: private must deny others */
+  unlink(path);
+  unlink(file);
+
+  /* file helpers before / after sockets keep the umask and file modes */
+  FIO_ASSERT(!fio_filename_overwrite(file, "x", 1), "overwrite failed");
+  int tmp = fio_filename_tmp();
+  FIO_ASSERT(tmp != -1, "fio_filename_tmp failed");
+  close(tmp);
+  FIO_ASSERT(umask(077) == 077, "file helpers changed the umask");
+
+  /* public socket */
+  fio_socket_i srv = fio_sock_open(path, NULL, FIO_SOCK_UNIX | FIO_SOCK_SERVER);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv), "public unix server failed");
+  FIO_ASSERT(umask(077) == 077, "public unix socket leaked a umask change");
+  int mode = test_sock_unix_mode(path);
+  FIO_ASSERT(mode == 0777, "public unix socket mode %o != 777", mode);
+  FIO_ASSERT(!fio_filename_overwrite(file, "xy", 2), "overwrite (2) failed");
+  FIO_ASSERT(test_sock_unix_mode(path) == 0777,
+             "file save changed the public socket mode");
+  struct stat st;
+  FIO_ASSERT(!stat(file, &st) && (st.st_mode & 0777) == 0600,
+             "saved file mode %o != 600 (0666 & umask 077)",
+             (unsigned)(st.st_mode & 0777));
+  int r = test_sock_unix_connect_as(path, -1, -1);
+  FIO_ASSERT(!r, "public: other process (same uid) can't connect (%d)", r);
+  if (as_root) {
+    r = test_sock_unix_connect_as(path, other, other);
+    FIO_ASSERT(!r, "public: uid %ld can't connect (%d)", other, r);
+  }
+  fprintf(stderr,
+          "* AF_UNIX public socket: mode %o, same uid: connected, "
+          "uid %ld: %s\n",
+          mode,
+          other,
+          as_root ? "connected" : "skipped (not root)");
+  fio_sock_close(srv);
+  unlink(path);
+
+  /* private socket */
+  srv = fio_sock_open(path, NULL, FIO_SOCK_UNIX_PRIVATE | FIO_SOCK_SERVER);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv), "private unix server failed");
+  mode = test_sock_unix_mode(path);
+  FIO_ASSERT(mode == 0700, "private unix socket mode %o != 700", mode);
+  r = test_sock_unix_connect_as(path, -1, -1);
+  FIO_ASSERT(!r, "private: owner (other process) can't connect (%d)", r);
+  if (as_root) {
+    r = test_sock_unix_connect_as(path, other, other);
+    FIO_ASSERT(r == EACCES,
+               "private: uid %ld should get EACCES (got %d)",
+               other,
+               r);
+  }
+  fprintf(stderr,
+          "* AF_UNIX private socket: mode %o, owner: connected, "
+          "uid %ld: %s\n",
+          mode,
+          other,
+          as_root ? "EACCES (denied)" : "skipped (not root)");
+  fio_sock_close(srv);
+  unlink(path);
+  unlink(file);
+  umask(um_org);
+}
+#else
+static void test_sock_unix_permissions(void) {
+  fprintf(stderr, "* AF_UNIX permissions: skipped on this platform\n");
+}
+#endif
+
 static void test_sock_maximize_limits(void) {
   size_t limit = fio_sock_maximize_limits(0);
   FIO_ASSERT(limit > 0, "fio_sock_maximize_limits should return > 0");
@@ -321,6 +477,7 @@ int main(void) {
   test_sock_socketpair();
   test_sock_udp();
   test_sock_unix();
+  test_sock_unix_permissions();
   test_sock_maximize_limits();
   return 0;
 }

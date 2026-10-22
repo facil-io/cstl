@@ -223,13 +223,24 @@ FIO_SFUNC void fio___io_work(int is_worker) {
 Worker Forking
 ***************************************************************************** */
 static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2);
+static void fio___io_unwait_forked_worker(void *thr_);
 
 static void fio___io_wait_for_worker(void *thr_) {
   fio_thread_t t = (fio_thread_t)(uintptr_t)thr_;
   fio_state_callback_remove(FIO_CALL_ON_STOP,
                             fio___io_wait_for_worker,
                             (void *)(uintptr_t)t);
+  fio_state_callback_remove(FIO_CALL_IN_CHILD,
+                            fio___io_unwait_forked_worker,
+                            thr_);
   fio_thread_join(&t);
+}
+
+static void fio___io_unwait_forked_worker(void *thr_) {
+  fio_state_callback_remove(FIO_CALL_ON_STOP, fio___io_wait_for_worker, thr_);
+  fio_state_callback_remove(FIO_CALL_IN_CHILD,
+                            fio___io_unwait_forked_worker,
+                            thr_);
 }
 
 /** Worker sentinel */
@@ -239,6 +250,9 @@ static void *fio___io_worker_sentinel(void *pid_data) {
   int status = 0;
   (void)status;
   fio_thread_t thr = fio_thread_current();
+  fio_state_callback_add(FIO_CALL_IN_CHILD,
+                         fio___io_unwait_forked_worker,
+                         (void *)thr);
   fio_state_callback_add(FIO_CALL_ON_STOP,
                          fio___io_wait_for_worker,
                          (void *)thr);
@@ -744,7 +758,7 @@ test_url:
     if (!args.url)
       args.url = "0.0.0.0";
   }
-  url_alt.len = strlen(args.url);
+  url_alt.len = FIO_STRLEN(args.url);
   if (url_alt.len > 2024) {
     FIO_LOG_ERROR("binding address / url too long.");
     args.url = NULL;
@@ -893,9 +907,11 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   if (!args.timeout)
     args.timeout = 30000;
 
-  size_t url_len = strlen(args.url);
+  size_t url_len = FIO_STRLEN(args.url);
   fio_url_s url = fio_url_parse(args.url, url_len);
   args.tls = fio_io_tls_from_url(args.tls, url);
+  if (args.tls && url.host.len)
+    fio_io_tls_sni_set(args.tls, url.host.buf, url.host.len);
   /* guarded: the protocol may already have live IOs (e.g., shared with a
    * listener or another client) - re-initializing resets its IO lists. */
   fio___io_protocol_init_test(args.protocol, !!args.tls);

@@ -264,7 +264,7 @@ FIO_SFUNC void fio___http_controller_sse_write_body(
   }
   if (args.dealloc && args.buf)
     args.dealloc((void *)args.buf);
-  if (!args.buf && (unsigned)(args.fd + 1) > 1)
+  if (!args.buf && (unsigned)(args.fd + 1) > 1 && !args.copy)
     close(args.fd);
 }
 

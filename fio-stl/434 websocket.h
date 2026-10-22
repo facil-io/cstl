@@ -712,7 +712,7 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
   if (c->is_client) {
     /* Generic writes must mask the actual payload, not only set the MASK bit.
      * An fd cannot be sent directly: read it before framing, then close it
-     * as promised by the HTTP generic-write contract (even with copy=1). */
+     * (unless `copy` is set, as with every other write path). */
     const size_t framed_len = fio_websocket_write_len(args.len, 1);
     char *frame = NULL;
     if (args.len <= SIZE_MAX - args.offset && framed_len <= UINT32_MAX &&
@@ -747,7 +747,7 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
                 args.len,
                 ((uint64_t)mask << 32) | (uint64_t)mask);
     }
-    if (!args.buf && (unsigned)(args.fd + 1) > 1)
+    if (!args.buf && (unsigned)(args.fd + 1) > 1 && !args.copy)
       close(args.fd);
     if (args.dealloc && args.buf)
       args.dealloc((void *)args.buf);
@@ -758,7 +758,7 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
     return;
   client_write_error:
     FIO_LOG_ERROR("WebSocket client write: couldn't frame %zu bytes", args.len);
-    if (!args.buf && (unsigned)(args.fd + 1) > 1)
+    if (!args.buf && (unsigned)(args.fd + 1) > 1 && !args.copy)
       close(args.fd);
     if (args.dealloc && args.buf)
       args.dealloc((void *)args.buf);

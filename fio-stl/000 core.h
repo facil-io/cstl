@@ -35,7 +35,7 @@ supports macros that will help detect and validate it's version.
 /** MINOR version: Deprecation, or significant features added. May break ABI. */
 #define FIO_VERSION_MINOR 8
 /** PATCH version: Bug fixes, minor features may be added. */
-#define FIO_VERSION_PATCH 2
+#define FIO_VERSION_PATCH 3
 /** Build version: optional build info (string), i.e. "beta.02" */
 /* #define FIO_VERSION_BUILD */
 
@@ -5352,6 +5352,14 @@ String and Buffer Information – Helper Macros
 /** Tests to see if memory reallocation happened. */
 #define FIO_STR_INFO_TMP_IS_REALLOCATED(name)                                  \
   (fio___stack_mem___##name != name.buf)
+
+/** Resets a `FIO_STR_INFO_TMP_VAR` to its original state. */
+#define FIO_STR_INFO_TMP_RESET(name)                                           \
+  do {                                                                         \
+    name = (fio_str_info_s){.buf = fio___stack_mem___##name,                   \
+                            .capa = (sizeof(fio___stack_mem___##name) - 1)};   \
+    fio___stack_mem___##name[0] = 0;                                           \
+  } while (0)
 
 /* *****************************************************************************
 UTF-8 Support (basic)

@@ -109,7 +109,7 @@ SFUNC fio_io_s *fio_http_connect FIO_NOOP(const char *url,
   fio___http_settings_validate(&s, 1);
   fio_url_s u = (fio_url_s){0};
   if (url)
-    u = fio_url_parse(url, strlen(url));
+    u = fio_url_parse(url, FIO_STRLEN(url));
 
   if (!h)
     h = fio_http_new();
@@ -516,7 +516,7 @@ FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
       (unsigned)s.timeout * 1000U;
   /* fill in TLS data */
   if (url) {
-    fio_url_s u = fio_url_parse(url, strlen(url));
+    fio_url_s u = fio_url_parse(url, FIO_STRLEN(url));
     s.tls = fio_io_tls_from_url(s.tls, u);
     if (s.tls) {
       s.tls = fio_io_tls_dup(s.tls);

@@ -115,21 +115,27 @@ Opens `filename` with POSIX `open` semantics. If `filename` starts with `"~/"` (
 SFUNC int fio_filename_tmp(void);
 ```
 
-Creates a temporary file and returns its descriptor. Tries `TMPDIR`, `TMP`, `TEMP`, `P_tmpdir`, then the current directory. On Linux it attempts `O_TMPFILE` first; otherwise it builds a name prefixed with `facil_io_tmp_` and opens with `O_CREAT | O_EXCL`.
+Creates an anonymous temporary file and returns its descriptor. Tries `TMPDIR`, `TMP`, `TEMP`, `P_tmpdir`, then the current directory. On Linux it attempts `O_TMPFILE` first; otherwise it builds a name prefixed with `facil_io_tmp_` and opens with `O_CREAT | O_EXCL`. On POSIX systems the name is unlinked right after the file is opened; on Windows the file is opened with delete-on-close (`O_TEMPORARY`). Either way, the file is removed once the descriptor is closed (or the process exits), so no temporary files are left behind.
 
 **Returns:** file descriptor on success, `-1` on error.
 
 #### `fio_filename_overwrite`
 
 ```c
-FIO_IFUNC int fio_filename_overwrite(const char *filename,
-                                     const void *buf,
-                                     size_t len);
+SFUNC int fio_filename_overwrite(const char *filename,
+                                 const void *buf,
+                                 size_t len);
 ```
 
-Opens `filename` with `O_RDWR | O_CREAT | O_TRUNC`, writes `len` bytes from `buf`, and closes the file.
+Overwrites `filename` with `len` bytes from `buf`, atomically replacing any existing file: readers see either the old file or the complete new one.
 
-**Returns:** `0` on success, `-1` on error. On error the file state is undefined.
+The data is written to a new sibling file in the target's folder (`<filename>.fio-tmp-<random>`, opened with `O_CREAT | O_EXCL`, mode `0666` minus the `umask`), flushed to storage (`fsync`; `_commit` on Windows) and renamed over `filename` (`rename`; `MoveFileExA` with `MOVEFILE_REPLACE_EXISTING` on Windows). A leading `"~/"` (or `"~\\"` on Windows) is expanded exactly as by `fio_filename_open`. An empty buffer (`len == 0`) creates an empty file.
+
+**Durability:** exactly one `fsync` per save, on the new file before the rename. This makes the replace atomic across crashes: after a crash, `filename` holds either the old or the complete new content, never a partial or empty file. The folder isn't `fsync`ed (it would cost a second blocking call; `syncfs` flushes the whole file system), so the rename itself may not survive a crash (or power loss) right after the save returns: `filename` then still holds the previous version (or doesn't exist, if it was new). Call `fsync` on the folder yourself if you need the rename to be durable.
+
+**Returns:** `0` on success, `-1` on error (`errno` is preserved from the failing call; `EINVAL` for a missing `filename`, or `buf == NULL` with `len > 0`). On error, any existing `filename` is untouched and the sibling file is removed. On Windows, a failed `MoveFileExA` maps `GetLastError()` to `errno`: `ENOENT` (file / path not found), `EACCES` (access denied), `EBUSY` (sharing / lock violation), `EEXIST`, `ENOSPC` (disk full), `EXDEV` (not the same device), otherwise `EIO`.
+
+**Note:** uses fixed size stack buffers (zero allocations); over-long paths fail with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`). `fio_fd_save` does the same with a file descriptor as the source.
 
 ### Removing Files and Folders
 
@@ -218,7 +224,7 @@ Writes `len` bytes to `fd`, fragmenting the syscall into `write` blocks of up to
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
 ```
 
-Reads up to `len` bytes from `fd` starting at `start_at`. On POSIX systems with `pread`, the file offset is preserved; otherwise it seeks. Reads are fragmented to `1 << 27` byte chunks. Retries on `EINTR`.
+Reads up to `len` bytes from `fd` starting at `start_at`. On POSIX systems with `pread`, the file offset is preserved; otherwise it seeks. Reads are fragmented to `1 << 27` byte chunks. Retries on `EINTR`, and keeps reading after partial reads, so fewer than `len` bytes are returned only at EOF or on error (`errno` is set by the failing call on error and left unchanged at EOF - clear it first to tell them apart).
 
 **Parameters:**
 - `fd` - file descriptor
@@ -227,6 +233,20 @@ Reads up to `len` bytes from `fd` starting at `start_at`. On POSIX systems with 
 - `start_at` - offset; negative values seek from end
 
 **Returns:** bytes read, or `0` on error / EOF. Sets `errno = ENOENT` if `fd == -1`, `buf == NULL`, or `len == 0`.
+
+#### `fio_fd_save`
+
+```c
+SFUNC int fio_fd_save(int fd, const char *filename, size_t len);
+```
+
+Saves the first `len` bytes of the file `fd` (`[0, len)`) to `filename`, with the same atomic replace semantics, `"~/"` expansion and cleanup guarantees as `fio_filename_overwrite` (both use the same internal routine).
+
+On Linux the copy is done by the kernel (`copy_file_range`, which may share storage - reflink - on copy-on-write file systems). If the kernel copy isn't available or stops (for example `EXDEV`, `ENOSYS`, `EINVAL`, `EOPNOTSUPP`, or an early `0`), the copy continues from where it stopped with positional block reads (`fio_fd_read`) and writes, which report any real error. Elsewhere only the block copy is used.
+
+`fd` must be readable; its content isn't changed (its file offset may move on systems without `pread`). A source shorter than `len` fails with `errno == EIO` (or the read error's `errno`), never saving truncated data.
+
+**Returns:** `0` on success, `-1` on error (`EBADF` if `fd == -1`).
 
 ### File Information
 

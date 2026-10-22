@@ -19,6 +19,8 @@ typedef struct {
   char last_field_name[256];
   char last_field_value[256];
   char last_filename[256];
+  const char *expected_headers;
+  size_t empty_filename_count;
 } test_multipart_ctx_s;
 
 static void *test_on_field(void *udata,
@@ -45,9 +47,18 @@ static void *test_on_field(void *udata,
 static void *test_on_file_start(void *udata,
                                 fio_buf_info_s name,
                                 fio_buf_info_s filename,
-                                fio_buf_info_s content_type) {
+                                fio_buf_info_s content_type,
+                                fio_buf_info_s headers) {
   test_multipart_ctx_s *ctx = (test_multipart_ctx_s *)udata;
   ++ctx->file_count;
+  if (ctx->expected_headers) {
+    size_t len = FIO_STRLEN(ctx->expected_headers);
+    FIO_ASSERT(headers.len == len &&
+                   FIO_MEMCMP(headers.buf, ctx->expected_headers, len) == 0,
+               "Non-streaming raw part headers differ");
+  }
+  if (filename.buf && !filename.len)
+    ++ctx->empty_filename_count;
 
   /* Store filename for verification */
   if (filename.len < sizeof(ctx->last_filename)) {
@@ -120,6 +131,9 @@ FIO_SFUNC void fio___test_multipart_basic(void) {
 
 FIO_SFUNC void fio___test_multipart_file_upload(void) {
   test_multipart_ctx_s ctx = {0};
+  ctx.expected_headers =
+      "Content-Disposition: form-data; name=\"file1\"; "
+      "filename=\"test.txt\"\r\nContent-Type: text/plain";
 
   const char *boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
   const char *data = "------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n"
@@ -155,6 +169,23 @@ FIO_SFUNC void fio___test_multipart_file_upload(void) {
   FIO_ASSERT(FIO_MEMCMP(ctx.last_filename, "test.txt", 8) == 0,
              "Filename should be 'test.txt', got '%s'",
              ctx.last_filename);
+}
+
+FIO_SFUNC void fio___test_multipart_empty_filename(void) {
+  test_multipart_ctx_s ctx = {0};
+  const char *data =
+      "--XyZ\r\n"
+      "Content-Disposition: form-data; name=\"upload\"; filename=\"\"\r\n"
+      "\r\n"
+      "ignored\r\n"
+      "--XyZ--\r\n";
+  fio_multipart_result_s result = fio_multipart_parse(
+      &test_callbacks, &ctx, FIO_BUF_INFO1("XyZ"), data, FIO_STRLEN(data));
+  FIO_ASSERT(result.err == 0, "Empty filename parse should succeed");
+  FIO_ASSERT(ctx.empty_filename_count == 1 && ctx.file_count == 1,
+             "Empty filename must trigger file callback with non-NULL buf");
+  FIO_ASSERT(ctx.field_count == 0 && result.field_count == 0,
+             "Empty filename must not trigger field callback");
 }
 
 FIO_SFUNC void fio___test_multipart_empty(void) {
@@ -340,6 +371,7 @@ typedef struct {
   size_t file_end_calls;       /* Number of on_file_end calls */
   char accumulated_data[4096]; /* Accumulated file data */
   size_t accumulated_len;
+  const char *expected_headers;
 } streaming_test_ctx_s;
 
 static void *streaming_on_field(void *udata,
@@ -357,10 +389,17 @@ static void *streaming_on_field(void *udata,
 static void *streaming_on_file_start(void *udata,
                                      fio_buf_info_s name,
                                      fio_buf_info_s filename,
-                                     fio_buf_info_s content_type) {
+                                     fio_buf_info_s content_type,
+                                     fio_buf_info_s headers) {
   streaming_test_ctx_s *ctx = (streaming_test_ctx_s *)udata;
   ++ctx->file_count;
   ++ctx->file_start_calls;
+  if (ctx->expected_headers) {
+    size_t len = FIO_STRLEN(ctx->expected_headers);
+    FIO_ASSERT(headers.len == len &&
+                   FIO_MEMCMP(headers.buf, ctx->expected_headers, len) == 0,
+               "Streaming raw part headers differ");
+  }
   (void)name;
   (void)filename;
   (void)content_type;
@@ -559,6 +598,10 @@ FIO_SFUNC void fio___test_multipart_incremental_parts(void) {
  */
 FIO_SFUNC void fio___test_multipart_large_file(void) {
   streaming_test_ctx_s ctx = {0};
+  ctx.expected_headers =
+      "Content-Disposition: form-data; name=\"bigfile\"; "
+      "filename=\"large.bin\"\r\n"
+      "Content-Type: application/octet-stream";
 
   const char *boundary = "----boundary";
 
@@ -949,12 +992,14 @@ static void streaming_field_on_field_end(void *udata, void *field_ctx) {
 static void *streaming_field_on_file_start(void *udata,
                                            fio_buf_info_s name,
                                            fio_buf_info_s filename,
-                                           fio_buf_info_s content_type) {
+                                           fio_buf_info_s content_type,
+                                           fio_buf_info_s headers) {
   streaming_field_ctx_s *ctx = (streaming_field_ctx_s *)udata;
   ++ctx->file_count;
   (void)name;
   (void)filename;
   (void)content_type;
+  (void)headers;
   return ctx;
 }
 
@@ -1300,6 +1345,272 @@ FIO_SFUNC void fio___test_multipart_streaming_field_multiple(void) {
 }
 
 /* *****************************************************************************
+Stateful Streaming Tests (fio_multipart_stream_parse)
+***************************************************************************** */
+
+typedef struct {
+  char *file; /* reassembled file content (malloc'ed) */
+  size_t file_len;
+  size_t file_capa;
+  size_t file_starts;
+  size_t file_ends;
+  size_t headers_checked;
+  size_t fields;
+  char field_names[4][16];
+  char field_values[4][16];
+  size_t abort_after; /* abort on_file_data once file_len exceeds this (0 = no) */
+  int bad_ctx;
+} fio___mp_stream_ctx_s;
+
+static int fio___mp_stream_file_ctx_tag;
+
+FIO_SFUNC void *fio___mp_stream_on_field(void *udata,
+                                         fio_buf_info_s name,
+                                         fio_buf_info_s value,
+                                         fio_buf_info_s content_type) {
+  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
+  if (c->fields < 4 && name.len < 16 && value.len < 16) {
+    FIO_MEMCPY(c->field_names[c->fields], name.buf, name.len);
+    c->field_names[c->fields][name.len] = 0;
+    FIO_MEMCPY(c->field_values[c->fields], value.buf, value.len);
+    c->field_values[c->fields][value.len] = 0;
+  }
+  ++c->fields;
+  (void)content_type;
+  return NULL;
+}
+FIO_SFUNC void *fio___mp_stream_on_file_start(void *udata,
+                                              fio_buf_info_s name,
+                                              fio_buf_info_s filename,
+                                              fio_buf_info_s content_type,
+                                              fio_buf_info_s headers) {
+  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
+  ++c->file_starts;
+  const char *expected =
+      "Content-Disposition: form-data; name=\"up\"; "
+      "filename=\"f.bin\"\r\nContent-Type: application/octet-stream";
+  size_t len = FIO_STRLEN(expected);
+  FIO_ASSERT(headers.len == len && FIO_MEMCMP(headers.buf, expected, len) == 0,
+             "Stateful streaming raw part headers differ");
+  ++c->headers_checked;
+  (void)name, (void)filename, (void)content_type;
+  return &fio___mp_stream_file_ctx_tag;
+}
+FIO_SFUNC int fio___mp_stream_on_file_data(void *udata,
+                                           void *file_ctx,
+                                           fio_buf_info_s data) {
+  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
+  c->bad_ctx |= (file_ctx != &fio___mp_stream_file_ctx_tag);
+  if (c->file_len + data.len > c->file_capa) {
+    size_t n = (c->file_len + data.len) << 1;
+    c->file = (char *)realloc(c->file, n);
+    FIO_ASSERT(c->file, "allocation failed");
+    c->file_capa = n;
+  }
+  FIO_MEMCPY(c->file + c->file_len, data.buf, data.len);
+  c->file_len += data.len;
+  return (c->abort_after && c->file_len > c->abort_after);
+}
+FIO_SFUNC void fio___mp_stream_on_file_end(void *udata, void *file_ctx) {
+  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
+  c->bad_ctx |= (file_ctx != &fio___mp_stream_file_ctx_tag);
+  ++c->file_ends;
+}
+
+static const fio_multipart_parser_callbacks_s fio___mp_stream_callbacks = {
+    .on_field = fio___mp_stream_on_field,
+    .on_file_start = fio___mp_stream_on_file_start,
+    .on_file_data = fio___mp_stream_on_file_data,
+    .on_file_end = fio___mp_stream_on_file_end,
+};
+
+/** Builds: field a, a file with tricky content, field b. Returns length. */
+FIO_SFUNC size_t fio___mp_stream_build(char *dest,
+                                       size_t capa,
+                                       const char *file,
+                                       size_t file_len) {
+  size_t len = 0;
+#define MP_PUT(str, l)                                                         \
+  do {                                                                         \
+    FIO_ASSERT(len + (l) <= capa, "test buffer too small");                    \
+    FIO_MEMCPY(dest + len, (str), (l));                                        \
+    len += (l);                                                                \
+  } while (0)
+#define MP_PUTS(str) MP_PUT(str, FIO_STRLEN(str))
+  MP_PUTS("--XyZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n");
+  MP_PUTS("--XyZ\r\nContent-Disposition: form-data; name=\"up\"; "
+          "filename=\"f.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n");
+  MP_PUT(file, file_len);
+  MP_PUTS("\r\n--XyZ\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n2"
+          "\r\n--XyZ--\r\n");
+#undef MP_PUTS
+#undef MP_PUT
+  return len;
+}
+
+/** Feeds `msg` in `chunk` sized pieces, keeping unconsumed bytes. */
+FIO_SFUNC int fio___mp_stream_feed(fio___mp_stream_ctx_s *c,
+                                   const char *msg,
+                                   size_t msg_len,
+                                   size_t chunk,
+                                   size_t *max_pending) {
+  fio_multipart_stream_s stream = {0};
+  char *buf = (char *)malloc(msg_len + 1);
+  size_t buf_len = 0, fed = 0;
+  int err = -2;
+  FIO_ASSERT(buf, "allocation failed");
+  while (err == -2 && fed < msg_len) {
+    size_t n = (msg_len - fed < chunk) ? msg_len - fed : chunk;
+    FIO_MEMCPY(buf + buf_len, msg + fed, n);
+    buf_len += n;
+    fed += n;
+    fio_multipart_result_s r =
+        fio_multipart_stream_parse(&stream,
+                                   &fio___mp_stream_callbacks,
+                                   c,
+                                   FIO_BUF_INFO1((char *)"XyZ"),
+                                   buf,
+                                   buf_len);
+    err = r.err;
+    FIO_ASSERT(r.consumed <= buf_len, "consumed beyond buffer");
+    FIO_MEMMOVE(buf, buf + r.consumed, buf_len - r.consumed);
+    buf_len -= r.consumed;
+    if (max_pending && buf_len > *max_pending)
+      *max_pending = buf_len;
+  }
+  if (err == -2)
+    err = fio_multipart_stream_close(&stream, &fio___mp_stream_callbacks, c)
+              ? -3 /* truncated inside a file */
+              : -2;
+  free(buf);
+  return err;
+}
+
+FIO_SFUNC void fio___test_multipart_stream_parse(void) {
+  fprintf(stderr, "  * stateful streaming (fio_multipart_stream_parse)\n");
+  /* file content full of near-miss delimiters and CR/LF sequences */
+  static char file[70000];
+  for (size_t i = 0; i < sizeof(file); ++i)
+    file[i] = (char)(i * 131 + (i >> 7));
+  for (size_t i = 0; i + 310 < sizeof(file); i += 997) {
+    FIO_MEMCPY(file + i, "\r\n--XyX", 7); /* near-miss delimiter */
+    FIO_MEMCPY(file + i + 300, "\r\n--Xy", 6);
+  }
+  static char msg[71000];
+  size_t msg_len = fio___mp_stream_build(msg, sizeof(msg), file, sizeof(file));
+
+  const size_t chunks[] = {1, 2, 3, 7, 8, 9, 64, 100, 4096, 65536, 1 << 20};
+  for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]); ++i) {
+    fio___mp_stream_ctx_s c = {0};
+    size_t max_pending = 0;
+    int err = fio___mp_stream_feed(&c, msg, msg_len, chunks[i], &max_pending);
+    FIO_ASSERT(!err, "stream chunk %zu: err %d", chunks[i], err);
+    FIO_ASSERT(c.file_starts == 1 && c.file_ends == 1 &&
+                   c.headers_checked == 1 && !c.bad_ctx,
+               "stream chunk %zu: file callbacks %zu / %zu",
+               chunks[i],
+               c.file_starts,
+               c.file_ends);
+    FIO_ASSERT(c.file_len == sizeof(file) && !memcmp(c.file, file, c.file_len),
+               "stream chunk %zu: file content mismatch (%zu bytes)",
+               chunks[i],
+               c.file_len);
+    FIO_ASSERT(c.fields == 2 && !strcmp(c.field_names[0], "a") &&
+                   !strcmp(c.field_values[0], "1") &&
+                   !strcmp(c.field_names[1], "b") &&
+                   !strcmp(c.field_values[1], "2"),
+               "stream chunk %zu: fields mismatch",
+               chunks[i]);
+    /* pending data stays bounded: one part's headers + a held-back tail */
+    if (chunks[i] < 4096)
+      FIO_ASSERT(max_pending < 256,
+                 "stream chunk %zu: buffer grew to %zu bytes",
+                 chunks[i],
+                 max_pending);
+    free(c.file);
+  }
+
+  /* every split point of a small message */
+  {
+    char small[512];
+    size_t small_len =
+        fio___mp_stream_build(small, sizeof(small), "\r\n--Xy\r\nZ", 9);
+    for (size_t chunk = 1; chunk <= small_len; ++chunk) {
+      fio___mp_stream_ctx_s c = {0};
+      int err = fio___mp_stream_feed(&c, small, small_len, chunk, NULL);
+      FIO_ASSERT(!err && c.file_len == 9 &&
+                     !memcmp(c.file, "\r\n--Xy\r\nZ", 9) && c.fields == 2 &&
+                     c.file_ends == 1 && c.headers_checked == 1,
+                 "small stream chunk %zu: err %d, file %zu",
+                 chunk,
+                 err,
+                 c.file_len);
+      free(c.file);
+    }
+  }
+
+  /* truncated input: stream_close ends the open file */
+  {
+    fio___mp_stream_ctx_s c = {0};
+    int err = fio___mp_stream_feed(&c, msg, msg_len / 2, 1000, NULL);
+    FIO_ASSERT(err == -3 && c.file_starts == 1 && c.file_ends == 1,
+               "truncated stream: err %d, file %zu / %zu",
+               err,
+               c.file_starts,
+               c.file_ends);
+    free(c.file);
+  }
+
+  /* stateless: a buffer ending right after a delimiter's CRLF must not make
+   * the caller re-parse (and re-report) completed parts */
+  {
+    const char *part1 =
+        "--XyZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n"
+        "--XyZ\r\n";
+    const char *part2 =
+        "Content-Disposition: form-data; name=\"b\"\r\n\r\n2\r\n--XyZ--\r\n";
+    char buf[256];
+    size_t l1 = FIO_STRLEN(part1), l2 = FIO_STRLEN(part2);
+    fio___mp_stream_ctx_s c = {0};
+    FIO_MEMCPY(buf, part1, l1);
+    fio_multipart_result_s r = fio_multipart_parse(&fio___mp_stream_callbacks,
+                                                   &c,
+                                                   FIO_BUF_INFO1((char *)"XyZ"),
+                                                   buf,
+                                                   l1);
+    FIO_ASSERT(r.err == -2 && r.consumed && c.fields == 1,
+               "stateless rewind: err %d consumed %zu fields %zu",
+               r.err,
+               r.consumed,
+               c.fields);
+    size_t keep = l1 - r.consumed;
+    FIO_MEMMOVE(buf, buf + r.consumed, keep);
+    FIO_MEMCPY(buf + keep, part2, l2);
+    r = fio_multipart_parse(&fio___mp_stream_callbacks,
+                            &c,
+                            FIO_BUF_INFO1((char *)"XyZ"),
+                            buf,
+                            keep + l2);
+    FIO_ASSERT(!r.err && c.fields == 2 && !strcmp(c.field_names[1], "b"),
+               "stateless rewind: second call err %d fields %zu",
+               r.err,
+               c.fields);
+  }
+
+  /* on_file_data abort closes the file and stops */
+  {
+    fio___mp_stream_ctx_s c = {.abort_after = 1000};
+    int err = fio___mp_stream_feed(&c, msg, msg_len, 512, NULL);
+    FIO_ASSERT(err == -1 && c.file_ends == 1 && c.fields == 1,
+               "aborted stream: err %d, ends %zu, fields %zu",
+               err,
+               c.file_ends,
+               c.fields);
+    free(c.file);
+  }
+}
+
+/* *****************************************************************************
 Main Test Entry Point
 ***************************************************************************** */
 
@@ -1309,6 +1620,7 @@ void fio_test_multipart(void) {
   fio___test_multipart_file_upload();
   fio___test_multipart_empty();
   fio___test_multipart_quoted_filename();
+  fio___test_multipart_empty_filename();
   fio___test_multipart_need_more_data();
   fio___test_multipart_multiple_files();
   fio___test_multipart_mixed_content();
@@ -1332,6 +1644,9 @@ void fio_test_multipart(void) {
   fio___test_multipart_streaming_field_mixed();
   fio___test_multipart_streaming_field_abort();
   fio___test_multipart_streaming_field_multiple();
+
+  /* Stateful streaming (file data in bounded memory) */
+  fio___test_multipart_stream_parse();
 }
 
 #ifndef FIO_TEST_ALL

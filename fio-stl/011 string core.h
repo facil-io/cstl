@@ -206,6 +206,42 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i);
 
+/** Primitive types detected by `fio_string2primitive`. */
+typedef enum {
+  FIO_STRING_PRIMITIVE_STRING = 0,
+  FIO_STRING_PRIMITIVE_NULL,
+  FIO_STRING_PRIMITIVE_TRUE,
+  FIO_STRING_PRIMITIVE_FALSE,
+  FIO_STRING_PRIMITIVE_NUMBER,
+  FIO_STRING_PRIMITIVE_FLOAT,
+} fio_string_primitive_e;
+
+/** Result of `fio_string2primitive`. */
+typedef struct {
+  /** The value for `FIO_STRING_PRIMITIVE_NUMBER` (`i`) or `_FLOAT` (`f`). */
+  union {
+    int64_t i;
+    double f;
+  };
+  /** The detected primitive type. */
+  fio_string_primitive_e type;
+  /** The numeral's original base (2, 8, 10 or 16); 0 for non-numerals. */
+  uint8_t base;
+} fio_string_primitive_s;
+
+/**
+ * Identifies the primitive a String represents.
+ *
+ * Detects `null` / `nil`, `true` and `false` (case-insensitive) and any
+ * numeral `fio_aton` accepts (decimal, float, hex, binary, octal, `inf`,
+ * `nan`, ...) provided the whole String is consumed. Anything else (including
+ * an empty String) is `FIO_STRING_PRIMITIVE_STRING`.
+ *
+ * Note: numerals are parsed by `fio_aton`, so `str` MUST be followed by a
+ * readable non-numeric guard byte (i.e., NUL terminated).
+ */
+SFUNC fio_string_primitive_s fio_string2primitive(fio_str_info_s str);
+
 /* *****************************************************************************
 String printf style support
 ***************************************************************************** */
@@ -1277,6 +1313,62 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
 }
 
 /* *****************************************************************************
+Primitive Identification
+***************************************************************************** */
+
+/** Identifies the primitive a String represents. */
+SFUNC fio_string_primitive_s fio_string2primitive(fio_str_info_s str) {
+  fio_string_primitive_s r = {.type = FIO_STRING_PRIMITIVE_STRING};
+  if (!str.len || !str.buf)
+    return r;
+
+  /* null / nil / true / false - case insensitive */
+  if (str.len == 3 &&
+      !(((str.buf[0] | 32) ^ (char)'n') | ((str.buf[1] | 32) ^ (char)'i') |
+        ((str.buf[2] | 32) ^ (char)'l'))) {
+    r.type = FIO_STRING_PRIMITIVE_NULL;
+  }
+  if (str.len == 4) {
+    const uint32_t null_s = fio_buf2u32u("null");
+    const uint32_t true_s = fio_buf2u32u("true");
+    uint32_t tmp = fio_buf2u32u(str.buf) | 0x20202020U; /* down-case */
+    r.type = (tmp == null_s)   ? FIO_STRING_PRIMITIVE_NULL
+             : (tmp == true_s) ? FIO_STRING_PRIMITIVE_TRUE
+                               : r.type;
+  }
+  if (str.len == 5 && (str.buf[4] | 32) == 'e') {
+    const uint32_t fals_s = fio_buf2u32u("fals");
+    uint32_t tmp = fio_buf2u32u(str.buf) | 0x20202020U; /* down-case */
+    r.type = (tmp == fals_s) ? FIO_STRING_PRIMITIVE_FALSE : r.type;
+  }
+  if (r.type != FIO_STRING_PRIMITIVE_STRING)
+    return r;
+
+  /* numerals - any format `fio_aton` accepts, if it consumes everything */
+  char *p = str.buf;
+  fio_aton_s n = fio_aton(&p);
+  if (n.err || p != str.buf + str.len)
+    return r;
+  r.type =
+      n.is_float ? FIO_STRING_PRIMITIVE_FLOAT : FIO_STRING_PRIMITIVE_NUMBER;
+  r.i = n.i; /* copies the union (`f` for floats) */
+
+  /* original base: inspect the prefix `fio_aton` already accepted */
+  p = str.buf;
+  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+    ++p;
+  p += (*p == '-' || *p == '+');
+  p += (p[0] == '0' && ((p[1] | 32) == 'x' || (p[1] | 32) == 'b'));
+  r.base = ((p[0] | 32) == 'x')   ? 16
+           : ((p[0] | 32) == 'b') ? 2
+           : (p[0] == '0' && ((uint8_t)(p[1] - '0') < 10 || p[1] == '_') &&
+              !n.is_float)
+               ? 8 /* a leading-zero float is decimal (as in C) */
+               : 10;
+  return r;
+}
+
+/* *****************************************************************************
 `printf` Style Support
 ***************************************************************************** */
 
@@ -1795,6 +1887,42 @@ String C / JSON escaping
 ***************************************************************************** */
 
 /**
+ * Returns the length of a valid, complete UTF-8 sequence at `p`, bounded by
+ * `e` (never reads past `e`). Returns 1 for ASCII, invalid sequences, or
+ * truncated UTF-8 tails (which should be escaped byte-wise).
+ */
+FIO_SFUNC size_t fio___string_escape_utf8_len(const uint8_t *p,
+                                              const uint8_t *e) {
+  const size_t limit = (size_t)(e - p);
+  const size_t need = (size_t)(fio_utf8_char_len_unsafe(*p) & 7);
+  if (need < 2 || need > limit)
+    return 1; /* ASCII, invalid lead byte, or truncated UTF-8 tail */
+  /* validate continuation bytes without reading past `e` */
+  size_t valid = 1;
+  for (size_t i = 1; i < need; ++i)
+    valid &= (size_t)((p[i] & 0xC0) == 0x80);
+  return valid ? need : 1;
+}
+
+/**
+ * SWAR escape detection: returns non-zero if any byte in the word has a
+ * non-zero `escape_map` entry (< 0x20, '"', '\\', 0x7F) or needs UTF-8
+ * validation (>= 0x80). Byte-order independent (only tested against zero).
+ * Contributed by the Iodine project (MIT licensed).
+ */
+FIO_IFUNC uint64_t fio___string_escape_swar_dirty(uint64_t v) {
+  const uint64_t hi = 0x8080808080808080ULL;
+  uint64_t dirty = (v - 0x2020202020202020ULL) & ~v & hi; /* bytes < 0x20 */
+  uint64_t x = v ^ 0x2222222222222222ULL;                 /* '"' */
+  dirty |= (x - 0x0101010101010101ULL) & ~x & hi;
+  x = v ^ 0x5C5C5C5C5C5C5C5CULL;                          /* '\\' */
+  dirty |= (x - 0x0101010101010101ULL) & ~x & hi;
+  x = v ^ 0x7F7F7F7F7F7F7F7FULL;                          /* 0x7F */
+  dirty |= (x - 0x0101010101010101ULL) & ~x & hi;
+  return dirty | (v & hi); /* bytes >= 0x80 */
+}
+
+/**
  * Writes data at the end of the String, escaping the data using JSON semantics.
  *
  * The JSON semantic are common to many programming languages, promising a UTF-8
@@ -1835,18 +1963,33 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
   const uint8_t *p = s;
 
   /* test memory length requirements – unlikely to be avoided (len * 5) */
-  for (; (p < e); ++p) {
-    if (!escape_map[*p]) /* skip valid ASCII, hope for compiler magic */
+  while (p < e) {
+    /* SWAR fast scan: skip 16 clean bytes at a time */
+    while ((size_t)(e - p) >= 16) {
+      uint64_t v0, v1;
+      FIO_MEMCPY(&v0, p, 8);
+      FIO_MEMCPY(&v1, p + 8, 8);
+      if (fio___string_escape_swar_dirty(v0) |
+          fio___string_escape_swar_dirty(v1))
+        break;
+      p += 16;
+    }
+    if (p >= e)
+      break;
+    if (!escape_map[*p]) { /* skip valid ASCII, hope for compiler magic */
+      ++p;
       continue;
-    size_t valid_utf8_len = fio_utf8_char_len(p);
+    }
+    size_t valid_utf8_len = fio___string_escape_utf8_len(p, e);
     if (valid_utf8_len > 1) { /* skip valid UTF-8 */
-      p += valid_utf8_len - 1;
+      p += valid_utf8_len;
       continue;
     }
     first_stop |= (0ULL - updater) & (p - s);
     updater = 0;
     /* count extra bytes */
     extra_space += escape_map[*p];
+    ++p;
   }
 
   /* reserve space and copy any valid first_stop */
@@ -1873,20 +2016,29 @@ SFUNC int fio_string_write_escape(fio_str_info_s *restrict dest,
 
   /* start copying and escaping as needed */
   for (;;) {
+    if (p >= e)
+      break;
     if (!(escape_map[*p])) {
-      for (s = p; (s < e) && !(escape_map[*s]); ++s)
+      s = p + 1; /* *p is known clean */
+      /* SWAR fast scan: skip 16 clean bytes at a time */
+      while ((size_t)(e - s) >= 16) {
+        uint64_t v0, v1;
+        FIO_MEMCPY(&v0, s, 8);
+        FIO_MEMCPY(&v1, s + 8, 8);
+        if (fio___string_escape_swar_dirty(v0) |
+            fio___string_escape_swar_dirty(v1))
+          break;
+        s += 16;
+      }
+      for (; (s < e) && !(escape_map[*s]); ++s)
         ; /* hope for compiler magic */
       updater = s - p;
       FIO_MEMMOVE(dest->buf + dest->len, p, updater);
       dest->len += updater;
       p = s;
+      continue;
     }
-    if (p >= e)
-      break;
-    size_t valid_utf8_len = fio_utf8_char_len(p);
-    size_t limit = e - p;
-    if (valid_utf8_len > limit)
-      valid_utf8_len = limit;
+    size_t valid_utf8_len = fio___string_escape_utf8_len(p, e);
     switch (valid_utf8_len) {
     case 4: dest->buf[dest->len++] = *p++; /* fall through */
     case 3: dest->buf[dest->len++] = *p++; /* fall through */

@@ -184,6 +184,131 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha384_kat)(void) {
 }
 
 /* *****************************************************************************
+SHA-2 Padding Boundary Known-Answer Tests
+
+The final block must hold the 0x80 padding byte plus the message bit length
+(8 bytes for SHA-256, 16 bytes for SHA-384/512). Lengths where the remainder
+is exactly at the limit (55/56 mod 64, 111/112 mod 128) need an extra block.
+Regression: SHA-384/512 produced wrong digests for len % 128 == 112, which
+broke ~1/128 TLS 1.3 TLS_AES_256_GCM_SHA384 handshakes (transcript hash).
+Digests of 'a' * len, cross-checked with `shasum` and `openssl dgst`. Runs
+without OpenSSL (e.g., Windows CI).
+***************************************************************************** */
+
+/** Compares `len` bytes of `digest` with a lowercase hex string. */
+FIO_SFUNC int fio___test_sha_hex_eq(const uint8_t *digest,
+                                    const char *hex,
+                                    size_t len) {
+  static const char map[] = "0123456789abcdef";
+  if (FIO_STRLEN(hex) != (len << 1))
+    return 0;
+  for (size_t i = 0; i < len; ++i) {
+    if (hex[i << 1] != map[digest[i] >> 4] ||
+        hex[(i << 1) + 1] != map[digest[i] & 15])
+      return 0;
+  }
+  return 1;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, sha2_padding_boundary)(void) {
+  static const struct {
+    size_t len;
+    const char *sha256;
+    const char *sha384;
+    const char *sha512;
+  } kat[] = {
+      {55,
+       "9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318",
+       NULL,
+       NULL},
+      {56,
+       "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a",
+       NULL,
+       NULL},
+      {111,
+       NULL,
+       "3c37955051cb5c3026f94d551d5b5e2ac38d572ae4e07172085fed81f8466b8f90dc23a"
+       "8ffcdea0b8d8e58e8fdacc80a",
+       "fa9121c7b32b9e01733d034cfc78cbf67f926c7ed83e82200ef86818196921760b4bef"
+       "f48404df811b953828274461673c68d04e297b0eb7b2b4d60fc6b566a2"},
+      {112,
+       NULL,
+       "187d4e07cb306103c69967bf544d0dfbe9042577599c73c330abc0cb64c61236d5ed565"
+       "ee19119d8c31779a38f791fcd",
+       "c01d080efd492776a1c43bd23dd99d0a2e626d481e16782e75d54c2503b5dc32bd05f0"
+       "f1ba33e568b88fd2d970929b719ecbb152f58f130a407c8830604b70ca"},
+      {113,
+       NULL,
+       "1d6bed01626682961b50da078a6b1da707c1da0c8a0a3226f159235bd45ed724a0622fa"
+       "6f39fd70007a6c72a5cda43ae",
+       "55ddd8ac210a6e18ba1ee055af84c966e0dbff091c43580ae1be703bdb85da31acf694"
+       "8cf5bd90c55a20e5450f22fb89bd8d0085e39f85a86cc46abbca75e24d"},
+      {119,
+       "31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb",
+       NULL,
+       NULL},
+      {120,
+       "2f3d335432c70b580af0e8e1b3674a7c020d683aa5f73aaaedfdc55af904c21c",
+       NULL,
+       NULL},
+      {240,
+       NULL,
+       "4d86957beab348a29180f02d02564ac1d32f5b4c217ece2b038f7c184f0cafc8c8e438e"
+       "b82aa03796170e0a7ce8c0675",
+       "4c296d90c61052a62ffb1dd196f1b7b09373b1f93e71836baebf89690546b7595684db"
+       "e9467a8e484fa0d1094272b4344a7c24f5fee8daedeb0bf549c985ab5f"},
+  };
+  uint8_t data[240];
+  FIO_MEMSET(data, 'a', sizeof(data));
+  for (size_t i = 0; i < sizeof(kat) / sizeof(kat[0]); ++i) {
+    const size_t len = kat[i].len;
+    const size_t split = len / 3; /* streaming: 3 uneven parts */
+    if (kat[i].sha256) {
+      fio_u256 h = fio_sha256(data, len);
+      FIO_ASSERT(fio___test_sha_hex_eq(h.u8, kat[i].sha256, 32),
+                 "SHA-256 padding boundary KAT failed at len=%zu",
+                 len);
+      fio_sha256_s ctx = fio_sha256_init();
+      fio_sha256_consume(&ctx, data, split);
+      fio_sha256_consume(&ctx, data + split, 1);
+      fio_sha256_consume(&ctx, data + split + 1, len - split - 1);
+      h = fio_sha256_finalize(&ctx);
+      FIO_ASSERT(fio___test_sha_hex_eq(h.u8, kat[i].sha256, 32),
+                 "SHA-256 streaming padding boundary KAT failed at len=%zu",
+                 len);
+    }
+    if (kat[i].sha384) {
+      fio_u512 h = fio_sha384(data, len);
+      FIO_ASSERT(fio___test_sha_hex_eq(h.u8, kat[i].sha384, 48),
+                 "SHA-384 padding boundary KAT failed at len=%zu",
+                 len);
+      fio_sha512_s ctx = fio_sha384_init();
+      fio_sha384_consume(&ctx, data, split);
+      fio_sha384_consume(&ctx, data + split, 1);
+      fio_sha384_consume(&ctx, data + split + 1, len - split - 1);
+      h = fio_sha384_finalize(&ctx);
+      FIO_ASSERT(fio___test_sha_hex_eq(h.u8, kat[i].sha384, 48),
+                 "SHA-384 streaming padding boundary KAT failed at len=%zu",
+                 len);
+    }
+    if (kat[i].sha512) {
+      fio_u512 h = fio_sha512(data, len);
+      FIO_ASSERT(fio___test_sha_hex_eq(h.u8, kat[i].sha512, 64),
+                 "SHA-512 padding boundary KAT failed at len=%zu",
+                 len);
+      fio_sha512_s ctx = fio_sha512_init();
+      fio_sha512_consume(&ctx, data, split);
+      fio_sha512_consume(&ctx, data + split, 1);
+      fio_sha512_consume(&ctx, data + split + 1, len - split - 1);
+      h = fio_sha512_finalize(&ctx);
+      FIO_ASSERT(fio___test_sha_hex_eq(h.u8, kat[i].sha512, 64),
+                 "SHA-512 streaming padding boundary KAT failed at len=%zu",
+                 len);
+    }
+  }
+}
+
+/* *****************************************************************************
 SHA-2 Streaming / Incremental Tests
 ***************************************************************************** */
 
@@ -447,6 +572,58 @@ OpenSSL Cross-Validation (library only, no external processes)
 
 #if HAVE_OPENSSL
 FIO_SFUNC void FIO_NAME_TEST(stl, sha_openssl_compare)(void) {
+  /* SHA-384 / SHA-512 / HMAC length sweep: every remainder mod 128 (twice),
+   * one-shot and streaming, plus HMAC (inner hash = 128 byte key block +
+   * message, so every inner remainder is hit as well). */
+  {
+    uint8_t buf[300];
+    uint8_t key[48];
+    fio_rand_bytes(buf, sizeof(buf));
+    fio_rand_bytes(key, sizeof(key));
+    for (size_t len = 0; len <= sizeof(buf); ++len) {
+      uint8_t ossl[64];
+      unsigned int ossl_len = 0;
+      const size_t split = len >> 1;
+
+      SHA512(buf, len, ossl);
+      fio_u512 h = fio_sha512(buf, len);
+      FIO_ASSERT(!FIO_MEMCMP(h.u8, ossl, 64),
+                 "SHA-512 mismatch with OpenSSL at len=%zu",
+                 len);
+      fio_sha512_s ctx = fio_sha512_init();
+      fio_sha512_consume(&ctx, buf, split);
+      fio_sha512_consume(&ctx, buf + split, len - split);
+      h = fio_sha512_finalize(&ctx);
+      FIO_ASSERT(!FIO_MEMCMP(h.u8, ossl, 64),
+                 "SHA-512 streaming mismatch with OpenSSL at len=%zu",
+                 len);
+
+      SHA384(buf, len, ossl);
+      h = fio_sha384(buf, len);
+      FIO_ASSERT(!FIO_MEMCMP(h.u8, ossl, 48),
+                 "SHA-384 mismatch with OpenSSL at len=%zu",
+                 len);
+      ctx = fio_sha384_init();
+      fio_sha384_consume(&ctx, buf, split);
+      fio_sha384_consume(&ctx, buf + split, len - split);
+      h = fio_sha384_finalize(&ctx);
+      FIO_ASSERT(!FIO_MEMCMP(h.u8, ossl, 48),
+                 "SHA-384 streaming mismatch with OpenSSL at len=%zu",
+                 len);
+
+      HMAC(EVP_sha384(), key, sizeof(key), buf, len, ossl, &ossl_len);
+      h = fio_sha384_hmac(key, sizeof(key), buf, len);
+      FIO_ASSERT(ossl_len == 48 && !FIO_MEMCMP(h.u8, ossl, 48),
+                 "HMAC-SHA-384 mismatch with OpenSSL at len=%zu",
+                 len);
+      HMAC(EVP_sha512(), key, sizeof(key), buf, len, ossl, &ossl_len);
+      h = fio_sha512_hmac(key, sizeof(key), buf, len);
+      FIO_ASSERT(ossl_len == 64 && !FIO_MEMCMP(h.u8, ossl, 64),
+                 "HMAC-SHA-512 mismatch with OpenSSL at len=%zu",
+                 len);
+    }
+  }
+
   /* SHA-256 block-boundary sweep. */
   for (size_t test_len = 1; test_len <= 200; test_len++) {
     uint8_t *test_data = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, test_len, 0);
@@ -607,6 +784,7 @@ int main(void) {
   FIO_NAME_TEST(stl, sha1_kat)();
   FIO_NAME_TEST(stl, sha2_kat)();
   FIO_NAME_TEST(stl, sha384_kat)();
+  FIO_NAME_TEST(stl, sha2_padding_boundary)();
   FIO_NAME_TEST(stl, sha2_streaming)();
   FIO_NAME_TEST(stl, hmac_rfc4231)();
 #if HAVE_OPENSSL

@@ -3,6 +3,8 @@ JSON Parser Tests
 ***************************************************************************** */
 #include "test-helpers.h"
 
+#include <locale.h>
+
 #define FIO_JSON
 #define FIO_STR
 #include FIO_INCLUDE_FILE
@@ -112,105 +114,97 @@ FIO_SFUNC void test_json_value_free(test_json_value_s *v) {
 JSON Parser Callbacks
 ***************************************************************************** */
 
-FIO_SFUNC void *test_json_on_null(void *udata) {
+static size_t test_json_escaped_callback_count;
+static size_t test_json_simple_callback_count;
+static const char *test_json_last_escaped_bytes;
+static size_t test_json_last_escaped_len;
+
+#define TEST_JSON_OBJ(v) ((fio_json_obj_result_s){.obj = (v)})
+
+FIO_SFUNC fio_json_obj_result_s test_json_on_null(void *udata) {
   (void)udata;
-  return test_json_value_new(TEST_JSON_NULL);
+  return TEST_JSON_OBJ(test_json_value_new(TEST_JSON_NULL));
 }
 
-FIO_SFUNC void *test_json_on_true(void *udata) {
+FIO_SFUNC fio_json_obj_result_s test_json_on_true(void *udata) {
   (void)udata;
-  return test_json_value_new(TEST_JSON_TRUE);
+  return TEST_JSON_OBJ(test_json_value_new(TEST_JSON_TRUE));
 }
 
-FIO_SFUNC void *test_json_on_false(void *udata) {
+FIO_SFUNC fio_json_obj_result_s test_json_on_false(void *udata) {
   (void)udata;
-  return test_json_value_new(TEST_JSON_FALSE);
+  return TEST_JSON_OBJ(test_json_value_new(TEST_JSON_FALSE));
 }
 
-FIO_SFUNC void *test_json_on_number(void *udata, int64_t i) {
+FIO_SFUNC fio_json_obj_result_s test_json_on_number(void *udata, int64_t i) {
   (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_NUMBER);
   v->data.i = i;
-  return v;
+  return TEST_JSON_OBJ(v);
 }
 
-FIO_SFUNC void *test_json_on_float(void *udata, double f) {
+FIO_SFUNC fio_json_obj_result_s test_json_on_float(void *udata, double f) {
   (void)udata;
   test_json_value_s *v = test_json_value_new(TEST_JSON_FLOAT);
   v->data.f = f;
-  return v;
+  return TEST_JSON_OBJ(v);
 }
 
-FIO_SFUNC void *test_json_on_string(void *udata,
-                                    const void *start,
-                                    size_t len) {
+FIO_SFUNC fio_json_obj_result_s test_json_on_string(void *udata,
+                                                    fio_buf_info_s str) {
   (void)udata;
+  ++test_json_escaped_callback_count;
+  test_json_last_escaped_bytes = str.buf;
+  test_json_last_escaped_len = str.len;
   test_json_value_s *v = test_json_value_new(TEST_JSON_STRING);
   /* Unescape the string */
-  char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, len + 1, 0);
+  char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, str.len + 1, 0);
   FIO_ASSERT_ALLOC(buf);
-  fio_str_info_s dest = FIO_STR_INFO3(buf, 0, len + 1);
-  fio_string_write_unescape(&dest, NULL, start, len);
+  fio_str_info_s dest = FIO_STR_INFO3(buf, 0, str.len + 1);
+  fio_string_write_unescape(&dest, NULL, str.buf, str.len);
   v->data.str.buf = buf;
   v->data.str.len = dest.len;
-  return v;
+  return TEST_JSON_OBJ(v);
 }
 
-FIO_SFUNC void *test_json_on_string_simple(void *udata,
-                                           const void *start,
-                                           size_t len) {
+FIO_SFUNC fio_json_obj_result_s test_json_on_string_simple(void *udata,
+                                                           fio_buf_info_s str) {
   (void)udata;
+  ++test_json_simple_callback_count;
   test_json_value_s *v = test_json_value_new(TEST_JSON_STRING);
-  v->data.str.buf = (char *)FIO_MEM_REALLOC(NULL, 0, len + 1, 0);
+  v->data.str.buf = (char *)FIO_MEM_REALLOC(NULL, 0, str.len + 1, 0);
   FIO_ASSERT_ALLOC(v->data.str.buf);
-  FIO_MEMCPY(v->data.str.buf, start, len);
-  v->data.str.buf[len] = '\0';
-  v->data.str.len = len;
-  return v;
+  if (str.len)
+    FIO_MEMCPY(v->data.str.buf, str.buf, str.len);
+  v->data.str.buf[str.len] = '\0';
+  v->data.str.len = str.len;
+  return TEST_JSON_OBJ(v);
 }
 
-FIO_SFUNC void *test_json_on_map(void *udata, void *ctx, void *at) {
-  (void)udata;
-  test_json_value_s *v = test_json_value_new(TEST_JSON_MAP);
-  v->data.map.capa = 8;
-  v->data.map.keys = (test_json_value_s **)FIO_MEM_REALLOC(
-      NULL,
-      0,
-      v->data.map.capa * sizeof(test_json_value_s *),
-      0);
-  v->data.map.values = (test_json_value_s **)FIO_MEM_REALLOC(
-      NULL,
-      0,
-      v->data.map.capa * sizeof(test_json_value_s *),
-      0);
-  FIO_ASSERT_ALLOC(v->data.map.keys);
-  FIO_ASSERT_ALLOC(v->data.map.values);
-  (void)ctx;
-  (void)at;
-  return v;
+FIO_SFUNC size_t test_json_map_index(test_json_value_s *map,
+                                      fio_buf_info_s key) {
+  for (size_t i = 0; i < map->data.map.count; ++i) {
+    test_json_value_s *k = map->data.map.keys[i];
+    if (k->data.str.len == key.len &&
+        !FIO_MEMCMP(k->data.str.buf, key.buf, key.len)) return i;
+  }
+  return SIZE_MAX;
 }
 
-FIO_SFUNC void *test_json_on_array(void *udata, void *ctx, void *at) {
-  (void)udata;
-  test_json_value_s *v = test_json_value_new(TEST_JSON_ARRAY);
-  v->data.arr.capa = 8;
-  v->data.arr.items = (test_json_value_s **)FIO_MEM_REALLOC(
-      NULL,
-      0,
-      v->data.arr.capa * sizeof(test_json_value_s *),
-      0);
-  FIO_ASSERT_ALLOC(v->data.arr.items);
-  (void)ctx;
-  (void)at;
-  return v;
-}
-
-FIO_SFUNC int test_json_map_push(void *udata,
-                                 void *ctx,
-                                 void *key,
-                                 void *value) {
+FIO_SFUNC int test_json_array_push(void *udata, void *ctx, void *value);
+/* Overwrites duplicates (frees the replaced value; never returns it). */
+FIO_SFUNC fio_json_obj_result_s test_json_map_push(void *udata,
+                                                   void *ctx,
+                                                   fio_buf_info_s key,
+                                                   void *value) {
   (void)udata;
   test_json_value_s *map = (test_json_value_s *)ctx;
+  size_t at = test_json_map_index(map, key);
+  if (at != SIZE_MAX) {
+    test_json_value_free(map->data.map.values[at]);
+    map->data.map.values[at] = value;
+    return (fio_json_obj_result_s){0};
+  }
   if (map->data.map.count >= map->data.map.capa) {
     size_t new_capa = map->data.map.capa * 2;
     map->data.map.keys = (test_json_value_s **)FIO_MEM_REALLOC(
@@ -225,10 +219,65 @@ FIO_SFUNC int test_json_map_push(void *udata,
         map->data.map.count * sizeof(test_json_value_s *));
     map->data.map.capa = new_capa;
   }
-  map->data.map.keys[map->data.map.count] = (test_json_value_s *)key;
-  map->data.map.values[map->data.map.count] = (test_json_value_s *)value;
-  map->data.map.count++;
-  return 0;
+  test_json_value_s *k = test_json_value_new(TEST_JSON_STRING);
+  k->data.str.buf = (char *)FIO_MEM_REALLOC(NULL, 0, key.len + 1, 0);
+  FIO_ASSERT_ALLOC(k->data.str.buf);
+  if (key.len)
+    FIO_MEMCPY(k->data.str.buf, key.buf, key.len);
+  k->data.str.buf[key.len] = 0;
+  k->data.str.len = key.len;
+  map->data.map.keys[map->data.map.count] = k;
+  map->data.map.values[map->data.map.count++] = value;
+  return (fio_json_obj_result_s){0};
+}
+
+FIO_SFUNC fio_json_push_result_s test_json_on_container(void *udata,
+                                                        void *ctx,
+                                                        fio_buf_info_s key,
+                                                        test_json_type_e type) {
+  fio_json_push_result_s r = {0};
+  test_json_value_s *parent = (test_json_value_s *)ctx;
+  if (parent && key.buf) {
+    size_t at = test_json_map_index(parent, key);
+    if (at != SIZE_MAX && parent->data.map.values[at] &&
+        parent->data.map.values[at]->type == type) {
+      r.obj = parent->data.map.values[at];
+      return r;
+    }
+  }
+  test_json_value_s *v = test_json_value_new(type);
+  if (type == TEST_JSON_MAP) {
+    v->data.map.capa = 8;
+    v->data.map.keys = (test_json_value_s **)FIO_MEM_REALLOC(
+        NULL, 0, v->data.map.capa * sizeof(test_json_value_s *), 0);
+    v->data.map.values = (test_json_value_s **)FIO_MEM_REALLOC(
+        NULL, 0, v->data.map.capa * sizeof(test_json_value_s *), 0);
+    FIO_ASSERT_ALLOC(v->data.map.keys);
+    FIO_ASSERT_ALLOC(v->data.map.values);
+  } else {
+    v->data.arr.capa = 8;
+    v->data.arr.items = (test_json_value_s **)FIO_MEM_REALLOC(
+        NULL, 0, v->data.arr.capa * sizeof(test_json_value_s *), 0);
+    FIO_ASSERT_ALLOC(v->data.arr.items);
+  }
+  if (parent) {
+    if (key.buf)
+      r.err = test_json_map_push(udata, parent, key, v).err;
+    else
+      r.err = test_json_array_push(udata, parent, v);
+  }
+  r.obj = v;
+  return r;
+}
+FIO_SFUNC fio_json_push_result_s test_json_on_map(void *udata,
+                                                  void *ctx,
+                                                  fio_buf_info_s key) {
+  return test_json_on_container(udata, ctx, key, TEST_JSON_MAP);
+}
+FIO_SFUNC fio_json_push_result_s test_json_on_array(void *udata,
+                                                    void *ctx,
+                                                    fio_buf_info_s key) {
+  return test_json_on_container(udata, ctx, key, TEST_JSON_ARRAY);
 }
 
 FIO_SFUNC int test_json_array_push(void *udata, void *ctx, void *value) {
@@ -252,13 +301,27 @@ FIO_SFUNC void test_json_free_unused(void *udata, void *obj) {
   test_json_value_free((test_json_value_s *)obj);
 }
 
-FIO_SFUNC void *test_json_on_error(void *udata, void *ctx) {
-  (void)udata;
-  test_json_value_free((test_json_value_s *)ctx);
-  return NULL;
+/* Failing push callbacks: they take (free) the value, as the contract says. */
+static int test_json_callback_error_code;
+FIO_SFUNC fio_json_obj_result_s test_json_map_push_error(void *udata,
+                                                         void *ctx,
+                                                         fio_buf_info_s key,
+                                                         void *value) {
+  if (test_json_callback_error_code) {
+    test_json_value_free((test_json_value_s *)value);
+    return (fio_json_obj_result_s){.err = test_json_callback_error_code};
+  }
+  return test_json_map_push(udata, ctx, key, value);
+}
+FIO_SFUNC int test_json_array_push_error(void *udata, void *ctx, void *value) {
+  if (test_json_callback_error_code) {
+    test_json_value_free((test_json_value_s *)value);
+    return test_json_callback_error_code;
+  }
+  return test_json_array_push(udata, ctx, value);
 }
 
-static fio_json_parser_callbacks_s test_json_callbacks = {
+static const fio_json_parser_callbacks_s test_json_callbacks = {
     .on_null = test_json_on_null,
     .on_true = test_json_on_true,
     .on_false = test_json_on_false,
@@ -271,17 +334,45 @@ static fio_json_parser_callbacks_s test_json_callbacks = {
     .map_push = test_json_map_push,
     .array_push = test_json_array_push,
     .free_unused_object = test_json_free_unused,
-    .on_error = test_json_on_error,
 };
 
 /* *****************************************************************************
 Helper: Parse JSON string
 ***************************************************************************** */
 
+FIO_SFUNC void fio___test_json_const_callbacks(void) {
+  /* Optional callbacks are filled in the parser's private copy only. */
+  static const fio_json_parser_callbacks_s cb = {
+      .on_null = test_json_on_null,
+      .on_true = test_json_on_true,
+      .on_false = test_json_on_false,
+      .on_number = test_json_on_number,
+      .on_float = test_json_on_float,
+      .on_string = test_json_on_string,
+      .on_map = test_json_on_map,
+      .on_array = test_json_on_array,
+      .map_push = test_json_map_push,
+      .array_push = test_json_array_push,
+      .free_unused_object = test_json_free_unused,
+  };
+  FIO_ASSERT(!fio_json_callbacks_validate(&cb),
+             "JSON minimal callback table must validate");
+  fio_json_result_s r = fio_json_parse(&cb, NULL, NULL, "\"hello\"", 7);
+  FIO_ASSERT(!r.err && r.ctx && r.stop_pos == 7,
+             "JSON minimal const callback table parse failed");
+  test_json_value_free((test_json_value_s *)r.ctx);
+  r = fio_json_parse(&cb, NULL, NULL, "[1,{\"a\":[]}]", 12);
+  FIO_ASSERT(!r.err && r.ctx, "JSON minimal const callback table failed");
+  test_json_value_free((test_json_value_s *)r.ctx);
+}
+
 FIO_SFUNC test_json_value_s *test_json_parse(const char *json, size_t len) {
-  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, json, len);
-  if (r.err)
+  fio_json_result_s r =
+      fio_json_parse(&test_json_callbacks, NULL, NULL, json, len);
+  if (r.err) {
+    test_json_value_free((test_json_value_s *)r.ctx); /* caller owned */
     return NULL;
+  }
   return (test_json_value_s *)r.ctx;
 }
 
@@ -750,6 +841,61 @@ FIO_SFUNC void fio___test_json_simple_object(void) {
   test_json_value_free(v);
 }
 
+FIO_SFUNC void fio___test_json_decoded_keys(void) {
+  const char *cases[] = {
+      "{\"a\\u0062\\n\":1}",
+      "{'a\\u0062\\n':1}",
+      "{a\\u0062\\n:1}",
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    test_json_escaped_callback_count = 0;
+    test_json_simple_callback_count = 0;
+    test_json_value_s *v = test_json_parse(cases[i], FIO_STRLEN(cases[i]));
+    FIO_ASSERT(v && v->type == TEST_JSON_MAP && v->data.map.count == 1,
+               "escaped key case %zu failed", i);
+    FIO_ASSERT(v->data.map.keys[0]->data.str.len == 3 &&
+                   !FIO_MEMCMP(v->data.map.keys[0]->data.str.buf, "ab\n", 3),
+               "escaped key case %zu decoded incorrectly", i);
+    FIO_ASSERT(test_json_simple_callback_count == 0 &&
+                   test_json_escaped_callback_count == 0,
+               "escaped key case %zu used wrong callback", i);
+    test_json_value_free(v);
+  }
+
+  /* The decoded length exceeds the in-state 1024-byte capacity. */
+  char large[1100];
+  large[0] = '{';
+  large[1] = '"';
+  FIO_MEMSET(large + 2, 'x', 1025);
+  FIO_MEMCPY(large + 1027, "\\n\":1}", 6);
+  test_json_escaped_callback_count = 0;
+  test_json_simple_callback_count = 0;
+  test_json_value_s *v = test_json_parse(large, 1033);
+  FIO_ASSERT(v && v->type == TEST_JSON_MAP && v->data.map.count == 1,
+             "large escaped key failed");
+  FIO_ASSERT(v->data.map.keys[0]->data.str.len == 1026 &&
+                 v->data.map.keys[0]->data.str.buf[1025] == '\n',
+             "large escaped key length or escape mismatch");
+  for (size_t i = 0; i < 1025; ++i)
+    FIO_ASSERT(v->data.map.keys[0]->data.str.buf[i] == 'x',
+               "large escaped key mismatch at %zu", i);
+  FIO_ASSERT(test_json_simple_callback_count == 0 &&
+                 test_json_escaped_callback_count == 0,
+             "large escaped key used wrong callback");
+  test_json_value_free(v);
+
+  test_json_escaped_callback_count = 0;
+  test_json_simple_callback_count = 0;
+  const char *value_json = "{\"key\":\"a\\n\"}";
+  v = test_json_parse(value_json, FIO_STRLEN(value_json));
+  FIO_ASSERT(v && test_json_simple_callback_count == 0 &&
+                 test_json_escaped_callback_count == 1 &&
+                 test_json_last_escaped_len == 3 &&
+                 !FIO_MEMCMP(test_json_last_escaped_bytes, "a\\n", 3),
+             "escaped value did not reach on_string unchanged");
+  test_json_value_free(v);
+}
+
 FIO_SFUNC void fio___test_json_nested_object(void) {
   test_json_value_s *v = test_json_parse("{\"outer\": {\"inner\": 42}}", 24);
   FIO_ASSERT(v, "JSON nested object parsing failed");
@@ -914,6 +1060,37 @@ FIO_SFUNC void fio___test_json_hex_binary(void) {
              "JSON binary value mismatch: got %lld",
              (long long)v->data.i);
   test_json_value_free(v);
+
+  /* Hex without the leading zero */
+  v = test_json_parse("x1F", 3);
+  FIO_ASSERT(v && v->type == TEST_JSON_NUMBER && v->data.i == 31,
+             "JSON hex x1F parsing failed");
+  test_json_value_free(v);
+
+  /* Binary float (raw IEEE 754 bits of -1.5, `0b...f`) */
+  {
+    char buf[80];
+    buf[0] = '-';
+    size_t len = fio_ftoa(buf + 1, 1.5, 2) + 1;
+    v = test_json_parse(buf, len);
+    FIO_ASSERT(v && v->type == TEST_JSON_FLOAT && v->data.f == -1.5,
+               "JSON binary float %s parsing failed",
+               buf);
+    test_json_value_free(v);
+  }
+
+  /* Correctly rounded and locale independent floats */
+  if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {
+    v = test_json_parse("0.3", 3);
+    setlocale(LC_NUMERIC, "C");
+    FIO_ASSERT(v && v->type == TEST_JSON_FLOAT && v->data.f == 0.3,
+               "JSON float parsing depends on the locale");
+    test_json_value_free(v);
+  }
+  errno = E2BIG; /* a stale errno must not fail float parsing */
+  v = test_json_parse("[1.5]", 5);
+  FIO_ASSERT(v, "JSON float parsing failed with a stale errno");
+  test_json_value_free(v);
 }
 
 /* *****************************************************************************
@@ -921,6 +1098,14 @@ Test: Error Cases
 ***************************************************************************** */
 
 FIO_SFUNC void fio___test_json_errors(void) {
+  fio_json_result_s malformed =
+      fio_json_parse(&test_json_callbacks, NULL, NULL, "{\"key\":", 7);
+  FIO_ASSERT(malformed.err == FIO_JSON_ERROR_GENERIC && malformed.ctx,
+             "JSON malformed input must return GENERIC (got %d) and the "
+             "partial root",
+             malformed.err);
+  test_json_value_free((test_json_value_s *)malformed.ctx);
+
   /* Empty input */
   test_json_value_s *v = test_json_parse("", 0);
   FIO_ASSERT(!v, "JSON empty input should fail");
@@ -945,6 +1130,16 @@ FIO_SFUNC void fio___test_json_errors(void) {
   v = test_json_parse("{\"key\" 42}", 10);
   FIO_ASSERT(!v, "JSON missing colon should fail");
 
+  /* Numbers without digits */
+  v = test_json_parse("[.]", 3);
+  FIO_ASSERT(!v, "JSON '[.]' should fail");
+  v = test_json_parse("[e5]", 4);
+  FIO_ASSERT(!v, "JSON '[e5]' should fail");
+  v = test_json_parse("[-]", 3);
+  FIO_ASSERT(!v, "JSON '[-]' should fail");
+  v = test_json_parse("[1e]", 4);
+  FIO_ASSERT(!v, "JSON '[1e]' should fail");
+
   /* Truncated null */
   v = test_json_parse("nul", 3);
   FIO_ASSERT(!v, "JSON truncated 'nul' should fail");
@@ -956,6 +1151,44 @@ FIO_SFUNC void fio___test_json_errors(void) {
   /* Truncated false */
   v = test_json_parse("fals", 4);
   FIO_ASSERT(!v, "JSON truncated 'fals' should fail");
+}
+
+/* *****************************************************************************
+Test: Public Error Contract and Callback Propagation
+***************************************************************************** */
+
+FIO_SFUNC void fio___test_json_error_contract(void) {
+  fio_json_parser_callbacks_s cb = test_json_callbacks;
+  cb.map_push = test_json_map_push_error;
+  cb.array_push = test_json_array_push_error;
+  const int errors[] = {-73, -1, -2, 47};
+  for (size_t i = 0; i < sizeof(errors) / sizeof(*errors); ++i) {
+    /* opaque errors propagate unchanged; the caller owns the partial root */
+    test_json_callback_error_code = errors[i];
+    fio_json_result_s r = fio_json_parse(&cb, NULL, NULL, "{\"a\":1}", 7);
+    FIO_ASSERT(r.err == errors[i] && r.ctx,
+               "JSON map callback error changed: %d != %d",
+               r.err,
+               errors[i]);
+    test_json_value_free((test_json_value_s *)r.ctx);
+    r = fio_json_parse(&cb, NULL, NULL, "[1]", 3);
+    FIO_ASSERT(r.err == errors[i] && r.ctx,
+               "JSON array callback error changed: %d != %d",
+               r.err,
+               errors[i]);
+    test_json_value_free((test_json_value_s *)r.ctx);
+  }
+  test_json_callback_error_code = 0;
+  const char *valid = "{\"a\":[1]}";
+  fio_json_result_s r =
+      fio_json_parse(&cb, NULL, NULL, valid, FIO_STRLEN(valid));
+  FIO_ASSERT(!r.err && r.ctx, "JSON success changed error state");
+  test_json_value_free((test_json_value_s *)r.ctx);
+
+  fio_json_parser_callbacks_s invalid = {0};
+  r = fio_json_parse(&invalid, NULL, NULL, "null", 4);
+  FIO_ASSERT(r.err == FIO_JSON_ERROR_GENERIC && !r.ctx && !r.stop_pos,
+             "JSON callback validation failure must return GENERIC");
 }
 
 /* *****************************************************************************
@@ -974,7 +1207,7 @@ FIO_SFUNC void fio___test_json_bom(void) {
 
   /* BOM only (should succeed with no value) */
   const char bom_only[] = "\xEF\xBB\xBF";
-  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, bom_only, 3);
+  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, NULL, bom_only, 3);
   FIO_ASSERT(!r.err, "JSON BOM-only should not error");
   if (r.ctx)
     test_json_value_free((test_json_value_s *)r.ctx);
@@ -987,7 +1220,7 @@ Test: Stop Position
 FIO_SFUNC void fio___test_json_stop_position(void) {
   /* Parse stops after first complete value */
   const char *json = "42 extra";
-  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, json, 8);
+  fio_json_result_s r = fio_json_parse(&test_json_callbacks, NULL, NULL, json, 8);
   FIO_ASSERT(!r.err, "JSON parsing should succeed");
   FIO_ASSERT(r.stop_pos == 2,
              "JSON stop position mismatch: expected 2, got %zu",
@@ -997,7 +1230,7 @@ FIO_SFUNC void fio___test_json_stop_position(void) {
 
   /* Array parsing */
   json = "[1,2,3]more";
-  r = fio_json_parse(&test_json_callbacks, NULL, json, 11);
+  r = fio_json_parse(&test_json_callbacks, NULL, NULL, json, 11);
   FIO_ASSERT(!r.err, "JSON array parsing should succeed");
   FIO_ASSERT(r.stop_pos == 7,
              "JSON array stop position mismatch: expected 7, got %zu",
@@ -1024,6 +1257,53 @@ FIO_SFUNC void fio___test_json_depth(void) {
   FIO_ASSERT(v, "JSON 5-level nested object parsing failed");
   FIO_ASSERT(v->type == TEST_JSON_MAP, "JSON nested object type mismatch");
   test_json_value_free(v);
+
+  /* Alternate maps and arrays up to the exact permitted depth. */
+  char nested[FIO_JSON_MAX_DEPTH * 8 + 16];
+  size_t len = 0;
+  for (size_t levels = FIO_JSON_MAX_DEPTH;
+       levels <= FIO_JSON_MAX_DEPTH + 1; ++levels) {
+    len = 0;
+    for (size_t i = 0; i < levels; ++i) {
+      const char *opening = (i & 1) ? "{\"k\":" : "[";
+      size_t count = (i & 1) ? 5 : 1;
+      FIO_MEMCPY(nested + len, opening, count);
+      len += count;
+    }
+    nested[len++] = '7';
+    for (size_t i = levels; i; --i)
+      nested[len++] = ((i - 1) & 1) ? '}' : ']';
+    nested[len] = 0;
+    fio_json_result_s result = fio_json_parse(&test_json_callbacks, NULL, NULL,
+                                               nested, len);
+    const int expected_err = levels > FIO_JSON_MAX_DEPTH ? FIO_JSON_ERROR_NESTING : 0;
+    FIO_ASSERT(result.err == expected_err,
+               "JSON depth %zu error mismatch: %d != %d",
+               levels,
+               result.err,
+               expected_err);
+    if (levels == FIO_JSON_MAX_DEPTH) {
+      FIO_ASSERT(result.stop_pos == len && result.ctx,
+                 "JSON maximum accepted depth incomplete");
+      v = result.ctx;
+      for (size_t i = 0; i < levels; ++i) {
+        if (i & 1) {
+          FIO_ASSERT(v->type == TEST_JSON_MAP && v->data.map.count == 1 &&
+                     v->data.map.keys[0]->data.str.len == 1 &&
+                     v->data.map.keys[0]->data.str.buf[0] == 'k',
+                     "JSON deep map structure mismatch at %zu", i);
+          v = v->data.map.values[0];
+        } else {
+          FIO_ASSERT(v->type == TEST_JSON_ARRAY && v->data.arr.count == 1,
+                     "JSON deep array structure mismatch at %zu", i);
+          v = v->data.arr.items[0];
+        }
+      }
+      FIO_ASSERT(v->type == TEST_JSON_NUMBER && v->data.i == 7,
+                 "JSON deep leaf mismatch");
+    }
+    test_json_value_free(result.ctx);
+  }
 }
 
 /* *****************************************************************************
@@ -1183,6 +1463,7 @@ Main Test Entry Point
 ***************************************************************************** */
 
 FIO_SFUNC void fio_test_json(void) {
+  fio___test_json_const_callbacks();
   /* Basic types */
   fio___test_json_null();
   fio___test_json_booleans();
@@ -1203,6 +1484,7 @@ FIO_SFUNC void fio_test_json(void) {
   /* Objects */
   fio___test_json_empty_object();
   fio___test_json_simple_object();
+  fio___test_json_decoded_keys();
   fio___test_json_nested_object();
   fio___test_json_trailing_comma_object();
 
@@ -1220,6 +1502,7 @@ FIO_SFUNC void fio_test_json(void) {
 
   /* Error handling */
   fio___test_json_errors();
+  fio___test_json_error_contract();
 
   /* Special cases */
   fio___test_json_bom();
