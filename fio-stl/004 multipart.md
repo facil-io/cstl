@@ -94,6 +94,36 @@ Parses `data` as MIME multipart input. `boundary` is the boundary string **witho
 - `err == -2` - need more data. Keep `data + result.consumed ... data + len` and append new data before calling again.
 - `err == -1` - unrecoverable parse error or callback abort.
 
+Each part must fit in the buffer, because a part is only reported once its closing delimiter is found. Use `fio_multipart_stream_parse` to stream large file uploads.
+
+#### `fio_multipart_stream_parse`
+
+```c
+typedef struct { /* private */ } fio_multipart_stream_s;
+
+SFUNC fio_multipart_result_s
+fio_multipart_stream_parse(fio_multipart_stream_s *stream,
+                           const fio_multipart_parser_callbacks_s *callbacks,
+                           void *udata,
+                           fio_buf_info_s boundary,
+                           const char *data,
+                           size_t len);
+
+SFUNC int fio_multipart_stream_close(
+    fio_multipart_stream_s *stream,
+    const fio_multipart_parser_callbacks_s *callbacks,
+    void *udata);
+```
+
+Works like `fio_multipart_parse`, but streams file contents. `on_file_start` is called once a file part's headers arrive, `on_file_data` is called with each chunk as it arrives, and `on_file_end` is called when the file's closing delimiter is found. A file part doesn't need to fit in the buffer, so large uploads can be parsed in bounded memory. Regular fields still need to fit.
+
+- Zero-initialize `stream` (`fio_multipart_stream_s s = {0};`) and pass the same `stream` to every call.
+- On `err == -2`, keep `data + result.consumed ... data + len`, append more data, and call again. While streaming a file, a few trailing bytes (up to the delimiter length) are held back in case they start a delimiter.
+- If the input ends early (while `err == -2`), call `fio_multipart_stream_close`. It calls `on_file_end` for any open file and returns `-1` if a file was left incomplete.
+- If `on_file_data` returns non-zero, `on_file_end` is called and parsing stops with `err == -1`.
+
+`field_count` and `file_count` count the parts completed during each call.
+
 ### Examples
 
 #### Basic field and file parsing

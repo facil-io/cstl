@@ -1005,6 +1005,7 @@ typedef struct {
   int64_t last_number;
   double last_float;
   int err_called;
+  int map_done_count;
   char pending_file_name[TEST_BODY_STR_MAX];
   char pending_file_filename[TEST_BODY_STR_MAX];
   char pending_file_ct[TEST_BODY_STR_MAX];
@@ -1180,6 +1181,11 @@ static void test_body_map_done(void *udata, void *map) {
   (void)map;
 }
 
+static void test_body_map_done_count(void *udata, void *map) {
+  ((test_body_ctx_s *)udata)->map_done_count += 1;
+  (void)map;
+}
+
 static void *test_body_on_error(void *udata, void *partial) {
   test_body_ctx_s *ctx = (test_body_ctx_s *)udata;
   ctx->err_called = 1;
@@ -1210,7 +1216,7 @@ static void *test_body_on_file(void *udata,
                    content_type.buf,
                    content_type.len);
   ctx->pending_file_data_len = 0;
-  return NULL;
+  return test_obj_str_new("<file>", 6); /* NULL would skip the file */
 }
 
 static int test_body_on_file_data(void *udata,
@@ -1251,7 +1257,7 @@ static void test_body_on_file_done(void *udata, void *file) {
   }
 }
 
-static const fio_http_body_parse_callbacks_s TEST_BODY_CALLBACKS = {
+static const fio_http_params_parse_callbacks_s TEST_BODY_CALLBACKS = {
     .on_null = test_body_on_null,
     .on_true = test_body_on_true,
     .on_false = test_body_on_false,
@@ -1263,7 +1269,7 @@ static const fio_http_body_parse_callbacks_s TEST_BODY_CALLBACKS = {
     .array_push = test_body_array_push,
     .map_set = test_body_map_set,
     .array_done = test_body_array_done,
-    .map_done = test_body_map_done,
+    .map_done = test_body_map_done_count,
     .on_file = test_body_on_file,
     .on_file_data = test_body_on_file_data,
     .on_file_done = test_body_on_file_done,
@@ -1291,7 +1297,7 @@ static fio_http_s *test_body_make_handle(const char *content_type,
   return h;
 }
 
-static void test_body_free_result(fio_http_body_parse_result_s *r) {
+static void test_body_free_result(fio_http_params_parse_result_s *r) {
   test_obj_free((test_obj_s *)r->result);
   r->result = NULL;
 }
@@ -1305,7 +1311,7 @@ static void test_body_parse_urlencoded_simple(void) {
                                         body,
                                         strlen(body));
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err, "urlencoded simple: parse should succeed (err=%d)", r.err);
   FIO_ASSERT(ctx.got_map, "urlencoded simple: should create a map");
@@ -1328,7 +1334,7 @@ static void test_body_parse_urlencoded_encoded(void) {
                                         body,
                                         strlen(body));
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err,
              "urlencoded encoded: parse should succeed (err=%d)",
@@ -1350,7 +1356,7 @@ static void test_body_parse_urlencoded_empty_value(void) {
                                         body,
                                         strlen(body));
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err, "urlencoded empty value: parse should succeed");
   test_body_pair_s *pk = test_body_find(&ctx, "key");
@@ -1367,7 +1373,7 @@ static void test_body_parse_urlencoded_multi_value(void) {
                                         body,
                                         strlen(body));
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err, "urlencoded multi-value: parse should succeed");
   size_t color_count = 0;
@@ -1382,6 +1388,65 @@ static void test_body_parse_urlencoded_multi_value(void) {
   fio_http_free(h);
 }
 
+/* ---- Query tests ---- */
+
+static void test_query_parse(void) {
+  fprintf(stderr, "  * query_parse values are Strings\n");
+  fio_http_s *h = fio_http_new();
+  fio_http_query_set(
+      h,
+      FIO_STR_INFO1((char *)"n=null&t=TRUE&f=false&i=-42&d=1.5&s=hello+w%21"
+                            "&flag&empty=&&q=%34%32x&h=0x1F&p=%2B5&o=0123"));
+  test_body_ctx_s ctx = {0};
+  fio_http_params_parse_result_s r =
+      fio_http_query_parse(h, &TEST_BODY_CALLBACKS, &ctx);
+  FIO_ASSERT(!r.err, "query_parse: should succeed (err=%d)", r.err);
+  FIO_ASSERT(ctx.got_map, "query_parse: should create a map");
+  FIO_ASSERT(ctx.count == 12, "query_parse: expected 12 pairs, got %zu", ctx.count);
+  FIO_ASSERT(!ctx.got_null && !ctx.got_true && !ctx.got_false &&
+                 !ctx.last_number && ctx.last_float == 0.0,
+             "query_parse: no primitives should be created");
+  static const char *expect[][2] = {
+      {"n", "null"},
+      {"t", "TRUE"},
+      {"f", "false"},
+      {"i", "-42"},
+      {"d", "1.5"},
+      {"s", "hello w!"},
+      {"flag", ""},
+      {"empty", ""},
+      {"q", "42x"},
+      {"h", "0x1F"},
+      {"p", "+5"},
+      {"o", "0123"},
+  };
+  for (size_t i = 0; i < sizeof(expect) / sizeof(expect[0]); ++i) {
+    test_body_pair_s *p = test_body_find(&ctx, expect[i][0]);
+    FIO_ASSERT(p, "query_parse: key '%s' missing", expect[i][0]);
+    FIO_ASSERT(!strcmp(p->val, expect[i][1]),
+               "query_parse: key '%s' = '%s', expected '%s'",
+               expect[i][0],
+               p->val,
+               expect[i][1]);
+  }
+  test_body_free_result(&r);
+
+  /* empty query: empty map, no error */
+  fio_http_query_set(h, FIO_STR_INFO0);
+  test_body_ctx_s ctx2 = {0};
+  r = fio_http_query_parse(h, &TEST_BODY_CALLBACKS, &ctx2);
+  FIO_ASSERT(!r.err && r.result && ctx2.got_map && !ctx2.count,
+             "query_parse: empty query should produce an empty map");
+  test_body_free_result(&r);
+
+  /* invalid arguments */
+  r = fio_http_query_parse(h, NULL, NULL);
+  FIO_ASSERT(r.err && !r.result, "query_parse: NULL callbacks should fail");
+  r = fio_http_query_parse(NULL, &TEST_BODY_CALLBACKS, &ctx2);
+  FIO_ASSERT(r.err && !r.result, "query_parse: NULL handle should fail");
+  fio_http_free(h);
+}
+
 /* ---- JSON tests ---- */
 
 static void test_body_parse_json_simple(void) {
@@ -1389,7 +1454,7 @@ static void test_body_parse_json_simple(void) {
   const char *body = "{\"key\": \"value\", \"num\": 42}";
   fio_http_s *h = test_body_make_handle("application/json", body, strlen(body));
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err, "JSON simple: parse should succeed (err=%d)", r.err);
   FIO_ASSERT(ctx.got_map, "JSON simple: should create a map");
@@ -1408,7 +1473,7 @@ static void test_body_parse_json_array(void) {
   const char *body = "[\"a\", \"b\", \"c\"]";
   fio_http_s *h = test_body_make_handle("application/json", body, strlen(body));
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err, "JSON array: parse should succeed");
   FIO_ASSERT(ctx.got_array, "JSON array: should create an array");
@@ -1492,7 +1557,7 @@ static void test_body_parse_multipart_simple_field(void) {
   snprintf(ct, sizeof(ct), "multipart/form-data; boundary=%s", boundary);
   fio_http_s *h = test_body_make_handle(ct, body, body_len);
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err,
              "multipart simple field: parse should succeed (err=%d)",
@@ -1522,7 +1587,7 @@ static void test_body_parse_multipart_file_upload(void) {
   snprintf(ct, sizeof(ct), "multipart/form-data; boundary=%s", boundary);
   fio_http_s *h = test_body_make_handle(ct, body, body_len);
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(!r.err,
              "multipart file upload: parse should succeed (err=%d)",
@@ -1543,6 +1608,358 @@ static void test_body_parse_multipart_file_upload(void) {
   fio_http_free(h);
 }
 
+
+/* ---- Multipart file skipping and streaming ---- */
+
+static void *test_body_on_file_skip(void *udata,
+                                    fio_str_info_s name,
+                                    fio_str_info_s filename,
+                                    fio_str_info_s content_type) {
+  ((test_body_ctx_s *)udata)->got_array += 1; /* counts on_file calls */
+  (void)name, (void)filename, (void)content_type;
+  return NULL;
+}
+
+static const fio_http_params_parse_callbacks_s TEST_SKIP_FILE_CALLBACKS = {
+    .on_string = test_body_on_string,
+    .on_map = test_body_on_map,
+    .map_set = test_body_map_set,
+    .map_done = test_body_map_done_count,
+    .on_file = test_body_on_file_skip,
+    .on_file_data = test_body_on_file_data,
+    .on_file_done = test_body_on_file_done,
+    .on_error = test_body_on_error,
+    .free_unused = test_body_free_unused,
+};
+
+static void test_body_parse_multipart_skip_file(void) {
+  fprintf(stderr, "  * body_parse multipart: on_file NULL skips the file\n");
+  char body[1024];
+  size_t body_len = test_body_build_multipart(body,
+                                              sizeof(body),
+                                              "skipb",
+                                              "up",
+                                              "file data",
+                                              "a.txt",
+                                              "text/plain",
+                                              "f",
+                                              "v",
+                                              NULL,
+                                              NULL,
+                                              (const char *)NULL);
+  fio_http_s *h = test_body_make_handle("multipart/form-data; boundary=skipb",
+                                        body,
+                                        body_len);
+  test_body_ctx_s ctx = {0};
+  fio_http_params_parse_result_s r =
+      fio_http_body_parse(h, &TEST_SKIP_FILE_CALLBACKS, &ctx);
+  FIO_ASSERT(!r.err && ctx.got_array == 1,
+             "skip file: err %d, on_file calls %d",
+             r.err,
+             ctx.got_array);
+  FIO_ASSERT(ctx.count == 1 && !strcmp(ctx.pairs[0].key, "f") &&
+                 !ctx.pending_file_data_len,
+             "skip file: on_file_data / on_file_done must not run (%zu pairs)",
+             ctx.count);
+  test_body_free_result(&r);
+  fio_http_free(h);
+}
+
+typedef struct {
+  const char *expect;
+  size_t expect_len;
+  size_t got;
+  size_t calls;
+  size_t max_chunk;
+  int mismatch;
+  int done;
+  int fields;
+} test_stream_ctx_s;
+
+static void *test_stream_on_string(void *udata, const void *d, size_t l) {
+  (void)udata;
+  return test_obj_str_new(d, l);
+}
+static void *test_stream_on_map(void *udata, void *parent) {
+  (void)udata, (void)parent;
+  return test_obj_sentinel_new(TEST_OBJ_MAP);
+}
+static int test_stream_map_set(void *udata, void *map, void *k, void *v) {
+  test_stream_ctx_s *c = (test_stream_ctx_s *)udata;
+  test_obj_s *key = (test_obj_s *)k;
+  c->fields += (key && key->type == TEST_OBJ_STRING &&
+                !strcmp(key->u.str.buf, "after"));
+  test_obj_free(key);
+  if (v != (void *)c)
+    test_obj_free((test_obj_s *)v);
+  (void)map;
+  return 0;
+}
+static void *test_stream_on_file(void *udata,
+                                 fio_str_info_s name,
+                                 fio_str_info_s filename,
+                                 fio_str_info_s content_type) {
+  (void)name, (void)filename, (void)content_type;
+  return udata; /* the context itself is the file handle */
+}
+static int test_stream_on_file_data(void *udata,
+                                    void *file,
+                                    fio_buf_info_s data) {
+  test_stream_ctx_s *c = (test_stream_ctx_s *)udata;
+  c->mismatch |= (file != udata) || (c->got + data.len > c->expect_len) ||
+                 memcmp(c->expect + c->got, data.buf, data.len);
+  c->got += data.len;
+  c->calls += 1;
+  if (data.len > c->max_chunk)
+    c->max_chunk = data.len;
+  return 0;
+}
+static void test_stream_on_file_done(void *udata, void *file) {
+  ((test_stream_ctx_s *)udata)->done += (file == udata);
+}
+static void test_stream_free_unused(void *udata, void *obj) {
+  if (obj != udata)
+    test_obj_free((test_obj_s *)obj);
+}
+
+static const fio_http_params_parse_callbacks_s TEST_STREAM_CALLBACKS = {
+    .on_string = test_stream_on_string,
+    .on_map = test_stream_on_map,
+    .map_set = test_stream_map_set,
+    .on_file = test_stream_on_file,
+    .on_file_data = test_stream_on_file_data,
+    .on_file_done = test_stream_on_file_done,
+    .free_unused = test_stream_free_unused,
+};
+
+static void test_body_parse_multipart_stream_large(void) {
+  fprintf(stderr, "  * params_parse multipart: large upload is streamed\n");
+  const size_t file_len = (FIO_HTTP_BODY_RAM_LIMIT * 4) + 12345;
+  char *file = (char *)malloc(file_len);
+  FIO_ASSERT(file, "allocation failed");
+  for (size_t i = 0; i < file_len; ++i)
+    file[i] = (char)(i * 7 + (i >> 9));
+  const char *head = "--bigb\r\nContent-Disposition: form-data; name=\"up\"; "
+                     "filename=\"big.bin\"\r\n\r\n";
+  const char *tail = "\r\n--bigb\r\nContent-Disposition: form-data; "
+                     "name=\"after\"\r\n\r\nok\r\n--bigb--\r\n";
+  fio_http_s *h = fio_http_new();
+  fio_http_request_header_set(
+      h,
+      FIO_STR_INFO2((char *)"content-type", 12),
+      FIO_STR_INFO1((char *)"multipart/form-data; boundary=bigb"));
+  fio_http_body_write(h, head, strlen(head));
+  fio_http_body_write(h, file, file_len);
+  fio_http_body_write(h, tail, strlen(tail));
+  FIO_ASSERT(fio_http_body_fd(h) != -1, "large body should spill to a file");
+
+  test_stream_ctx_s c = {.expect = file, .expect_len = file_len};
+  fio_http_params_parse_result_s r =
+      fio_http_params_parse(h, &TEST_STREAM_CALLBACKS, &c);
+  FIO_ASSERT(!r.err && r.result, "stream large: err %d", r.err);
+  FIO_ASSERT(c.got == file_len && !c.mismatch && c.done == 1,
+             "stream large: got %zu / %zu (mismatch %d, done %d)",
+             c.got,
+             file_len,
+             c.mismatch,
+             c.done);
+  FIO_ASSERT(c.calls > 4 && c.max_chunk <= (1UL << 16),
+             "stream large: expected bounded chunks (%zu calls, max %zu)",
+             c.calls,
+             c.max_chunk);
+  FIO_ASSERT(c.fields == 1, "stream large: field after the file missing");
+  FIO_ASSERT(r.consumed == fio_http_body_length(h),
+             "stream large: consumed %zu / %zu",
+             r.consumed,
+             fio_http_body_length(h));
+  test_obj_free((test_obj_s *)r.result);
+
+  /* truncated body: the open file is closed and the parse fails */
+  fio_http_s *t = fio_http_new();
+  fio_http_request_header_set(
+      t,
+      FIO_STR_INFO2((char *)"content-type", 12),
+      FIO_STR_INFO1((char *)"multipart/form-data; boundary=bigb"));
+  fio_http_body_write(t, head, strlen(head));
+  fio_http_body_write(t, file, file_len / 2);
+  test_stream_ctx_s c2 = {.expect = file, .expect_len = file_len};
+  r = fio_http_params_parse(t, &TEST_STREAM_CALLBACKS, &c2);
+  FIO_ASSERT(r.err && c2.done == 1 && !c2.mismatch,
+             "stream truncated: err %d, done %d",
+             r.err,
+             c2.done);
+  test_obj_free((test_obj_s *)r.result);
+  fio_http_free(t);
+  fio_http_free(h);
+  free(file);
+}
+
+/* ---- Params (query + body) tests ---- */
+
+static fio_http_params_parse_result_s test_params_run(test_body_ctx_s *ctx,
+                                                      const char *query,
+                                                      const char *ct,
+                                                      const char *body,
+                                                      size_t body_len) {
+  fio_http_s *h = ct ? test_body_make_handle(ct, body, body_len)
+                     : fio_http_new();
+  if (!ct && body_len)
+    fio_http_body_write(h, body, body_len);
+  if (query)
+    fio_http_query_set(h, FIO_STR_INFO1((char *)query));
+  fio_http_params_parse_result_s r =
+      fio_http_params_parse(h, &TEST_BODY_CALLBACKS, ctx);
+  fio_http_free(h);
+  return r;
+}
+
+static void test_params_expect(test_body_ctx_s *ctx,
+                               const char *name,
+                               size_t index,
+                               const char *key,
+                               const char *val) {
+  FIO_ASSERT(index < ctx->count, "%s: missing pair #%zu", name, index);
+  FIO_ASSERT(!strcmp(ctx->pairs[index].key, key) &&
+                 !strcmp(ctx->pairs[index].val, val),
+             "%s: pair #%zu = '%s'=>'%s', expected '%s'=>'%s'",
+             name,
+             index,
+             ctx->pairs[index].key,
+             ctx->pairs[index].val,
+             key,
+             val);
+}
+
+static void test_params_parse(void) {
+  fprintf(stderr, "  * params_parse query + body\n");
+  fio_http_params_parse_result_s r;
+  { /* query then urlencoded body, same map, query first */
+    test_body_ctx_s ctx = {0};
+    const char *body = "c=TRUE&a=2";
+    r = test_params_run(&ctx,
+                        "a=1&b",
+                        "application/x-www-form-urlencoded",
+                        body,
+                        strlen(body));
+    FIO_ASSERT(!r.err && r.result && ctx.count == 4,
+               "params urlencoded: err=%d count=%zu",
+               r.err,
+               ctx.count);
+    FIO_ASSERT(r.consumed == 5 + strlen(body),
+               "params urlencoded: consumed %zu",
+               r.consumed);
+    FIO_ASSERT(ctx.map_done_count == 1, "params urlencoded: map_done once");
+    test_params_expect(&ctx, "params urlencoded", 0, "a", "1");
+    test_params_expect(&ctx, "params urlencoded", 1, "b", "");
+    test_params_expect(&ctx, "params urlencoded", 2, "c", "TRUE");
+    test_params_expect(&ctx, "params urlencoded", 3, "a", "2");
+    test_body_free_result(&r);
+  }
+  { /* JSON object body merges into the query map */
+    test_body_ctx_s ctx = {0};
+    const char *body = "{\"j\": \"x\", \"n\": 7}";
+    r = test_params_run(&ctx, "q=1", "application/json", body, strlen(body));
+    FIO_ASSERT(!r.err && r.result && ctx.count == 3,
+               "params JSON object: err=%d count=%zu",
+               r.err,
+               ctx.count);
+    FIO_ASSERT(ctx.map_done_count == 1, "params JSON object: map_done once");
+    test_params_expect(&ctx, "params JSON object", 0, "q", "1");
+    test_params_expect(&ctx, "params JSON object", 1, "j", "x");
+    test_params_expect(&ctx, "params JSON object", 2, "n", "7");
+    test_body_free_result(&r);
+  }
+  { /* JSON array / primitive bodies are set under "_json" */
+    test_body_ctx_s ctx = {0};
+    r = test_params_run(&ctx, "q=1", "application/json", "[1,2]", 5);
+    FIO_ASSERT(!r.err && r.result && ctx.count == 2 && ctx.got_array,
+               "params JSON array: err=%d count=%zu",
+               r.err,
+               ctx.count);
+    test_params_expect(&ctx, "params JSON array", 1, "_json", "<array>");
+    test_body_free_result(&r);
+    test_body_ctx_s ctx2 = {0};
+    r = test_params_run(&ctx2, NULL, "application/json", "42", 2);
+    FIO_ASSERT(!r.err && r.result && ctx2.count == 1,
+               "params JSON primitive: err=%d count=%zu",
+               r.err,
+               ctx2.count);
+    test_params_expect(&ctx2, "params JSON primitive", 0, "_json", "42");
+    test_body_free_result(&r);
+  }
+  { /* multipart body */
+    test_body_ctx_s ctx = {0};
+    char body[1024];
+    size_t len = test_body_build_multipart(body,
+                                           sizeof(body),
+                                           "pb123",
+                                           "f",
+                                           "v",
+                                           NULL,
+                                           NULL,
+                                           NULL);
+    r = test_params_run(&ctx,
+                        "q=1",
+                        "multipart/form-data; boundary=pb123",
+                        body,
+                        len);
+    FIO_ASSERT(!r.err && r.result && ctx.count == 2,
+               "params multipart: err=%d count=%zu",
+               r.err,
+               ctx.count);
+    test_params_expect(&ctx, "params multipart", 0, "q", "1");
+    test_params_expect(&ctx, "params multipart", 1, "f", "v");
+    test_body_free_result(&r);
+  }
+  { /* unknown / missing Content-Type body is ignored */
+    test_body_ctx_s ctx = {0};
+    r = test_params_run(&ctx, "q=1", "text/plain", "a=b", 3);
+    FIO_ASSERT(!r.err && r.result && ctx.count == 1 && !ctx.err_called,
+               "params unknown content-type: err=%d count=%zu",
+               r.err,
+               ctx.count);
+    test_body_free_result(&r);
+    test_body_ctx_s ctx2 = {0};
+    r = test_params_run(&ctx2, NULL, NULL, "a=b", 3);
+    FIO_ASSERT(!r.err && r.result && !ctx2.count && ctx2.got_map,
+               "params missing content-type: should be an empty map");
+    test_body_free_result(&r);
+  }
+  { /* nothing at all: empty map */
+    test_body_ctx_s ctx = {0};
+    r = test_params_run(&ctx, NULL, NULL, NULL, 0);
+    FIO_ASSERT(!r.err && r.result && !ctx.count && ctx.map_done_count == 1,
+               "params empty: should be an empty, finished map");
+    test_body_free_result(&r);
+  }
+  { /* JSON errors report the params map through on_error (no leaks) */
+    test_body_ctx_s ctx = {0};
+    const char *bad[] = {"{\"a\": [1, {\"b\":", "[1, 2", "{\"a\" 1}"};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+      ctx = (test_body_ctx_s){0};
+      r = test_params_run(&ctx,
+                          "q=1",
+                          "application/json",
+                          bad[i],
+                          strlen(bad[i]));
+      FIO_ASSERT(r.err && ctx.err_called && !r.result,
+                 "params JSON error #%zu: err=%d err_called=%d",
+                 i,
+                 r.err,
+                 ctx.err_called);
+    }
+  }
+  { /* invalid arguments */
+    fio_http_s *h = fio_http_new();
+    r = fio_http_params_parse(h, NULL, NULL);
+    FIO_ASSERT(r.err && !r.result, "params: NULL callbacks should fail");
+    fio_http_free(h);
+    test_body_ctx_s ctx = {0};
+    r = fio_http_params_parse(NULL, &TEST_BODY_CALLBACKS, &ctx);
+    FIO_ASSERT(r.err && !r.result, "params: NULL handle should fail");
+  }
+}
+
 /* ---- Edge cases ---- */
 
 static void test_body_parse_empty_body(void) {
@@ -1553,7 +1970,7 @@ static void test_body_parse_empty_body(void) {
       FIO_STR_INFO2((char *)"content-type", 12),
       FIO_STR_INFO1((char *)"application/x-www-form-urlencoded"));
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(ctx.count == 0,
              "empty body: should have 0 pairs (got %zu)",
@@ -1567,7 +1984,7 @@ static void test_body_parse_no_content_type(void) {
   fio_http_s *h = fio_http_new();
   fio_http_body_write(h, "key=val", 7);
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(r.err != 0,
              "no content-type: should return error for unknown type");
@@ -1579,7 +1996,7 @@ static void test_body_parse_unknown_content_type(void) {
   fprintf(stderr, "  * body_parse unknown Content-Type\n");
   fio_http_s *h = test_body_make_handle("text/plain", "hello world", 11);
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(r.err != 0,
              "unknown content-type: should return error, not crash");
@@ -1590,7 +2007,7 @@ static void test_body_parse_unknown_content_type(void) {
 static void test_body_parse_null_callbacks(void) {
   fprintf(stderr, "  * body_parse NULL callbacks\n");
   fio_http_s *h = test_body_make_handle("application/json", "{\"k\":1}", 7);
-  fio_http_body_parse_result_s r = fio_http_body_parse(h, NULL, NULL);
+  fio_http_params_parse_result_s r = fio_http_body_parse(h, NULL, NULL);
   FIO_ASSERT(r.err != 0, "null callbacks: should return error");
   fio_http_free(h);
 }
@@ -1598,7 +2015,7 @@ static void test_body_parse_null_callbacks(void) {
 static void test_body_parse_null_handle(void) {
   fprintf(stderr, "  * body_parse NULL handle\n");
   test_body_ctx_s ctx = {0};
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(NULL, &TEST_BODY_CALLBACKS, &ctx);
   FIO_ASSERT(r.err != 0, "null handle: should return error");
 }
@@ -1653,7 +2070,7 @@ static void *test_decode_error(void *udata, void *partial) {
   return NULL;
 }
 
-static const fio_http_body_parse_callbacks_s TEST_DECODE_CALLBACKS = {
+static const fio_http_params_parse_callbacks_s TEST_DECODE_CALLBACKS = {
     .on_string = test_decode_string,
     .on_map = test_decode_map,
     .map_set = test_decode_set,
@@ -1668,7 +2085,7 @@ static void test_decode_parse(const char *content_type,
                               test_decode_ctx_s *ctx) {
   fio_http_s *h = test_body_make_handle(content_type, body, body_len);
   FIO_ASSERT(h, "decode regression: handle allocation failed");
-  fio_http_body_parse_result_s r =
+  fio_http_params_parse_result_s r =
       fio_http_body_parse(h, &TEST_DECODE_CALLBACKS, ctx);
   FIO_ASSERT(!r.err && ctx->seen == 1,
              "decode regression: parse err=%d pairs=%zu",
@@ -2034,6 +2451,10 @@ int main(void) {
   test_body_parse_urlencoded_encoded();
   test_body_parse_urlencoded_empty_value();
   test_body_parse_urlencoded_multi_value();
+  test_query_parse();
+  test_params_parse();
+  test_body_parse_multipart_skip_file();
+  test_body_parse_multipart_stream_large();
   test_body_parse_json_simple();
   test_body_parse_json_array();
   test_body_parse_multipart_simple_field();

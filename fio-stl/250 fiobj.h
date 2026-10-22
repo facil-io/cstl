@@ -377,6 +377,28 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), free)(FIOBJ i);
 FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___FLOAT_CLASS_VTBL;
 
 /* *****************************************************************************
+FIOBJ Data (FIOBJ_T_OTHER, a `fio_data_s` store)
+***************************************************************************** */
+
+/** The `FIOBJ_TYPE` of Data objects (a `FIOBJ_T_OTHER` class). */
+#define FIOBJ_T_DATA 40
+
+/**
+ * Creates a new Data object - a `fio_data_s` store that keeps data in RAM
+ * until it exceeds `ram_limit` bytes (0 = `FIO_DATA_RAM_LIMIT`), then moves it
+ * to a temporary file.
+ */
+FIO_IFUNC FIOBJ fiobj_data_new(size_t ram_limit);
+
+/**
+ * Returns the `fio_data_s` store of a Data object (use the `fio_data_*` API to
+ * read / write), or NULL if `o` isn't a Data object.
+ */
+FIO_IFUNC fio_data_s *fiobj_data_ptr(FIOBJ o);
+
+FIOBJ_EXTERN_OBJ const FIOBJ_class_vtable_s FIOBJ___DATA_CLASS_VTBL;
+
+/* *****************************************************************************
 FIOBJ Strings
 ***************************************************************************** */
 
@@ -1055,6 +1077,47 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), free)(FIOBJ i) {
 }
 
 /* *****************************************************************************
+FIOBJ Data
+***************************************************************************** */
+
+#define FIO_REF_NAME     fiobj___data
+#define FIO_REF_TYPE     fio_data_s
+#define FIO_REF_INIT(d)  (d) = (fio_data_s)FIO_DATA_INIT
+#define FIO_REF_DESTROY(d) fio_data_destroy(&(d))
+#define FIO_REF_METADATA const FIOBJ_class_vtable_s *
+#define FIO_REF_METADATA_INIT(m)                                               \
+  do {                                                                         \
+    m = &FIOBJ___DATA_CLASS_VTBL;                                              \
+    FIOBJ_MARK_MEMORY_ALLOC();                                                 \
+  } while (0)
+#define FIO_REF_METADATA_DESTROY(m)                                            \
+  do {                                                                         \
+    FIOBJ_MARK_MEMORY_FREE();                                                  \
+  } while (0)
+#define FIO_PTR_TAG(p)          FIOBJ_PTR_TAG(p, FIOBJ_T_OTHER)
+#define FIO_PTR_UNTAG(p)        FIOBJ_PTR_UNTAG(p)
+#define FIO_PTR_TAG_VALIDATE(p) (FIOBJ_TYPE_CLASS(p) == FIOBJ_T_OTHER)
+#define FIO_PTR_TAG_TYPE        FIOBJ
+#undef FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 1
+#include FIO_INCLUDE_FILE
+#undef FIO___RECURSIVE_INCLUDE
+#define FIO___RECURSIVE_INCLUDE 99
+
+FIO_IFUNC FIOBJ fiobj_data_new(size_t ram_limit) {
+  FIOBJ o = fiobj___data_new2();
+  if (o)
+    ((fio_data_s *)FIOBJ_PTR_UNTAG(o))->limit = ram_limit;
+  return o;
+}
+
+FIO_IFUNC fio_data_s *fiobj_data_ptr(FIOBJ o) {
+  if (FIOBJ_TYPE(o) != FIOBJ_T_DATA)
+    return NULL;
+  return (fio_data_s *)FIOBJ_PTR_UNTAG(o);
+}
+
+/* *****************************************************************************
 FIOBJ Basic Iteration
 ***************************************************************************** */
 
@@ -1706,6 +1769,62 @@ FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___FLOAT_CLASS_VTBL = {
     .each1 = NULL,
     /** Deallocates the element (but NOT any of it's exposed elements). */
     .free2 = fiobj___bigfloat_free2,
+};
+
+/* *****************************************************************************
+FIOBJ Data - vtable
+***************************************************************************** */
+
+/** Returns the whole content (temporary; may read a spilled file to RAM). */
+FIO_SFUNC fio_str_info_s fiobj___data2cstr(FIOBJ o) {
+  fio_data_s *d = (fio_data_s *)FIOBJ_PTR_UNTAG(o);
+  size_t pos = fio_data_pos(d);
+  fio_data_seek(d, 0);
+  fio_str_info_s r = fio_data_read(d, fio_data_len(d));
+  fio_data_seek(d, (ssize_t)pos);
+  if (!r.buf)
+    r = FIO_STR_INFO2((char *)"", 0);
+  return r;
+}
+
+/** Data objects compare by content (read in chunks). */
+FIO_SFUNC unsigned char fiobj___data_eq(FIOBJ restrict a, FIOBJ restrict b) {
+  fio_data_s *da = (fio_data_s *)FIOBJ_PTR_UNTAG(a);
+  fio_data_s *db = (fio_data_s *)FIOBJ_PTR_UNTAG(b);
+  if (da == db)
+    return 1;
+  if (fio_data_len(da) != fio_data_len(db))
+    return 0;
+  size_t pa = fio_data_pos(da), pb = fio_data_pos(db);
+  unsigned char r = 1;
+  fio_data_seek(da, 0);
+  fio_data_seek(db, 0);
+  for (fio_str_info_s x; r && (x = fio_data_read(da, 4096)).len;) {
+    fio_str_info_s y = fio_data_read(db, x.len);
+    r = (x.len == y.len && !FIO_MEMCMP(x.buf, y.buf, x.len));
+  }
+  fio_data_seek(da, (ssize_t)pa);
+  fio_data_seek(db, (ssize_t)pb);
+  return r;
+}
+
+/** A Data object's numeral value is its length. */
+FIO_SFUNC intptr_t fiobj___data2i(FIOBJ o) {
+  return (intptr_t)fio_data_len((fio_data_s *)FIOBJ_PTR_UNTAG(o));
+}
+FIO_SFUNC double fiobj___data2f(FIOBJ o) {
+  return (double)fio_data_len((fio_data_s *)FIOBJ_PTR_UNTAG(o));
+}
+
+FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___DATA_CLASS_VTBL = {
+    .type_id = FIOBJ_T_DATA,
+    .is_eq = fiobj___data_eq,
+    .to_s = fiobj___data2cstr,
+    .to_i = fiobj___data2i,
+    .to_f = fiobj___data2f,
+    .count = fiobj___count_noop,
+    .each1 = NULL,
+    .free2 = fiobj___data_free2,
 };
 
 /* *****************************************************************************

@@ -1037,11 +1037,11 @@ SFUNC int fio_http_mimetype_register(char *file_ext,
 SFUNC fio_str_info_s fio_http_mimetype(char *file_ext, size_t file_ext_len);
 
 /* *****************************************************************************
-HTTP Body Parsing Helpers
+HTTP Params Parsing Helpers (query / body)
 ***************************************************************************** */
 
 /**
- * HTTP body parser callbacks.
+ * HTTP params parser callbacks (query and body parsing).
  *
  * All callbacks receive `udata` as first parameter.
  * Primitive callbacks return the created object as `void *`.
@@ -1085,6 +1085,9 @@ typedef struct {
    *
    * Return context for this file (e.g., fd, stream, buffer).
    * Return NULL to skip this file (on_file_data/on_file_done won't be called).
+   *
+   * File data is streamed in chunks (the body is never fully loaded), so large
+   * uploads can be written to storage as they are parsed.
    */
   void *(*on_file)(void *udata,
                    fio_str_info_s name,
@@ -1102,17 +1105,17 @@ typedef struct {
   /** Called to free an unused object (e.g., key when map_set fails). */
   void (*free_unused)(void *udata, void *obj);
 
-} fio_http_body_parse_callbacks_s;
+} fio_http_params_parse_callbacks_s;
 
-/** HTTP body parse result. */
+/** HTTP params parse result. */
 typedef struct {
   /** Top-level parsed object (caller responsible for freeing). */
   void *result;
-  /** Number of bytes consumed from body. */
+  /** Number of bytes consumed from the parsed input(s). */
   size_t consumed;
   /** Error code: 0 = success. */
   int err;
-} fio_http_body_parse_result_s;
+} fio_http_params_parse_result_s;
 
 /**
  * Parses the HTTP request body, auto-detecting content type.
@@ -1125,10 +1128,48 @@ typedef struct {
  * @param udata     User context passed to all callbacks.
  * @return          Parse result with top-level object and status.
  */
-SFUNC fio_http_body_parse_result_s
+SFUNC fio_http_params_parse_result_s
 fio_http_body_parse(fio_http_s *h,
-                    const fio_http_body_parse_callbacks_s *callbacks,
+                    const fio_http_params_parse_callbacks_s *callbacks,
                     void *udata);
+
+/**
+ * Parses the HTTP query string (URL-encoded) into a map.
+ *
+ * All values are Strings (as with URL-encoded bodies); use
+ * `fio_string2primitive` to convert a value when appropriate. Missing values (`key` or `key=`) produce empty
+ * Strings. Keys and values are percent / `+` decoded.
+ *
+ * @param h         The HTTP handle.
+ * @param callbacks Parser callbacks (same as for `fio_http_body_parse`).
+ * @param udata     User context passed to all callbacks.
+ * @return          Parse result with top-level map and status.
+ */
+SFUNC fio_http_params_parse_result_s
+fio_http_query_parse(fio_http_s *h,
+                     const fio_http_params_parse_callbacks_s *callbacks,
+                     void *udata);
+
+/**
+ * Parses the query string and then the body (if any) into a single map.
+ *
+ * Query pairs are set first, followed by the body's fields (the `map_set`
+ * callback decides how duplicate keys are handled). JSON object bodies are
+ * merged into the map; any other JSON body (array, primitive) is set under the
+ * `"_json"` key. Bodies with a missing / unknown Content-Type are ignored.
+ *
+ * The result is always the params map (or whatever `on_error` returns on
+ * error). `consumed` is the sum of the query and body bytes consumed.
+ *
+ * @param h         The HTTP handle.
+ * @param callbacks Parser callbacks (same as for `fio_http_body_parse`).
+ * @param udata     User context passed to all callbacks.
+ * @return          Parse result with top-level map and status.
+ */
+SFUNC fio_http_params_parse_result_s
+fio_http_params_parse(fio_http_s *h,
+                      const fio_http_params_parse_callbacks_s *callbacks,
+                      void *udata);
 
 /* *****************************************************************************
 Header Value / Property Iteration

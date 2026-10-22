@@ -31,8 +31,55 @@ FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
   return 0;
 }
 
+/* FIOBJ_T_DATA: a fio_data_s store spilling to a temporary file */
+FIO_SFUNC void FIO_NAME_TEST(stl, fiobj_data)(void) {
+  fprintf(stderr, "* Testing FIOBJ Data (FIOBJ_T_DATA)\n");
+  FIOBJ a = fiobj_data_new(16); /* tiny RAM limit: spills quickly */
+  FIOBJ b = fiobj_data_new(0);
+  FIO_ASSERT(FIOBJ_TYPE(a) == FIOBJ_T_DATA && FIOBJ_TYPE_CLASS(a) == FIOBJ_T_OTHER,
+             "fiobj_data_new type");
+  FIO_ASSERT(fiobj_data_ptr(a) && !fiobj_data_ptr(fiobj_true()) &&
+                 !fiobj_data_ptr(FIOBJ_INVALID),
+             "fiobj_data_ptr type checks");
+  const char *txt = "Hello \"Data\" store, spilling past the RAM limit.";
+  size_t len = strlen(txt);
+  FIO_ASSERT(!fio_data_write(fiobj_data_ptr(a), txt, len), "write a");
+  FIO_ASSERT(!fio_data_write(fiobj_data_ptr(b), txt, len), "write b");
+  FIO_ASSERT(fio_data_fd(fiobj_data_ptr(a)) != -1 &&
+                 fio_data_fd(fiobj_data_ptr(b)) == -1,
+             "a should spill to a file, b should stay in RAM");
+  fio_str_info_s sa = fiobj2cstr(a);
+  FIO_ASSERT(sa.len == len && !memcmp(sa.buf, txt, len), "fiobj2cstr(a)");
+  FIO_ASSERT(fiobj2i(a) == (intptr_t)len, "fiobj2i is the length");
+  FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(a, b), "equal content should be equal");
+  fio_data_write(fiobj_data_ptr(b), "!", 1);
+  FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(a, b), "different content");
+  /* reading position is preserved by fiobj2cstr / eq */
+  fio_data_seek(fiobj_data_ptr(a), 6);
+  (void)fiobj2cstr(a);
+  FIO_ASSERT(fio_data_pos(fiobj_data_ptr(a)) == 6, "position preserved");
+  /* JSON output renders the content as a String; hashes hold Data objects */
+  FIOBJ h = fiobj_hash_new();
+  fiobj_hash_set2(h, "d", 1, fiobj_dup(a));
+  FIOBJ json = fiobj2json(FIOBJ_INVALID, h, 0);
+  fio_str_info_s js = fiobj2cstr(json);
+  const char *expect =
+      "{\"d\":\"Hello \\\"Data\\\" store, spilling past the RAM limit.\"}";
+  FIO_ASSERT(js.len == strlen(expect) && !memcmp(js.buf, expect, js.len),
+             "Data JSON: %s",
+             js.buf);
+  fiobj_free(json);
+  fiobj_free(h);
+  fiobj_free(a);
+  fiobj_free(b);
+  FIOBJ e = fiobj_data_new(0);
+  FIO_ASSERT(fiobj2cstr(e).buf && !fiobj2cstr(e).len, "empty Data to_s");
+  fiobj_free(e);
+}
+
 int main(void) {
   FIOBJ o = FIOBJ_INVALID;
+  FIO_NAME_TEST(stl, fiobj_data)();
   if (!FIOBJ_MARK_MEMORY_ENABLED) {
     FIO_LOG_WARNING("FIOBJ defined without allocation counter. "
                     "Tests might not be complete.");

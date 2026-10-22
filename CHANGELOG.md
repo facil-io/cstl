@@ -1,6 +1,50 @@
 # Change Log
 
-### 0.8.2 - Unreleased
+### Edge – rolling release
+
+**API**: (`atol`) `fio_ftoa(dest, num, 16)` now writes a C99 `%a` hex float, such as `-0x1.8p+0`. The output is the same on every platform, and `strtod`, `fio_aton` and `fio_atof` can read it back correctly. `inf` and `nan` print as `Infinity` and `NaN`.
+
+**Fix**: (`atol`) `fio_atol` now reads bare `x1F` as hex and `b101` as binary, as documented. Before, there was an issue with short-prefix handling (`x` and `b` instead of `0x` and `0b`). A prefix counts only when a valid digit follows it, so `"0x"` reads as `0` and stops at the `x`.
+
+**API**: (`json`) numbers are now always parsed with `fio_aton`, and the `FIO_JSON_USE_FIO_ATON` option was removed.
+
+**API**: (`atol`) `fio_atof` now uses `fio_aton` instead of `strtod`. Results are correctly rounded and don't depend on the locale. Leading zeros stay decimal. Binary (`0b...`) is still read as raw IEEE 754 bits, and can now follow a sign or whitespace. `ERANGE` is no longer set, and `nan(...)` is no longer accepted.
+
+**API**: (`atol`) `fio_ftoa(dest, num, 2)` now writes `0b...f`, the raw IEEE 754 bits, which `fio_aton` and `fio_atof` read back exactly.
+
+**Fix**: (`atol`) `fio_aton` details:
+- Input without digits (`-`, `.`, `e5`) sets `.err` and isn't consumed, and an exponent without digits isn't consumed, as with `strtod`.
+- A leading `-` now negates binary values: `-0b101` is `-5`, and `-0b...f` flips the sign bit.
+- Bare `x1F` is now hex; before, it was read as binary.
+- `nan` returns the standard quiet NaN.
+- Back-to-back numbers parse faster: `'_'` separator handling no longer slows the digit loop.
+
+**Fix**: (`atol`) `fio_aton` now rounds decimal floats correctly, matching `strtod`. A leading zero followed by a fraction or exponent is now read as decimal, as in C (`012.5` is `12.5`, not octal).
+
+**API**: (`http`) renamed `fio_http_body_parse_callbacks_s` to `fio_http_params_parse_callbacks_s` and `fio_http_body_parse_result_s` to `fio_http_params_parse_result_s`.
+
+**API**: (`http`) added `fio_http_query_parse`, which parses the query string into a map, and `fio_http_params_parse`, which parses the query and then the body into a single map. Both use the `fio_http_body_parse` callbacks. Query and URL-encoded values are always Strings, and missing values become empty Strings. A JSON body that isn't an object is stored under `"_json"`. A body with an unknown Content-Type is ignored.
+
+**API**: (`http` + `fiobj`) added `fio_http_params2FIOBJ`, which returns the request params as a FIOBJ Hash. The bridge compiles automatically once both modules are included, in any order. Neither module depends on the other. File uploads are stored as `FIOBJ_T_DATA` objects.
+
+**API**: (`http`) URL-encoded bodies no longer guess value types: every value is a String, so `007` stays `"007"` instead of becoming `7`.
+
+**API**: (`str`) added `fio_string2primitive`, which detects `null`, `true`, `false`, and any numeral `fio_aton` accepts. The result records the numeral's original base (2, 8, 10 or 16).
+
+**API**: (`data`) new Data Store module (`FIO_DATA`, `fio_data_s`): a seekable buffer that keeps data in RAM and moves it to a temporary file past a limit. HTTP bodies now use it.
+
+**API**: (`fiobj`) added `FIOBJ_T_DATA` (`fiobj_data_new`, `fiobj_data_ptr`), a `FIOBJ_T_OTHER` class that wraps a `fio_data_s`. FIOBJ now includes the Data Store module.
+
+**API**: (`multipart`) added `fio_multipart_stream_parse` and `fio_multipart_stream_close`, which stream file contents in chunks so file parts don't have to fit in the buffer.
+
+**Fix**: (`multipart`) when the input ended right after a delimiter's CRLF, `fio_multipart_parse` returned `consumed == 0`. Callers then re-parsed, and re-reported, parts that were already complete.
+
+**Fix**: (`http`) multipart bodies are now parsed in chunks, so file uploads are never fully loaded into memory. Returning `NULL` from `on_file` now skips the file, as documented: `on_file_data` and `on_file_done` aren't called.
+
+**Fix**: (`http`) `fio_http_body_read_until` on a RAM body no longer jumps to the end of the body when the token isn't found within `limit`. It now stops after `limit` bytes.
+
+
+### 0.8.2 - 2026-10-22
 
 **Security**: (`ipc`) cluster peers must complete the UUID handshake before any other message is handled. Messages sent before the handshake are rejected. A peer is refused when its UUID is zero, equals this instance's UUID, or was already connected. Each instance now draws a non-zero UUID at startup.
 

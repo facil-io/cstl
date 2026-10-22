@@ -164,6 +164,40 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
 
 Appends a binary representation.
 
+#### `fio_string2primitive`
+
+```c
+typedef enum {
+  FIO_STRING_PRIMITIVE_STRING = 0,
+  FIO_STRING_PRIMITIVE_NULL,
+  FIO_STRING_PRIMITIVE_TRUE,
+  FIO_STRING_PRIMITIVE_FALSE,
+  FIO_STRING_PRIMITIVE_NUMBER,
+  FIO_STRING_PRIMITIVE_FLOAT,
+} fio_string_primitive_e;
+
+typedef struct {
+  union {
+    int64_t i; /* FIO_STRING_PRIMITIVE_NUMBER */
+    double f;  /* FIO_STRING_PRIMITIVE_FLOAT */
+  };
+  fio_string_primitive_e type;
+  uint8_t base; /* 2, 8, 10 or 16 for numerals, otherwise 0 */
+} fio_string_primitive_s;
+
+SFUNC fio_string_primitive_s fio_string2primitive(fio_str_info_s str);
+```
+
+Identifies the primitive a String represents:
+
+- `null` / `nil`, `true`, and `false` (case-insensitive).
+- Any numeral `fio_aton` accepts (decimal, float, hex, binary, octal, `inf`, `nan`, ...), but only if the whole String is consumed. `base` records the numeral's original base, so `"0x1F"` is `31` with `base == 16` and `"0123"` is `83` with `base == 8`.
+- Anything else, including an empty String, is `FIO_STRING_PRIMITIVE_STRING`.
+
+Useful for values that arrive as text (query strings, form fields). Keep the original String if the conversion must be reversible, since `"007"` and `"7"` both become `7`.
+
+**Note**: numerals are parsed by `fio_aton`, so `str` must be followed by a readable non-numeric guard byte (for example, a NUL terminator).
+
 ---
 
 ## printf Support

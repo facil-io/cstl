@@ -202,6 +202,29 @@ void           fiobj_float_free(FIOBJ i);    /* type-specific free */
 
 ---
 
+## Data — `fiobj_data_*`
+
+A `FIOBJ_T_OTHER` class (`FIOBJ_TYPE(o) == FIOBJ_T_DATA`) wrapping a [Data Store](./013 data.md) (`fio_data_s`). It keeps data in RAM until it exceeds a limit, then moves it to a temporary file. This suits large payloads such as file uploads (`fio_http_params2FIOBJ` stores uploads this way).
+
+```c
+#define FIOBJ_T_DATA 40
+
+FIOBJ       fiobj_data_new(size_t ram_limit); /* 0 = FIO_DATA_RAM_LIMIT */
+fio_data_s *fiobj_data_ptr(FIOBJ o);          /* NULL if not a Data object */
+```
+
+Read and write through the store's API, for example `fio_data_write(fiobj_data_ptr(o), buf, len)` or `fio_data_read(fiobj_data_ptr(o), 65536)`. Free with `fiobj_free`, which also closes any temporary file.
+
+Generic conversions:
+
+- `fiobj2cstr` (and JSON output) returns the whole content. This reads a spilled file into RAM, so prefer chunked `fio_data_read` for large data.
+- `fiobj2i` / `fiobj2f` return the length.
+- Two Data objects are equal when their content is equal.
+
+The FIOBJ module includes the Data Store module automatically.
+
+---
+
 ## Strings — `fiobj_str_*`
 
 FIOBJ strings wrap the [Dynamic String module (201)](./201 string.md). The full `fiobj_str_*` API mirrors the `STR_*` API — write, concat, printf, base64, JSON-escape, UTF-8 helpers, freeze, etc.

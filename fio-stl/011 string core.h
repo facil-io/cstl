@@ -206,6 +206,42 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
                                fio_string_realloc_fn reallocate,
                                uint64_t i);
 
+/** Primitive types detected by `fio_string2primitive`. */
+typedef enum {
+  FIO_STRING_PRIMITIVE_STRING = 0,
+  FIO_STRING_PRIMITIVE_NULL,
+  FIO_STRING_PRIMITIVE_TRUE,
+  FIO_STRING_PRIMITIVE_FALSE,
+  FIO_STRING_PRIMITIVE_NUMBER,
+  FIO_STRING_PRIMITIVE_FLOAT,
+} fio_string_primitive_e;
+
+/** Result of `fio_string2primitive`. */
+typedef struct {
+  /** The value for `FIO_STRING_PRIMITIVE_NUMBER` (`i`) or `_FLOAT` (`f`). */
+  union {
+    int64_t i;
+    double f;
+  };
+  /** The detected primitive type. */
+  fio_string_primitive_e type;
+  /** The numeral's original base (2, 8, 10 or 16); 0 for non-numerals. */
+  uint8_t base;
+} fio_string_primitive_s;
+
+/**
+ * Identifies the primitive a String represents.
+ *
+ * Detects `null` / `nil`, `true` and `false` (case-insensitive) and any
+ * numeral `fio_aton` accepts (decimal, float, hex, binary, octal, `inf`,
+ * `nan`, ...) provided the whole String is consumed. Anything else (including
+ * an empty String) is `FIO_STRING_PRIMITIVE_STRING`.
+ *
+ * Note: numerals are parsed by `fio_aton`, so `str` MUST be followed by a
+ * readable non-numeric guard byte (i.e., NUL terminated).
+ */
+SFUNC fio_string_primitive_s fio_string2primitive(fio_str_info_s str);
+
 /* *****************************************************************************
 String printf style support
 ***************************************************************************** */
@@ -1273,6 +1309,62 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
     return (r = -1); /* no writing of partial numbers. */
   fio_ltoa_bin(dest->buf + dest->len, i, len);
   dest->len += len;
+  return r;
+}
+
+/* *****************************************************************************
+Primitive Identification
+***************************************************************************** */
+
+/** Identifies the primitive a String represents. */
+SFUNC fio_string_primitive_s fio_string2primitive(fio_str_info_s str) {
+  fio_string_primitive_s r = {.type = FIO_STRING_PRIMITIVE_STRING};
+  if (!str.len || !str.buf)
+    return r;
+
+  /* null / nil / true / false - case insensitive */
+  if (str.len == 3 &&
+      !(((str.buf[0] | 32) ^ (char)'n') | ((str.buf[1] | 32) ^ (char)'i') |
+        ((str.buf[2] | 32) ^ (char)'l'))) {
+    r.type = FIO_STRING_PRIMITIVE_NULL;
+  }
+  if (str.len == 4) {
+    const uint32_t null_s = fio_buf2u32u("null");
+    const uint32_t true_s = fio_buf2u32u("true");
+    uint32_t tmp = fio_buf2u32u(str.buf) | 0x20202020U; /* down-case */
+    r.type = (tmp == null_s)   ? FIO_STRING_PRIMITIVE_NULL
+             : (tmp == true_s) ? FIO_STRING_PRIMITIVE_TRUE
+                               : r.type;
+  }
+  if (str.len == 5 && (str.buf[4] | 32) == 'e') {
+    const uint32_t fals_s = fio_buf2u32u("fals");
+    uint32_t tmp = fio_buf2u32u(str.buf) | 0x20202020U; /* down-case */
+    r.type = (tmp == fals_s) ? FIO_STRING_PRIMITIVE_FALSE : r.type;
+  }
+  if (r.type != FIO_STRING_PRIMITIVE_STRING)
+    return r;
+
+  /* numerals - any format `fio_aton` accepts, if it consumes everything */
+  char *p = str.buf;
+  fio_aton_s n = fio_aton(&p);
+  if (n.err || p != str.buf + str.len)
+    return r;
+  r.type =
+      n.is_float ? FIO_STRING_PRIMITIVE_FLOAT : FIO_STRING_PRIMITIVE_NUMBER;
+  r.i = n.i; /* copies the union (`f` for floats) */
+
+  /* original base: inspect the prefix `fio_aton` already accepted */
+  p = str.buf;
+  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+    ++p;
+  p += (*p == '-' || *p == '+');
+  p += (p[0] == '0' && ((p[1] | 32) == 'x' || (p[1] | 32) == 'b'));
+  r.base = ((p[0] | 32) == 'x')   ? 16
+           : ((p[0] | 32) == 'b') ? 2
+           : (p[0] == '0' && ((uint8_t)(p[1] - '0') < 10 || p[1] == '_') &&
+              !n.is_float)
+               ? 8 /* a leading-zero float is decimal (as in C) */
+               : 10;
   return r;
 }
 

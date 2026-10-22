@@ -3,6 +3,8 @@ JSON Parser Tests
 ***************************************************************************** */
 #include "test-helpers.h"
 
+#include <locale.h>
+
 #define FIO_JSON
 #define FIO_STR
 #include FIO_INCLUDE_FILE
@@ -914,6 +916,37 @@ FIO_SFUNC void fio___test_json_hex_binary(void) {
              "JSON binary value mismatch: got %lld",
              (long long)v->data.i);
   test_json_value_free(v);
+
+  /* Hex without the leading zero */
+  v = test_json_parse("x1F", 3);
+  FIO_ASSERT(v && v->type == TEST_JSON_NUMBER && v->data.i == 31,
+             "JSON hex x1F parsing failed");
+  test_json_value_free(v);
+
+  /* Binary float (raw IEEE 754 bits of -1.5, `0b...f`) */
+  {
+    char buf[80];
+    buf[0] = '-';
+    size_t len = fio_ftoa(buf + 1, 1.5, 2) + 1;
+    v = test_json_parse(buf, len);
+    FIO_ASSERT(v && v->type == TEST_JSON_FLOAT && v->data.f == -1.5,
+               "JSON binary float %s parsing failed",
+               buf);
+    test_json_value_free(v);
+  }
+
+  /* Correctly rounded and locale independent floats */
+  if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {
+    v = test_json_parse("0.3", 3);
+    setlocale(LC_NUMERIC, "C");
+    FIO_ASSERT(v && v->type == TEST_JSON_FLOAT && v->data.f == 0.3,
+               "JSON float parsing depends on the locale");
+    test_json_value_free(v);
+  }
+  errno = E2BIG; /* a stale errno must not fail float parsing */
+  v = test_json_parse("[1.5]", 5);
+  FIO_ASSERT(v, "JSON float parsing failed with a stale errno");
+  test_json_value_free(v);
 }
 
 /* *****************************************************************************
@@ -944,6 +977,16 @@ FIO_SFUNC void fio___test_json_errors(void) {
   /* Missing colon in object */
   v = test_json_parse("{\"key\" 42}", 10);
   FIO_ASSERT(!v, "JSON missing colon should fail");
+
+  /* Numbers without digits */
+  v = test_json_parse("[.]", 3);
+  FIO_ASSERT(!v, "JSON '[.]' should fail");
+  v = test_json_parse("[e5]", 4);
+  FIO_ASSERT(!v, "JSON '[e5]' should fail");
+  v = test_json_parse("[-]", 3);
+  FIO_ASSERT(!v, "JSON '[-]' should fail");
+  v = test_json_parse("[1e]", 4);
+  FIO_ASSERT(!v, "JSON '[1e]' should fail");
 
   /* Truncated null */
   v = test_json_parse("nul", 3);

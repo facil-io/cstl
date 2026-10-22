@@ -3591,9 +3591,11 @@ Result container for `fio_aton`. Read the union member that matches `is_float`, 
 FIO_SFUNC fio_aton_s fio_aton(char **pstr);
 ```
 
-Auto-detects integers and floats. Skips leading whitespace, recognizes `0x` / `0b` / octal prefixes, and accepts `inf`, `infinity`, and `nan`. Updates `*pstr` to the first unconverted character. Sets `.err` on overflow or bad format.
+Auto-detects integers and floats. Skips leading whitespace, recognizes `0x` / `0b` / octal prefixes (`x` / `b` without the zero also work), and accepts `inf`, `infinity`, and `nan`. Updates `*pstr` to the first unconverted character. Sets `.err` on overflow or bad format; input with no digits (such as `-`, `.` or `e5`) sets `.err` and leaves `*pstr` unchanged. An exponent marker without digits (the `e` in `1e`) isn't consumed, as with `strtod`.
 
-**Note:** not an exact `strtod` replacement; rounding differences are possible.
+Binary followed by `f` (`0b...f`) is read as a float's raw IEEE 754 bits, which is exact and keeps the sign and NaN payload; `fio_ftoa(dest, num, 2)` writes this format. Without the `f`, binary is an integer. A leading `-` negates binary integers and flips the sign bit of `0b...f` floats. `nan` returns the standard quiet NaN (`0x7FF8000000000000`, or `0xFFF8000000000000` for `-nan`); C's `nan(...)` payload syntax isn't supported, so use `0b...f` to carry a payload.
+
+Decimal floats are correctly rounded, matching `strtod` bit for bit (Clinger fast path + Eisel-Lemire; inputs with over 19 significant digits that could round either way defer to `strtod`). A leading zero followed by a fraction or exponent is decimal, not octal (`012.5` is `12.5`, as in C). Hex floats (`0x1.8p1`) are supported but not guaranteed correctly rounded beyond 64 mantissa bits.
 
 ### Strict, Bounded Parsing (wire-safe)
 
@@ -3633,7 +3635,7 @@ Parses an unsigned `uint64_t`, hex digits only - unlike `fio_atol16u`, a `0x` pr
 SFUNC int64_t fio_atol(char **pstr);
 ```
 
-Parses a signed `int64_t`. Accepts base 10, octal (`0...`), hex (`0x...` or `x...`), and binary (`0b...` or `b...`). Updates `*pstr` past the number.
+Parses a signed `int64_t`. Accepts base 10, octal (`0...`), hex (`0x...` or `x...`), and binary (`0b...` or `b...`). A prefix counts only when a valid digit follows it, so `"0x"` reads as `0` and stops at the `x`. Updates `*pstr` past the number.
 
 #### `fio_atof`
 
@@ -3641,7 +3643,7 @@ Parses a signed `int64_t`. Accepts base 10, octal (`0...`), hex (`0x...` or `x..
 SFUNC double fio_atof(char **pstr);
 ```
 
-Parses a double. Wraps `strtod` for most inputs. The source also attempts to accept a raw `0b...` binary bit-pattern, but the detection condition looks fragile.
+Parses a double using `fio_aton`, so results are correctly rounded and don't depend on the C locale. Unlike `fio_aton`, leading zeros are decimal (`"0123"` is `123.0`), and binary (`0b...`, with or without the `f` suffix, after an optional sign) is always read as raw IEEE 754 bits. Integers are converted to `double`. On a format error it returns `0` without moving `*pstr`, like `strtod`. Unlike `strtod`, it doesn't set `errno` to `ERANGE` and doesn't accept `nan(...)`.
 
 #### `fio_ftoa`
 
@@ -3649,7 +3651,7 @@ Parses a double. Wraps `strtod` for most inputs. The source also attempts to acc
 SFUNC size_t fio_ftoa(char *dest, double num, uint8_t base);
 ```
 
-Writes `num` to `dest` in `base` (2, 10, or 16; unsupported bases silently fall back to 10). No prefixes are added. Returns bytes written excluding NUL.
+Writes `num` to `dest` in `base` (2, 10, or 16; unsupported bases silently fall back to 10). Base 2 writes the raw IEEE 754 bits as `0b...f`, which `fio_aton` and `fio_atof` read back exactly. Base 16 writes a C99 `%a` hex float (such as `-0x1.8p+0`, or `0x0.0000000000001p-1022` for the smallest subnormal), which `strtod`, `fio_aton` and `fio_atof` read back exactly. `inf` and `nan` print as `Infinity` and `NaN` in bases 10 and 16. Returns bytes written excluding NUL.
 
 **Note:** provide at least 130 bytes for base 2. Special values `inf` and `nan` produce `"Infinity"` / `"NaN"`.
 
@@ -6256,7 +6258,7 @@ available buffer length.
 
 A non-strict, streaming, callback-based JSON parser. It does not build a tree for you; it calls your callbacks for each value and lets you decide what to construct. Implemented in [`./004 json.h`](./004%20json.h). Depends on `FIO_ATOL`, which is included automatically.
 
-The parser tolerates trailing commas, comments (`//`, `/* */`, `#`), newlines inside strings, hex/octal/binary numbers, `NaN`, and `Infinity`.
+The parser tolerates trailing commas, comments (`//`, `/* */`, `#`), newlines inside strings, hex/octal/binary numbers, `NaN`, and `Infinity`. Numbers are parsed with `fio_aton`: floats are correctly rounded and locale independent, and `0b...f` spells a float's raw IEEE 754 bits.
 
 ### Configuration Macros
 
@@ -6269,16 +6271,6 @@ The parser tolerates trailing commas, comments (`//`, `/* */`, `#`), newlines in
 ```
 
 Maximum JSON nesting depth. Must be less than `65536`. Deeper input aborts with an error.
-
-#### `FIO_JSON_USE_FIO_ATON`
-
-```c
-#ifndef FIO_JSON_USE_FIO_ATON
-#define FIO_JSON_USE_FIO_ATON 0
-#endif
-```
-
-Set to `1` to use `fio_aton` for number parsing instead of the built-in logic.
 
 ### Types
 
@@ -6537,6 +6529,36 @@ Parses `data` as MIME multipart input. `boundary` is the boundary string **witho
 - `err == 0` - parsing complete; closing boundary found.
 - `err == -2` - need more data. Keep `data + result.consumed ... data + len` and append new data before calling again.
 - `err == -1` - unrecoverable parse error or callback abort.
+
+Each part must fit in the buffer, because a part is only reported once its closing delimiter is found. Use `fio_multipart_stream_parse` to stream large file uploads.
+
+#### `fio_multipart_stream_parse`
+
+```c
+typedef struct { /* private */ } fio_multipart_stream_s;
+
+SFUNC fio_multipart_result_s
+fio_multipart_stream_parse(fio_multipart_stream_s *stream,
+                           const fio_multipart_parser_callbacks_s *callbacks,
+                           void *udata,
+                           fio_buf_info_s boundary,
+                           const char *data,
+                           size_t len);
+
+SFUNC int fio_multipart_stream_close(
+    fio_multipart_stream_s *stream,
+    const fio_multipart_parser_callbacks_s *callbacks,
+    void *udata);
+```
+
+Works like `fio_multipart_parse`, but streams file contents. `on_file_start` is called once a file part's headers arrive, `on_file_data` is called with each chunk as it arrives, and `on_file_end` is called when the file's closing delimiter is found. A file part doesn't need to fit in the buffer, so large uploads can be parsed in bounded memory. Regular fields still need to fit.
+
+- Zero-initialize `stream` (`fio_multipart_stream_s s = {0};`) and pass the same `stream` to every call.
+- On `err == -2`, keep `data + result.consumed ... data + len`, append more data, and call again. While streaming a file, a few trailing bytes (up to the delimiter length) are held back in case they start a delimiter.
+- If the input ends early (while `err == -2`), call `fio_multipart_stream_close`. It calls `on_file_end` for any open file and returns `-1` if a file was left incomplete.
+- If `on_file_data` returns non-zero, `on_file_end` is called and parsing stops with `err == -1`.
+
+`field_count` and `file_count` count the parts completed during each call.
 
 ### Examples
 
@@ -9128,6 +9150,40 @@ SFUNC int fio_string_write_bin(fio_str_info_s *dest,
 
 Appends a binary representation.
 
+#### `fio_string2primitive`
+
+```c
+typedef enum {
+  FIO_STRING_PRIMITIVE_STRING = 0,
+  FIO_STRING_PRIMITIVE_NULL,
+  FIO_STRING_PRIMITIVE_TRUE,
+  FIO_STRING_PRIMITIVE_FALSE,
+  FIO_STRING_PRIMITIVE_NUMBER,
+  FIO_STRING_PRIMITIVE_FLOAT,
+} fio_string_primitive_e;
+
+typedef struct {
+  union {
+    int64_t i; /* FIO_STRING_PRIMITIVE_NUMBER */
+    double f;  /* FIO_STRING_PRIMITIVE_FLOAT */
+  };
+  fio_string_primitive_e type;
+  uint8_t base; /* 2, 8, 10 or 16 for numerals, otherwise 0 */
+} fio_string_primitive_s;
+
+SFUNC fio_string_primitive_s fio_string2primitive(fio_str_info_s str);
+```
+
+Identifies the primitive a String represents:
+
+- `null` / `nil`, `true`, and `false` (case-insensitive).
+- Any numeral `fio_aton` accepts (decimal, float, hex, binary, octal, `inf`, `nan`, ...), but only if the whole String is consumed. `base` records the numeral's original base, so `"0x1F"` is `31` with `base == 16` and `"0123"` is `83` with `base == 8`.
+- Anything else, including an empty String, is `FIO_STRING_PRIMITIVE_STRING`.
+
+Useful for values that arrive as text (query strings, form fields). Keep the original String if the conversion must be reversible, since `"007"` and `"7"` both become `7`.
+
+**Note**: numerals are parsed by `fio_aton`, so `str` must be followed by a readable non-numeric guard byte (for example, a NUL terminator).
+
 ---
 
 ## printf Support
@@ -9848,6 +9904,80 @@ int main(void) {
 ```
 
 ------------------------------------------------------------
+## Data Store (`fio_data_s`)
+
+```c
+#define FIO_DATA
+#include FIO_INCLUDE_FILE
+```
+
+> **Requires:** `FIO_STR` and `FIO_FILES`. When using `include.h`, these dependencies are resolved automatically. The HTTP and FIOBJ modules include this module.
+
+A seekable data store that keeps data in RAM until it grows past a limit, then moves it to a temporary file. This is the storage behind HTTP request and response bodies, and it's useful anywhere large payloads (such as file uploads) shouldn't stay in memory.
+
+### Settings
+
+```c
+#define FIO_DATA_RAM_LIMIT (1UL << 17) /* default RAM limit, in bytes */
+```
+
+### Type and lifetime
+
+```c
+typedef struct {
+  char *buf;    /* RAM data (fio_bstr), or the last read once spilled */
+  size_t len;   /* total length */
+  size_t pos;   /* reading position */
+  size_t limit; /* RAM limit (0 = FIO_DATA_RAM_LIMIT) */
+  int fd;       /* temporary file, or -1 while in RAM */
+} fio_data_s;
+
+#define FIO_DATA_INIT { .buf = NULL, .len = 0, .pos = 0, .limit = 0, .fd = -1 }
+
+void fio_data_init(fio_data_s *d, size_t ram_limit);
+void fio_data_destroy(fio_data_s *d);
+```
+
+Initialize with `FIO_DATA_INIT` or `fio_data_init`, and release with `fio_data_destroy`. Destroying closes the temporary file (if any) and resets the store to empty, so it can be reused. It keeps the RAM limit. Treat the fields as read-only and use the functions below.
+
+### Writing
+
+```c
+int  fio_data_write(fio_data_s *d, const void *data, size_t len);
+void fio_data_expect(fio_data_s *d, size_t len);
+```
+
+`fio_data_write` appends data. Once the total would exceed the RAM limit, the data moves to a temporary file and later writes go there. It returns `0` on success or `-1` if the data couldn't be fully written. If no temporary file can be created, the data stays in RAM.
+
+`fio_data_expect` prepares for `len` more bytes. It reserves RAM, or moves to a temporary file early if the expected size crosses the limit.
+
+### Reading
+
+```c
+size_t         fio_data_len(fio_data_s *d);
+size_t         fio_data_pos(fio_data_s *d);
+int            fio_data_fd(fio_data_s *d);
+size_t         fio_data_seek(fio_data_s *d, ssize_t pos);
+fio_str_info_s fio_data_read(fio_data_s *d, size_t len);
+fio_str_info_s fio_data_read_until(fio_data_s *d, char token, size_t limit);
+```
+
+- **Reads** start at the reading position and advance it. `fio_data_read` returns up to `len` bytes. `fio_data_read_until` stops after `token`, after `limit` bytes (ignored if zero), or at EOF. Both return an empty result at EOF.
+- **Read buffers** are borrowed. They stay valid until the next read, write, or destroy. While in RAM, reads point into the store's own buffer. Once spilled, reads go through `buf`, so read in bounded chunks to keep memory bounded.
+- **`fio_data_seek`** sets the position and returns it. Negative values count from the end, `SSIZE_MAX` keeps the current position, and the result is clamped to the data length.
+- **`fio_data_fd`** returns the temporary file descriptor (for example, for `sendfile`), or `-1` while the data is in RAM.
+
+### Example
+
+```c
+fio_data_s d = FIO_DATA_INIT;
+fio_data_write(&d, "hello ", 6);
+fio_data_write(&d, "world", 5);
+fio_data_seek(&d, 0);
+for (fio_str_info_s s; (s = fio_data_read(&d, 4096)).len;)
+  fwrite(s.buf, 1, s.len, stdout);
+fio_data_destroy(&d);
+```
 # POSIX Portable Polling API
 
 ```c
@@ -16558,6 +16688,29 @@ void           fiobj_float_free(FIOBJ i);    /* type-specific free */
 
 ---
 
+## Data — `fiobj_data_*`
+
+A `FIOBJ_T_OTHER` class (`FIOBJ_TYPE(o) == FIOBJ_T_DATA`) wrapping a [Data Store](./013 data.md) (`fio_data_s`). It keeps data in RAM until it exceeds a limit, then moves it to a temporary file. This suits large payloads such as file uploads (`fio_http_params2FIOBJ` stores uploads this way).
+
+```c
+#define FIOBJ_T_DATA 40
+
+FIOBJ       fiobj_data_new(size_t ram_limit); /* 0 = FIO_DATA_RAM_LIMIT */
+fio_data_s *fiobj_data_ptr(FIOBJ o);          /* NULL if not a Data object */
+```
+
+Read and write through the store's API, for example `fio_data_write(fiobj_data_ptr(o), buf, len)` or `fio_data_read(fiobj_data_ptr(o), 65536)`. Free with `fiobj_free`, which also closes any temporary file.
+
+Generic conversions:
+
+- `fiobj2cstr` (and JSON output) returns the whole content. This reads a spilled file into RAM, so prefer chunked `fio_data_read` for large data.
+- `fiobj2i` / `fiobj2f` return the length.
+- Two Data objects are equal when their content is equal.
+
+The FIOBJ module includes the Data Store module automatically.
+
+---
+
 ## Strings — `fiobj_str_*`
 
 FIOBJ strings wrap the [Dynamic String module (201)](./201 string.md). The full `fiobj_str_*` API mirrors the `STR_*` API — write, concat, printf, base64, JSON-escape, UTF-8 helpers, freeze, etc.
@@ -20967,24 +21120,25 @@ int            fio_http_body_fd(fio_http_s *h);
 void           fio_http_body_close(fio_http_s *h);
 ```
 
-The handle stores body data in RAM until the configured threshold is crossed,
+The handle stores body data in RAM until `FIO_HTTP_BODY_RAM_LIMIT` is crossed,
 then uses a temporary file. `fio_http_body_fd` returns that file descriptor or
-`-1`.
+`-1`. Body storage is implemented by the [Data Store module](./013 data.md)
+(`fio_data_s`), which can be used independently.
 
 `fio_http_body_close` releases the body's RAM buffer and temporary file (if
 any) and resets the body to empty. The body is also released automatically
 when the handle is cleared or destroyed, so calling this is only needed to
 free resources early, once the body has been consumed.
 
-### Body parsing
+### Params parsing (query / body)
 
 ```c
-typedef struct fio_http_body_parse_callbacks_s fio_http_body_parse_callbacks_s;
-typedef struct fio_http_body_parse_result_s fio_http_body_parse_result_s;
+typedef struct fio_http_params_parse_callbacks_s fio_http_params_parse_callbacks_s;
+typedef struct fio_http_params_parse_result_s fio_http_params_parse_result_s;
 
-fio_http_body_parse_result_s fio_http_body_parse(
+fio_http_params_parse_result_s fio_http_body_parse(
     fio_http_s *h,
-    const fio_http_body_parse_callbacks_s *callbacks,
+    const fio_http_params_parse_callbacks_s *callbacks,
     void *udata);
 ```
 
@@ -20992,14 +21146,51 @@ The body parser auto-detects JSON, URL-encoded, and multipart/form-data input.
 Callbacks build application objects for primitives, arrays, maps, and file
 uploads.
 
-`fio_http_body_parse_callbacks_s` contains primitive callbacks (`on_null`,
+`fio_http_params_parse_callbacks_s` contains primitive callbacks (`on_null`,
 `on_true`, `on_false`, `on_number`, `on_float`, `on_string`), container
 callbacks (`on_array`, `on_map`, `array_push`, `map_set`, `array_done`,
 `map_done`), multipart callbacks (`on_file`, `on_file_data`, `on_file_done`),
 and error / cleanup callbacks (`on_error`, `free_unused`).
 
-`fio_http_body_parse_result_s` reports the top-level result, consumed bytes,
+Multipart bodies are read and parsed in chunks, so file uploads are never fully
+loaded into memory. `on_file_data` receives each chunk as it's parsed. Return
+`NULL` from `on_file` to skip a file; `on_file_data` and `on_file_done` then
+aren't called.
+
+`fio_http_params_parse_result_s` reports the top-level result, consumed bytes,
 and error code.
+
+```c
+fio_http_params_parse_result_s fio_http_query_parse(
+    fio_http_s *h,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata);
+```
+
+Parses the request query string (URL-encoded) into a map using the same
+callbacks and result type as `fio_http_body_parse`. Keys and values are
+percent / `+` decoded. All values are Strings (no type guessing, so `007` stays
+`"007"`); use `fio_string2primitive` to convert a value when appropriate.
+URL-encoded bodies follow the same rule. Missing values (`key` or `key=`) produce empty Strings, never
+`NULL`. An empty query produces an empty map.
+
+```c
+fio_http_params_parse_result_s fio_http_params_parse(
+    fio_http_s *h,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata);
+```
+
+Parses the query string and then the body (if any) into a single map. Query
+pairs are set first, followed by the body fields; `map_set` decides how
+duplicate keys are handled. A JSON object body is merged into the map, while any
+other JSON body (array or primitive) is set under the `"_json"` key. A body with
+a missing or unknown Content-Type is ignored (not an error). The result is
+always the params map, or whatever `on_error` returns on error; `consumed` is
+the sum of query and body bytes consumed.
+
+When the FIOBJ module is also included, `fio_http_params2FIOBJ` returns the
+params as a FIOBJ Hash (see the FIOBJ documentation).
 
 ### Cookies
 
@@ -21213,6 +21404,35 @@ void start_http(void) {
 
 For WebSocket or SSE routes, provide the relevant authentication and upgraded
 connection callbacks in the route settings.
+## HTTP Params to FIOBJ (440 http fiobj.h)
+
+```c
+#define FIO_FIOBJ
+#define FIO_HTTP
+#include FIO_INCLUDE_FILE
+```
+
+This bridge compiles automatically once **both** the HTTP and FIOBJ modules are included. They can be included in either order, in one pass or in separate passes. Neither module depends on the other, so you can include each one independently.
+
+```c
+FIOBJ fio_http_params2FIOBJ(fio_http_s *h);
+```
+
+Calls `fio_http_params_parse` (see [430 http.md](./430 http.md)) and returns the query and body params as a new FIOBJ Hash. The caller must `fiobj_free` it.
+
+- Query pairs are added first, followed by the body fields. A JSON object body is merged into the Hash. Any other JSON body (array or primitive) is stored under `"_json"`.
+- Query and URL-encoded values are Strings (JSON bodies keep their JSON types). Missing values (`key` or `key=`) become empty Strings.
+- When a key repeats, the last value wins. The Hash is ordered, so the replaced key moves to the end.
+- A file upload is stored as a Hash with the keys `"filename"` and `"type"` (Strings) and `"data"`. `"data"` is a [`FIOBJ_T_DATA`](./250 fiobj.md) object holding the content. Uploads are streamed in chunks, and the content moves to a temporary file once it grows past `FIO_DATA_RAM_LIMIT`, so large files never sit fully in memory. Read it in chunks with `fio_data_read(fiobj_data_ptr(data), len)`.
+- A body with a missing or unknown Content-Type is ignored.
+- Returns `FIOBJ_INVALID` on error (malformed body, `NULL` handle).
+
+```c
+FIOBJ params = fio_http_params2FIOBJ(h);
+FIOBJ name = fiobj_hash_get2(params, "name", 4);
+/* ... */
+fiobj_free(params);
+```
 ## Hash Function Testing
 
 During development I tested the Hash functions using [the SMHasher testing suite (@rurban's fork)](https://github.com/rurban/smhasher). The testing suite is often growing with more tests, so I do not know what the future may bring... but attached are the test results for Risky Hash, Stable Hash (64 and 128 bit variation) as they were at the time of (re)development (March, 2023).

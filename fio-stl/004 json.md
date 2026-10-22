@@ -7,7 +7,7 @@
 
 A non-strict, streaming, callback-based JSON parser. It does not build a tree for you; it calls your callbacks for each value and lets you decide what to construct. Implemented in [`./004 json.h`](./004%20json.h). Depends on `FIO_ATOL`, which is included automatically.
 
-The parser tolerates trailing commas, comments (`//`, `/* */`, `#`), newlines inside strings, hex/octal/binary numbers, `NaN`, and `Infinity`.
+The parser tolerates trailing commas, comments (`//`, `/* */`, `#`), newlines inside strings, hex/octal/binary numbers, `NaN`, and `Infinity`. Numbers are parsed with `fio_aton`: floats are correctly rounded and locale independent, and `0b...f` spells a float's raw IEEE 754 bits.
 
 ### Configuration Macros
 
@@ -20,16 +20,6 @@ The parser tolerates trailing commas, comments (`//`, `/* */`, `#`), newlines in
 ```
 
 Maximum JSON nesting depth. Must be less than `65536`. Deeper input aborts with an error.
-
-#### `FIO_JSON_USE_FIO_ATON`
-
-```c
-#ifndef FIO_JSON_USE_FIO_ATON
-#define FIO_JSON_USE_FIO_ATON 0
-#endif
-```
-
-Set to `1` to use `fio_aton` for number parsing instead of the built-in logic.
 
 ### Types
 

@@ -29,10 +29,6 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 FIO_ASSERT_STATIC(FIO_JSON_MAX_DEPTH < 65536, "FIO_JSON_MAX_DEPTH too big");
 
-#ifndef FIO_JSON_USE_FIO_ATON
-#define FIO_JSON_USE_FIO_ATON 0
-#endif
-
 /**
  * The JSON parser settings (callbacks).
  *
@@ -225,77 +221,13 @@ buffer_error:
 
 FIO_SFUNC void *fio___json_consume_number(fio___json_state_s *s) {
   FIO_JSON___PRINT_STEP(s, "number");
-#if FIO_JSON_USE_FIO_ATON
   fio_aton_s aton = fio_aton((char **)&s->pos);
+  if (aton.err) {
+    s->error = 1;
+    return NULL;
+  }
   return aton.is_float ? s->cb.on_float(s->udata, aton.f)
                        : s->cb.on_number(s->udata, aton.i);
-#else
-  const char *tst = s->pos;
-  uint64_t i;
-  double f;
-  _Bool negative = 0;
-  _Bool hex = 0;
-  _Bool binary = 0;
-  long ilimit = 19;
-  while (tst < s->end && ((unsigned)(tst[0] == '-') | (tst[0] == '+')))
-    negative ^= ((tst++)[0] == '-');
-  if (tst + 1 > s->end)
-    goto buffer_overflow;
-  const char *start = tst;
-  if ((tst[0] | 0x20) == 'i')
-    goto is_inifinity;
-  tst += (tst[0] == '0' && tst + 2 < s->end);
-  if ((tst[0] | 32) == 'x') {
-    hex = 1;
-    do
-      ++tst;
-    while ((tst < s->end) &
-           (((tst[0] >= '0') & (tst[0] <= '9')) |
-            (((tst[0] | 32) >= 'a') & ((tst[0] | 32) <= 'f'))));
-    if (tst - start > 9 || tst == start + 1)
-      goto buffer_overflow;
-  } else if ((tst[0] | 32) == 'b') {
-    binary = 1;
-    ilimit = 66;
-    do
-      ++tst;
-    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '1')));
-  } else {
-    while (((tst < s->end) & (tst[0] >= '0') & (tst[0] <= '9')))
-      ++tst;
-  }
-  if (tst > (start + ilimit) ||
-      ((tst < s->end) &&
-       (tst[0] == '.' || (tst[0] | 32) == 'e' || (tst[0] | 32) == 'p')))
-    goto is_float;
-
-  tst = s->pos;
-  s->pos = start;
-  errno = 0;
-  i = (hex              ? fio_atol16u((char **)&s->pos)
-       : binary         ? fio_atol_bin((char **)&s->pos)
-       : *s->pos == '0' ? fio_atol8u((char **)&s->pos)
-                        : fio_atol10u((char **)&s->pos));
-  if (errno == E2BIG || (((uint64_t)(1 ^ hex ^ binary) << 63) & i))
-    goto is_float_from_error;
-  // s->error = (errno == E2BIG);
-  return s->cb.on_number(s->udata, fio_u2i_limit(i, negative));
-is_float_from_error:
-  s->pos = tst;
-  errno = 0;
-
-is_float:
-  f = fio_atof((char **)&s->pos);
-  s->error = (errno == E2BIG);
-  return s->cb.on_float(s->udata, f);
-
-buffer_overflow:
-  s->error = 1;
-  return NULL;
-is_inifinity:
-  ++s->pos;
-  return fio___json_consume_infinit(s, negative);
-#endif /* FIO_JSON_USE_FIO_ATON */
 }
 
 FIO_IFUNC void *fio___json_consume_string_any(fio___json_state_s *s,

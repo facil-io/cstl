@@ -3,6 +3,8 @@ Test ATOL
 ***************************************************************************** */
 #include "test-helpers.h"
 
+#include <locale.h>
+
 FIO_SFUNC double fio___aton_float_wrapper(char **pstr) {
   fio_aton_s r = fio_aton(pstr);
   if (r.is_float)
@@ -62,10 +64,21 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_vectors)(void) {
       "0x1.0P-1074",
       "0x3a.0P-1074",
       "0x0.f9c7573d7fe52p-1022",
+      "0.3",
+      "3e-5",
+      "123e-5",
+      "012.5",
+      "9007199254740993",
+      "1e23",
+      "2.4703282292062327e-324",
+      "2.4703282292062328e-324",
+      "1.7976931348623158e308",
+      "1.7976931348623159e308",
+      "0.000000000000000000000000000000000000001e39",
+      "1000000000000000000000000000000000000000e-39",
   };
   fprintf(stderr, "\t* Testing fio_aton against strtod vectors:\n");
   /* Sanity Test */
-  bool rounding_errors_detected = 0;
   for (size_t n_i = 0; n_i < sizeof(floats) / sizeof(floats[0]); ++n_i) {
     union {
       double f;
@@ -76,21 +89,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_vectors)(void) {
     for (size_t fn_i = 1; fn_i < sizeof(to_test) / sizeof(to_test[0]); ++fn_i) {
       char *tmp2 = (char *)floats[n_i];
       u2.f = to_test[fn_i].fn(&tmp2);
-      if (tmp2 == tmp) {
-        if ((isnan(u1.f) && isnan(u2.f)) || u1.u64 == u2.u64)
-          continue;
-        rounding_errors_detected = 1;
-#ifdef DEBUG
-        FIO_LOG_WARNING("Rounding error for %s:\n\t%.17g ?= %.17g",
-                        floats[n_i],
-                        u1.f,
-                        u2.f);
-#endif
-        if (u1.u64 + 1 == u2.u64)
-          continue;
-        if (u2.u64 + 1 == u1.u64)
-          continue;
-      }
+      if (tmp2 == tmp && isnan(u1.f) && isnan(u2.f))
+        continue;
       FIO_ASSERT(
           tmp2 == tmp && u1.u64 == u2.u64,
           "Sanity test failed for %s\n\t %.17g ?!= %.17g\n\t %s ?!= %s %s",
@@ -102,9 +102,220 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_vectors)(void) {
           (tmp == tmp2 ? "√" : "X"));
     }
   }
-  if (rounding_errors_detected)
-    FIO_LOG_WARNING("Single bit rounding errors detected when comparing "
-                    "`fio_aton` to `strtod`.\n");
+  /* Round-trip: shortest-exact (%.17g) decimals must parse bit-exact */
+  for (size_t i = 0; i < (1ULL << 16); ++i) {
+    union {
+      double f;
+      uint64_t u64;
+    } u = {.u64 = fio_rand64()}, r;
+    char buf[64];
+    if (isnan(u.f) || isinf(u.f))
+      continue;
+    snprintf(buf, sizeof(buf), "%.17g", u.f);
+    char *tmp = buf;
+    r.f = fio___aton_float_wrapper(&tmp);
+    FIO_ASSERT(r.u64 == u.u64 && !*tmp,
+               "fio_aton round-trip error for %s (%.17g)",
+               buf,
+               r.f);
+  }
+}
+
+/* Number formats: digit-less input, prefixes, binary floats, NaN, fio_atof */
+FIO_SFUNC void FIO_NAME_TEST(stl, aton_formats)(void) {
+  fprintf(stderr, "\t* Testing fio_aton / fio_atof formats:\n");
+  union {
+    double f;
+    uint64_t u;
+  } u;
+  char buf[160];
+  char *p;
+  fio_aton_s r;
+  /* input without digits is an error and isn't consumed */
+  const char *bad[] = {"-", "+", ".", "e5", "-.e", "", "abc", " ._"};
+  for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+    p = (char *)bad[i];
+    r = fio_aton(&p);
+    FIO_ASSERT(r.err && p == bad[i], "fio_aton should reject \"%s\"", bad[i]);
+    p = (char *)bad[i];
+    FIO_ASSERT(fio_atof(&p) == 0 && p == bad[i],
+               "fio_atof should reject \"%s\"",
+               bad[i]);
+  }
+  struct {
+    const char *s;
+    int64_t i;
+    size_t len;
+  } ints[] = {
+      {"0", 0, 1},
+      {"0x1F", 31, 4},
+      {"x1F", 31, 3},
+      {"b101", 5, 4},
+      {"-0b101", -5, 6},
+      {"0x", 0, 1},
+      {"0b2", 0, 1},
+      {"0123", 83, 4},
+      {"1e", 1, 1},
+      {"2E+x", 2, 1},
+  };
+  for (size_t i = 0; i < sizeof(ints) / sizeof(ints[0]); ++i) {
+    p = (char *)ints[i].s;
+    r = fio_aton(&p);
+    FIO_ASSERT(!r.err && !r.is_float && r.i == ints[i].i &&
+                   (size_t)(p - ints[i].s) == ints[i].len,
+               "fio_aton integer error for \"%s\": %lld (%zu bytes)",
+               ints[i].s,
+               (long long)r.i,
+               (size_t)(p - ints[i].s));
+  }
+  /* `0b...f` is a float's raw IEEE 754 bits; a leading `-` flips the sign */
+  u.f = 1.5;
+  buf[0] = '-';
+  FIO_ASSERT(fio_ftoa(buf + 1, u.f, 2) == 2 + 62 + 1 && buf[1] == '0' &&
+                 buf[2] == 'b' && buf[65] == 'f' && !buf[66],
+             "fio_ftoa base 2 should write 0b...f: %s",
+             buf + 1);
+  for (size_t neg = 0; neg < 2; ++neg) {
+    p = buf + !neg;
+    r = fio_aton(&p);
+    FIO_ASSERT(r.is_float && r.f == (neg ? -1.5 : 1.5) && !*p,
+               "fio_aton binary float error for %s",
+               buf + !neg);
+    p = buf + !neg;
+    FIO_ASSERT(fio_atof(&p) == (neg ? -1.5 : 1.5) && !*p,
+               "fio_atof binary float error for %s",
+               buf + !neg);
+    buf[65] = 0; /* without the `f`: fio_atof still reads raw bits */
+    p = buf + !neg;
+    FIO_ASSERT(fio_atof(&p) == (neg ? -1.5 : 1.5) && !*p,
+               "fio_atof binary (no f) error for %s",
+               buf + !neg);
+    buf[65] = 'f';
+  }
+  /* fio_ftoa base 2 round-trips any bit pattern (incl. NaN payloads, -0) */
+  for (size_t i = 0; i < (1ULL << 12); ++i) {
+    union {
+      double f;
+      uint64_t u;
+    } src = {.u = fio_rand64() >> (i & 63)}, dst;
+    if (i < 2)
+      src.u = (uint64_t)i << 63; /* 0.0, -0.0 */
+    fio_ftoa(buf, src.f, 2);
+    p = buf;
+    r = fio_aton(&p);
+    FIO_ASSERT(r.is_float && r.u == src.u && !*p,
+               "fio_aton 0b...f round-trip error for %s",
+               buf);
+    p = buf;
+    dst.f = fio_atof(&p);
+    FIO_ASSERT(dst.u == src.u && !*p, "fio_atof round-trip error: %s", buf);
+  }
+  /* fio_ftoa base 16 writes C99 `%a` hex floats, read back exactly */
+  struct {
+    double d;
+    const char *s;
+  } hexf[] = {
+      {1.5, "0x1.8p+0"},
+      {1.0, "0x1p+0"},
+      {0.0, "0x0p+0"},
+      {-0.0, "-0x0p+0"},
+      {-0.1, "-0x1.999999999999ap-4"},
+      {4.9406564584124654e-324, "0x0.0000000000001p-1022"},
+      {1.7976931348623157e+308, "0x1.fffffffffffffp+1023"},
+      {INFINITY, "Infinity"},
+  };
+  for (size_t i = 0; i < sizeof(hexf) / sizeof(hexf[0]); ++i) {
+    size_t len = fio_ftoa(buf, hexf[i].d, 16);
+    FIO_ASSERT(len == strlen(hexf[i].s) && !strcmp(buf, hexf[i].s),
+               "fio_ftoa base 16 error: %s != %s",
+               buf,
+               hexf[i].s);
+  }
+  for (size_t i = 0; i < (1ULL << 12); ++i) {
+    union {
+      double f;
+      uint64_t u;
+    } src = {.u = fio_rand64() >> (i & 63)}, dst;
+    if (isnan(src.f) || isinf(src.f))
+      continue;
+    fio_ftoa(buf, src.f, 16);
+    p = buf;
+    r = fio_aton(&p);
+    FIO_ASSERT(r.is_float && r.u == src.u && !*p,
+               "fio_aton hex float round-trip error for %s",
+               buf);
+    p = buf;
+    dst.f = fio_atof(&p);
+    FIO_ASSERT(dst.u == src.u && !*p, "fio_atof hex round-trip error: %s", buf);
+    p = buf;
+    dst.f = strtod(p, &p);
+    FIO_ASSERT(dst.u == src.u && !*p, "strtod hex round-trip error: %s", buf);
+  }
+  /* fio_atol: a prefix counts only when a valid digit follows */
+  struct {
+    const char *s;
+    int64_t i;
+    size_t len;
+  } atol_prefix[] = {
+      {"x1F", 31, 3},
+      {"-x10", -16, 4},
+      {"b101", 5, 4},
+      {"0x", 0, 1},
+      {"0b", 0, 1},
+      {"0b2", 0, 1},
+      {"0xg", 0, 1},
+  };
+  for (size_t i = 0; i < sizeof(atol_prefix) / sizeof(atol_prefix[0]); ++i) {
+    p = (char *)atol_prefix[i].s;
+    int64_t n = fio_atol(&p);
+    FIO_ASSERT(n == atol_prefix[i].i &&
+                   (size_t)(p - atol_prefix[i].s) == atol_prefix[i].len,
+               "fio_atol prefix error for \"%s\": %lld (%zu bytes)",
+               atol_prefix[i].s,
+               (long long)n,
+               (size_t)(p - atol_prefix[i].s));
+  }
+  /* NaN is the standard quiet NaN; C's `nan(...)` payload isn't consumed */
+  p = (char *)"nan(1)";
+  r = fio_aton(&p);
+  FIO_ASSERT(r.is_float && r.u == 0x7FF8000000000000ULL && *p == '(',
+             "fio_aton nan error");
+  p = (char *)"-NaN";
+  r = fio_aton(&p);
+  FIO_ASSERT(r.is_float && r.u == 0xFFF8000000000000ULL && !*p,
+             "fio_aton -nan error");
+  /* fio_atof: decimal leading zeros, signs, hex, large integers */
+  struct {
+    const char *s;
+    double d;
+    size_t len;
+  } fl[] = {
+      {"0123", 123.0, 4},
+      {"-0123.5", -123.5, 7},
+      {" +1.5", 1.5, 5},
+      {"0x10", 16.0, 4},
+      {"0xFFFFFFFFFFFFFFFF", 18446744073709551615.0, 18},
+      {"-0.0", -0.0, 4},
+      {"0.3", 0.3, 3},
+      {"--1", 0.0, 0},
+      {"- 1", 0.0, 0},
+  };
+  for (size_t i = 0; i < sizeof(fl) / sizeof(fl[0]); ++i) {
+    p = (char *)fl[i].s;
+    u.f = fio_atof(&p);
+    FIO_ASSERT(u.f == fl[i].d && signbit(u.f) == signbit(fl[i].d) &&
+                   (size_t)(p - fl[i].s) == fl[i].len,
+               "fio_atof error for \"%s\": %.17g (%zu bytes)",
+               fl[i].s,
+               u.f,
+               (size_t)(p - fl[i].s));
+  }
+  /* locale independence (skipped if the locale isn't installed) */
+  if (setlocale(LC_NUMERIC, "de_DE.UTF-8")) {
+    p = (char *)"1.5";
+    FIO_ASSERT(fio_atof(&p) == 1.5 && !*p, "fio_atof depends on the locale");
+    setlocale(LC_NUMERIC, "C");
+  }
 }
 
 int main(void) {
@@ -432,6 +643,7 @@ int main(void) {
                "fio_stol16u bound (end pointer) failed");
   }
   FIO_NAME_TEST(stl, aton_vectors)();
+  FIO_NAME_TEST(stl, aton_formats)();
 
 #define TEST_DOUBLE(s, d, stop)                                                \
   do {                                                                         \
@@ -451,6 +663,11 @@ int main(void) {
     (void)std;                                                                 \
     pn.d_ = r;                                                                 \
     pn1.d_ = r2;                                                               \
+    FIO_ASSERT(r2 == (double)d || (isnan(r2) && isnan((double)d)),             \
+               "fio_aton rounding error for %s\n\t%.17g != %.17g",            \
+               s,                                                              \
+               r2,                                                             \
+               (double)d);                                                     \
     FIO_ASSERT(                                                                \
         *p == stop || p == p2 || ((FIO_OS_WIN - 1 + 1) && p == start),         \
         "atof float parsing didn't stop at correct position! %x != %x\n%s",    \

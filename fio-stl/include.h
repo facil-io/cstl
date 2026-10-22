@@ -105,6 +105,10 @@
 #include "012 gfm.h"
 #endif
 
+#ifdef FIO_DATA
+#include "013 data.h"
+#endif
+
 #if defined(FIO_POLL) && !defined(FIO___RECURSIVE_INCLUDE)
 #include "102 poll api.h"
 #include "102 poll epoll.h"
@@ -260,6 +264,12 @@
 #include "434 websocket.h"
 #include "438 http.h"
 #include "439 http.h"
+#endif
+
+/* HTTP <=> FIOBJ bridge: compiled once both modules were included (any order) */
+#if defined(H___FIO_HTTP_API___H) && defined(H___FIO_FIOBJ___H) &&             \
+    !defined(FIO___RECURSIVE_INCLUDE)
+#include "440 http fiobj.h"
 #endif
 
 #ifndef FIO___DEV___

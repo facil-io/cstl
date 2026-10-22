@@ -167,6 +167,8 @@ MIME Multipart Parser API
  * - `err`: 0 = success, -1 = error, -2 = need more data
  *
  * For streaming, call again with remaining data appended to unconsumed data.
+ * Note: each part must fit in the buffer; use `fio_multipart_stream_parse` to
+ * stream large file uploads in bounded memory.
  */
 SFUNC fio_multipart_result_s
 fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
@@ -174,6 +176,44 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
                     fio_buf_info_s boundary,
                     const char *data,
                     size_t len);
+
+/**
+ * Streaming state for `fio_multipart_stream_parse`.
+ *
+ * Zero-initialize before the first call. All fields are private.
+ */
+typedef struct {
+  void *file_ctx;
+  int in_file;
+} fio_multipart_stream_s;
+
+/**
+ * Parses MIME multipart data like `fio_multipart_parse`, except that file
+ * contents are streamed: `on_file_data` is called with each chunk of a file as
+ * it arrives, so a file part doesn't have to fit in the buffer.
+ *
+ * On `err == -2`, keep `data + consumed ... data + len`, append more data and
+ * call again with the same `stream`. Regular fields must still fit in the
+ * buffer.
+ *
+ * If the input ends while `err == -2`, call `fio_multipart_stream_close`.
+ */
+SFUNC fio_multipart_result_s
+fio_multipart_stream_parse(fio_multipart_stream_s *stream,
+                           const fio_multipart_parser_callbacks_s *callbacks,
+                           void *udata,
+                           fio_buf_info_s boundary,
+                           const char *data,
+                           size_t len);
+
+/**
+ * Ends a stream early (i.e., truncated input), calling `on_file_end` for any
+ * open file. Returns -1 if a file was open (incomplete), otherwise 0.
+ */
+SFUNC int fio_multipart_stream_close(
+    fio_multipart_stream_s *stream,
+    const fio_multipart_parser_callbacks_s *callbacks,
+    void *udata);
 
 /* *****************************************************************************
 MIME Multipart Parser - Implementation
@@ -512,22 +552,84 @@ FIO_SFUNC fio_buf_info_s fio___multipart_find_header(const char *headers,
 }
 
 /* *****************************************************************************
+Internal Helper: Handle the bytes after a boundary delimiter
+***************************************************************************** */
+
+/**
+ * Handles the bytes following a delimiter found at `next_boundary`.
+ *
+ * Returns 1 to continue with the next part (`*ppos` updated), or 0 if
+ * `result` is final (closing boundary, need more data or error).
+ */
+FIO_SFUNC int fio___multipart_after_boundary(fio_multipart_result_s *result,
+                                             fio___multipart_cb_s *cb,
+                                             void *udata,
+                                             const char *data,
+                                             const char *end,
+                                             const char *next_boundary,
+                                             size_t delimiter_len,
+                                             const char **ppos) {
+  const char *pos = next_boundary + delimiter_len;
+  if ((size_t)(end - pos) < 2) {
+    result->err = -2; /* Need more data */
+    result->consumed = (size_t)(next_boundary - data);
+    return 0;
+  }
+  if (pos[0] == '-' && pos[1] == '-') { /* Closing boundary */
+    pos += 2;
+    /* Skip optional trailing CRLF */
+    if ((size_t)(end - pos) >= 2 && pos[0] == '\r' && pos[1] == '\n')
+      pos += 2;
+    result->consumed = (size_t)(pos - data);
+    return 0;
+  }
+  if (pos[0] != '\r' || pos[1] != '\n') {
+    result->err = -1;
+    cb->on_error(udata);
+    result->consumed = (size_t)(pos - data);
+    return 0;
+  }
+  *ppos = pos + 2; /* Skip CRLF, continue to next part */
+  return 1;
+}
+
+/** Emits a file chunk. Returns non-zero (after closing the file) on abort. */
+FIO_SFUNC int fio___multipart_stream_file_data(fio_multipart_stream_s *stream,
+                                               fio___multipart_cb_s *cb,
+                                               void *udata,
+                                               const char *buf,
+                                               size_t len) {
+  if (!len || !cb->on_file_data(udata,
+                                stream->file_ctx,
+                                FIO_BUF_INFO2((char *)buf, len)))
+    return 0;
+  cb->on_file_end(udata, stream->file_ctx);
+  *stream = (fio_multipart_stream_s){0};
+  return -1;
+}
+
+/* *****************************************************************************
 MIME Multipart Main Parse Function
 ***************************************************************************** */
 
-SFUNC fio_multipart_result_s
-fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
-                    void *udata,
-                    fio_buf_info_s boundary,
-                    const char *data,
-                    size_t len) {
+/** Parses `data`; streams file contents when `stream` is not NULL. */
+FIO_SFUNC fio_multipart_result_s
+fio___multipart_parse(fio_multipart_stream_s *stream,
+                      const fio_multipart_parser_callbacks_s *callbacks,
+                      void *udata,
+                      fio_buf_info_s boundary,
+                      const char *data,
+                      size_t len) {
   fio_multipart_result_s result = {.consumed = 0,
                                    .field_count = 0,
                                    .file_count = 0,
                                    .err = 0};
 
   if (!data || !len || !boundary.buf || !boundary.len) {
-    result.err = -1;
+    result.err = (stream && stream->in_file && data && boundary.buf &&
+                  boundary.len)
+                     ? -2 /* streaming a file: no new data yet */
+                     : -1;
     return result;
   }
 
@@ -550,6 +652,8 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
   char *first_delimiter = delimiter_buf + 2;
   size_t first_delimiter_len = boundary.len + 2;
   size_t delimiter_len = boundary.len + 4;
+  /* bytes held back while streaming (may hold a partial delimiter) */
+  size_t hold = delimiter_len - 1;
 
   if (boundary.len > 250) {
     result.err = -1;
@@ -565,48 +669,86 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
   FIO_MEMCPY(delimiter + 4, boundary.buf, boundary.len);
   /* first_delimiter now points to "--" + boundary (at offset 2) */
 
-  /* Check for initial boundary */
-  if ((size_t)(end - pos) < first_delimiter_len) {
-    result.err = -2; /* Need more data */
-    return result;
-  }
+  if (stream && stream->in_file) {
+    /* Resume streaming a file: data starts inside the file's body */
+    const char *next_boundary =
+        fio___multipart_find(data, len, delimiter, delimiter_len);
+    if (!next_boundary) {
+      size_t emit = (len > hold) ? (len - hold) : 0;
+      if (fio___multipart_stream_file_data(stream, &cb, udata, data, emit)) {
+        result.err = -1;
+        result.consumed = emit;
+        return result;
+      }
+      result.err = -2;
+      result.consumed = emit;
+      return result;
+    }
+    if (fio___multipart_stream_file_data(stream,
+                                         &cb,
+                                         udata,
+                                         data,
+                                         (size_t)(next_boundary - data))) {
+      result.err = -1;
+      result.consumed = (size_t)(next_boundary - data);
+      return result;
+    }
+    cb.on_file_end(udata, stream->file_ctx);
+    *stream = (fio_multipart_stream_s){0};
+    ++result.file_count;
+    if (!fio___multipart_after_boundary(&result,
+                                        &cb,
+                                        udata,
+                                        data,
+                                        end,
+                                        next_boundary,
+                                        delimiter_len,
+                                        &pos))
+      return result;
+  } else {
+    /* Check for initial boundary */
+    if ((size_t)(end - pos) < first_delimiter_len) {
+      result.err = -2; /* Need more data */
+      return result;
+    }
 
-  /* First boundary may or may not have leading CRLF */
-  if (pos[0] == '\r' && pos[1] == '\n') {
-    pos += 2;
-  }
-
-  if ((size_t)(end - pos) < first_delimiter_len ||
-      FIO_MEMCMP(pos, first_delimiter, first_delimiter_len) != 0) {
-    result.err = -1;
-    cb.on_error(udata);
-    return result;
-  }
-
-  pos += first_delimiter_len;
-
-  /* Check for immediate close (empty multipart) */
-  if ((size_t)(end - pos) >= 2 && pos[0] == '-' && pos[1] == '-') {
-    /* Empty multipart - just the closing boundary */
-    pos += 2;
-    /* Skip optional trailing CRLF */
-    if ((size_t)(end - pos) >= 2 && pos[0] == '\r' && pos[1] == '\n')
+    /* First boundary may or may not have leading CRLF */
+    if (pos[0] == '\r' && pos[1] == '\n') {
       pos += 2;
-    result.consumed = (size_t)(pos - data);
-    return result;
-  }
+    }
 
-  /* Expect CRLF after boundary */
-  if ((size_t)(end - pos) < 2) {
-    result.err = -2;
-    return result;
+    if ((size_t)(end - pos) < first_delimiter_len ||
+        FIO_MEMCMP(pos, first_delimiter, first_delimiter_len) != 0) {
+      result.err = -1;
+      cb.on_error(udata);
+      return result;
+    }
+
+    pos += first_delimiter_len;
+
+    /* Check for immediate close (empty multipart) */
+    if ((size_t)(end - pos) >= 2 && pos[0] == '-' && pos[1] == '-') {
+      /* Empty multipart - just the closing boundary */
+      pos += 2;
+      /* Skip optional trailing CRLF */
+      if ((size_t)(end - pos) >= 2 && pos[0] == '\r' && pos[1] == '\n')
+        pos += 2;
+      result.consumed = (size_t)(pos - data);
+      return result;
+    }
+
+    /* Expect CRLF after boundary */
+    if ((size_t)(end - pos) < 2) {
+      result.err = -2;
+      return result;
+    }
+    if (pos[0] != '\r' || pos[1] != '\n') {
+      result.err = -1;
+      cb.on_error(udata);
+      return result;
+    }
+    pos += 2;
   }
-  if (pos[0] != '\r' || pos[1] != '\n') {
-    result.err = -1;
-    cb.on_error(udata);
-    return result;
-  }
-  pos += 2;
 
   /* Parse parts */
   while (pos < end) {
@@ -641,6 +783,7 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
     fio___multipart_disposition_s disposition =
         fio___multipart_parse_disposition(disposition_value.buf,
                                           disposition_value.len);
+    int is_file = (disposition.filename.buf && disposition.filename.len > 0);
 
     /* Parse Content-Type header (optional) */
     fio_buf_info_s content_type = fio___multipart_find_header(headers_start,
@@ -655,6 +798,22 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
                                                      delimiter_len);
 
     if (!next_boundary) {
+      if (stream && is_file) {
+        /* Stream the file: emit what's safe, keep a possible partial delimiter */
+        size_t avail = (size_t)(end - body_start);
+        size_t emit = (avail > hold) ? (avail - hold) : 0;
+        stream->file_ctx = cb.on_file_start(udata,
+                                            disposition.name,
+                                            disposition.filename,
+                                            content_type);
+        stream->in_file = 1;
+        result.consumed = (size_t)(body_start + emit - data);
+        result.err =
+            fio___multipart_stream_file_data(stream, &cb, udata, body_start, emit)
+                ? -1
+                : -2;
+        return result;
+      }
       /* Check if we might have partial data */
       /* We need at least delimiter_len bytes after body to be sure */
       result.err = -2; /* Need more data */
@@ -669,7 +828,7 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
     size_t body_len = (size_t)(next_boundary - body_start);
 
     /* Determine if this is a file or field */
-    if (disposition.filename.buf && disposition.filename.len > 0) {
+    if (is_file) {
       /* File upload */
       void *file_ctx = cb.on_file_start(udata,
                                         disposition.name,
@@ -714,39 +873,56 @@ fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
       ++result.field_count;
     }
 
-    /* Move past the boundary */
-    pos = next_boundary + delimiter_len;
-
-    /* Check for closing boundary (--) or continuation (CRLF) */
-    if ((size_t)(end - pos) < 2) {
-      result.err = -2; /* Need more data */
-      result.consumed = (size_t)(next_boundary - data);
+    /* Move past the boundary, checking for closing boundary or CRLF */
+    if (!fio___multipart_after_boundary(&result,
+                                        &cb,
+                                        udata,
+                                        data,
+                                        end,
+                                        next_boundary,
+                                        delimiter_len,
+                                        &pos))
       return result;
-    }
-
-    if (pos[0] == '-' && pos[1] == '-') {
-      /* Closing boundary */
-      pos += 2;
-      /* Skip optional trailing CRLF */
-      if ((size_t)(end - pos) >= 2 && pos[0] == '\r' && pos[1] == '\n')
-        pos += 2;
-      result.consumed = (size_t)(pos - data);
-      return result;
-    }
-
-    if (pos[0] != '\r' || pos[1] != '\n') {
-      result.err = -1;
-      cb.on_error(udata);
-      result.consumed = (size_t)(pos - data);
-      return result;
-    }
-
-    pos += 2; /* Skip CRLF, continue to next part */
   }
 
-  /* Reached end of data without finding closing boundary */
+  /* Reached end of data without finding closing boundary: rewind to the last
+   * delimiter, so earlier parts aren't reported again */
   result.err = -2;
+  result.consumed = (size_t)((pos - 2 - delimiter_len) - data);
+  if (result.consumed > len)
+    result.consumed = 0;
   return result;
+}
+
+SFUNC fio_multipart_result_s
+fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks,
+                    void *udata,
+                    fio_buf_info_s boundary,
+                    const char *data,
+                    size_t len) {
+  return fio___multipart_parse(NULL, callbacks, udata, boundary, data, len);
+}
+
+SFUNC fio_multipart_result_s
+fio_multipart_stream_parse(fio_multipart_stream_s *stream,
+                           const fio_multipart_parser_callbacks_s *callbacks,
+                           void *udata,
+                           fio_buf_info_s boundary,
+                           const char *data,
+                           size_t len) {
+  return fio___multipart_parse(stream, callbacks, udata, boundary, data, len);
+}
+
+SFUNC int fio_multipart_stream_close(
+    fio_multipart_stream_s *stream,
+    const fio_multipart_parser_callbacks_s *callbacks,
+    void *udata) {
+  if (!stream || !stream->in_file)
+    return 0;
+  fio___multipart_cb_s cb = fio___multipart_callbacks_validate(callbacks);
+  cb.on_file_end(udata, stream->file_ctx);
+  *stream = (fio_multipart_stream_s){0};
+  return -1;
 }
 
 /* *****************************************************************************

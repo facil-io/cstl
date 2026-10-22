@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3172.
+Total symbols: 3196.
 
 ## Contents
 
@@ -27,8 +27,8 @@ Total symbols: 3172.
 - [`./fio-stl/003 entities.h`](#fio-stl-003-entities-h) — 1
 - [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 28
 - [`./fio-stl/004 http1 parser.h`](#fio-stl-004-http1-parser-h) — 3
-- [`./fio-stl/004 json.h`](#fio-stl-004-json-h) — 5
-- [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 3
+- [`./fio-stl/004 json.h`](#fio-stl-004-json-h) — 4
+- [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 6
 - [`./fio-stl/004 resp3.h`](#fio-stl-004-resp3-h) — 24
 - [`./fio-stl/004 sock.h`](#fio-stl-004-sock-h) — 35
 - [`./fio-stl/004 state callbacks.h`](#fio-stl-004-state-callbacks-h) — 4
@@ -37,8 +37,9 @@ Total symbols: 3172.
 - [`./fio-stl/004 websocket parser.h`](#fio-stl-004-websocket-parser-h) — 29
 - [`./fio-stl/005 cli.h`](#fio-stl-005-cli-h) — 23
 - [`./fio-stl/010 mem.h`](#fio-stl-010-mem-h) — 50
-- [`./fio-stl/011 string core.h`](#fio-stl-011-string-core-h) — 103
+- [`./fio-stl/011 string core.h`](#fio-stl-011-string-core-h) — 106
 - [`./fio-stl/012 gfm.h`](#fio-stl-012-gfm-h) — 10
+- [`./fio-stl/013 data.h`](#fio-stl-013-data-h) — 13
 - [`./fio-stl/102 poll api.h`](#fio-stl-102-poll-api-h) — 16
 - [`./fio-stl/102 queue.h`](#fio-stl-102-queue-h) — 28
 - [`./fio-stl/102 stream.h`](#fio-stl-102-stream-h) — 16
@@ -72,13 +73,14 @@ Total symbols: 3172.
 - [`./fio-stl/210 map.h`](#fio-stl-210-map-h) — 30
 - [`./fio-stl/210 map2.h`](#fio-stl-210-map2-h) — 3
 - [`./fio-stl/249 reference counter.h`](#fio-stl-249-reference-counter-h) — 17
-- [`./fio-stl/250 fiobj.h`](#fio-stl-250-fiobj-h) — 66
+- [`./fio-stl/250 fiobj.h`](#fio-stl-250-fiobj-h) — 69
 - [`./fio-stl/401 io api.h`](#fio-stl-401-io-api-h) — 104
 - [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 45
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
-- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 161
+- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 163
+- [`./fio-stl/440 http fiobj.h`](#fio-stl-440-http-fiobj-h) — 1
 
 -----------------------------------------------------
 
@@ -485,7 +487,7 @@ _Symbol type:_ `macro`
 #### `FIO_VERSION_PATCH`
 
 ```c
-#define FIO_VERSION_PATCH 2
+#define FIO_VERSION_PATCH 3
 ```
 
 PATCH version: Bug fixes, minor features may be added.
@@ -19069,6 +19071,7 @@ Converts a String to a number - either an integer or a float (double).
 Skips white space at the beginning of the string.
 
 Auto detects binary and hex formats when prefix is provided (0x / 0b).
+Binary with an `f` suffix (`0b...f`) is a float's raw IEEE 754 bits.
 
 Auto detects octal when number starts with zero.
 
@@ -19077,8 +19080,12 @@ Auto detects the Strings "inf", "infinity" and "nan" as float values.
 The number's format and type are returned in the return type.
 
 If a numerical overflow or format error occurred, the `.err` flag is set.
+Input without digits (i.e., "-", "." or "e5") sets `.err` and isn't consumed.
+An exponent without digits (i.e., the `e` in "1e") isn't consumed.
 
-Note: rounding errors may occur, as this is not an `strtod` exact match.
+Decimal floats are correctly rounded (round-half-even, as `strtod`), using
+Clinger's fast path and the Eisel-Lemire algorithm. Leading-zero numbers with
+a fraction or exponent are decimal (e.g., `012.5` is 12.5, as in C).
 
 _Symbol type:_ `function`
 
@@ -19105,7 +19112,11 @@ _Symbol type:_ `function`
 double fio_atof(char **pstr)
 ```
 
-A helper function that converts between String data to a signed double.
+Converts String data to a double (locale independent, correctly rounded).
+
+Decimal (leading zeros are decimal, not octal), hex (`0x`), `inf` and `nan`
+are parsed using `fio_aton`. Binary (`0b...`, optional `f` suffix) is read
+as the raw IEEE 754 bit pattern. On error, returns 0 without moving `*pstr`.
 
 _Symbol type:_ `function`
 
@@ -19144,8 +19155,10 @@ No overflow guard is provided, make sure there's at least 130 bytes
 available (for base 2).
 
 Supports base 2, base 10 and base 16. An unsupported base will silently
-default to base 10. Prefixes aren't added (i.e., no "0x" or "0b" at the
-beginning of the string).
+default to base 10. Base 2 writes the raw IEEE 754 bits as `0b...f`, which
+`fio_aton` and `fio_atof` read back exactly. Base 16 writes a C99 `%a` hex
+float (i.e., `-0x1.8p+0`), which `strtod`, `fio_aton` and `fio_atof` read
+back exactly.
 
 Returns the number of bytes actually written (excluding the NUL
 terminator).
@@ -21375,7 +21388,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-004-json-h"></a> `./fio-stl/004 json.h`
 
-5 public symbols.
+4 public symbols.
 
 ### Macros
 
@@ -21388,16 +21401,6 @@ _Symbol type:_ `macro`
 Maximum allowed JSON nesting level. MUST be less then 65536
 
 Values above 65536 might cause the stack to overflow and cause a failure.
-
-_Symbol type:_ `macro`
-
-#### `FIO_JSON_USE_FIO_ATON`
-
-```c
-#define FIO_JSON_USE_FIO_ATON 0
-```
-
-
 
 _Symbol type:_ `macro`
 
@@ -21499,7 +21502,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-004-multipart-h"></a> `./fio-stl/004 multipart.h`
 
-3 public symbols.
+6 public symbols.
 
 ### Types
 
@@ -21586,6 +21589,21 @@ The MIME multipart parse result type.
 
 _Symbol type:_ `type`
 
+#### `fio_multipart_stream_s`
+
+```c
+typedef struct {
+void *file_ctx;
+int in_file;
+} fio_multipart_stream_s
+```
+
+Streaming state for `fio_multipart_stream_parse`.
+
+Zero-initialize before the first call. All fields are private.
+
+_Symbol type:_ `type`
+
 ### Functions
 
 #### `fio_multipart_parse`
@@ -21609,6 +21627,37 @@ Returns a result struct containing:
 - `err`: 0 = success, -1 = error, -2 = need more data
 
 For streaming, call again with remaining data appended to unconsumed data.
+Note: each part must fit in the buffer; use `fio_multipart_stream_parse` to
+stream large file uploads in bounded memory.
+
+_Symbol type:_ `function`
+
+#### `fio_multipart_stream_parse`
+
+```c
+fio_multipart_result_s fio_multipart_stream_parse(fio_multipart_stream_s *stream, const fio_multipart_parser_callbacks_s *callbacks, void *udata, fio_buf_info_s boundary, const char *data, size_t len)
+```
+
+Parses MIME multipart data like `fio_multipart_parse`, except that file
+contents are streamed: `on_file_data` is called with each chunk of a file as
+it arrives, so a file part doesn't have to fit in the buffer.
+
+On `err == -2`, keep `data + consumed ... data + len`, append more data and
+call again with the same `stream`. Regular fields must still fit in the
+buffer.
+
+If the input ends while `err == -2`, call `fio_multipart_stream_close`.
+
+_Symbol type:_ `function`
+
+#### `fio_multipart_stream_close`
+
+```c
+int fio_multipart_stream_close( fio_multipart_stream_s *stream, const fio_multipart_parser_callbacks_s *callbacks, void *udata)
+```
+
+Ends a stream early (i.e., truncated input), calling `on_file_end` for any
+open file. Returns -1 if a file was open (incomplete), otherwise 0.
 
 _Symbol type:_ `function`
 
@@ -24062,7 +24111,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-011-string-core-h"></a> `./fio-stl/011 string core.h`
 
-103 public symbols.
+106 public symbols.
 
 ### Macros
 
@@ -24295,6 +24344,43 @@ Argument type used by fio_string_write2.
 
 _Symbol type:_ `type`
 
+#### `fio_string_primitive_e`
+
+```c
+typedef enum {
+FIO_STRING_PRIMITIVE_STRING = 0,
+FIO_STRING_PRIMITIVE_NULL,
+FIO_STRING_PRIMITIVE_TRUE,
+FIO_STRING_PRIMITIVE_FALSE,
+FIO_STRING_PRIMITIVE_NUMBER,
+FIO_STRING_PRIMITIVE_FLOAT,
+} fio_string_primitive_e
+```
+
+Primitive types detected by `fio_string2primitive`.
+
+_Symbol type:_ `type`
+
+#### `fio_string_primitive_s`
+
+```c
+typedef struct {
+/** The value for `FIO_STRING_PRIMITIVE_NUMBER` (`i`) or `_FLOAT` (`f`). */
+union {
+int64_t i;
+double f;
+};
+/** The detected primitive type. */
+fio_string_primitive_e type;
+/** The numeral's original base (2, 8, 10 or 16); 0 for non-numerals. */
+uint8_t base;
+} fio_string_primitive_s
+```
+
+Result of `fio_string2primitive`.
+
+_Symbol type:_ `type`
+
 #### `fio_keystr_s`
 
 ```c
@@ -24464,6 +24550,24 @@ int fio_string_write_bin(fio_str_info_s *dest, fio_string_realloc_fn reallocate,
 ```
 
 
+
+_Symbol type:_ `function`
+
+#### `fio_string2primitive`
+
+```c
+fio_string_primitive_s fio_string2primitive(fio_str_info_s str)
+```
+
+Identifies the primitive a String represents.
+
+Detects `null` / `nil`, `true` and `false` (case-insensitive) and any
+numeral `fio_aton` accepts (decimal, float, hex, binary, octal, `inf`,
+`nan`, ...) provided the whole String is consumed. Anything else (including
+an empty String) is `FIO_STRING_PRIMITIVE_STRING`.
+
+Note: numerals are parsed by `fio_aton`, so `str` MUST be followed by a
+readable non-numeric guard byte (i.e., NUL terminated).
 
 _Symbol type:_ `function`
 
@@ -25359,6 +25463,175 @@ _Symbol type:_ `macro`
 GFM task-list marker is checked.
 
 _Symbol type:_ `macro`
+
+-----------------------------------------------------
+
+## <a id="fio-stl-013-data-h"></a> `./fio-stl/013 data.h`
+
+13 public symbols.
+
+### Macros
+
+#### `FIO_DATA_RAM_LIMIT`
+
+```c
+#define FIO_DATA_RAM_LIMIT (1UL << 17)
+```
+
+Default number of bytes kept in RAM before spilling to a temporary file.
+
+_Symbol type:_ `macro`
+
+#### `FIO_DATA_INIT`
+
+```c
+#define FIO_DATA_INIT   \
+  { .buf = NULL, .len = 0, .pos = 0, .limit = 0, .fd = -1 }
+```
+
+Initializes a `fio_data_s` using the default RAM limit.
+
+_Symbol type:_ `macro`
+
+### Types
+
+#### `fio_data_s`
+
+```c
+typedef struct {
+/** RAM data (`fio_bstr`), or the last read once spilled to `fd`. */
+char *buf;
+/** Total data length. */
+size_t len;
+/** Reading position. */
+size_t pos;
+/** RAM limit before spilling to a temporary file (0 = default). */
+size_t limit;
+/** Temporary file descriptor (-1 while the data is in RAM). */
+int fd;
+} fio_data_s
+```
+
+A seekable data store that keeps data in RAM until it grows beyond `limit`,
+at which point it moves to a temporary file.
+
+Initialize with `FIO_DATA_INIT` (or `fio_data_init`) and release with
+`fio_data_destroy`. Fields are read-only for users; use the API.
+
+_Symbol type:_ `type`
+
+### Functions
+
+#### `fio_data_init`
+
+```c
+inline void fio_data_init(fio_data_s *d, size_t ram_limit)
+```
+
+Initializes `d`, setting the RAM limit (0 = `FIO_DATA_RAM_LIMIT`).
+
+_Symbol type:_ `function`
+
+#### `fio_data_destroy`
+
+```c
+void fio_data_destroy(fio_data_s *d)
+```
+
+Releases all resources (closing any temporary file). `d` stays usable.
+
+_Symbol type:_ `function`
+
+#### `fio_data_len`
+
+```c
+inline size_t fio_data_len(fio_data_s *d)
+```
+
+Returns the data length.
+
+_Symbol type:_ `function`
+
+#### `fio_data_pos`
+
+```c
+inline size_t fio_data_pos(fio_data_s *d)
+```
+
+Returns the reading position.
+
+_Symbol type:_ `function`
+
+#### `fio_data_fd`
+
+```c
+inline int fio_data_fd(fio_data_s *d)
+```
+
+Returns the temporary file's descriptor, or -1 if the data is in RAM.
+
+_Symbol type:_ `function`
+
+#### `fio_data_seek`
+
+```c
+size_t fio_data_seek(fio_data_s *d, ssize_t pos)
+```
+
+Sets the reading position and returns the new position.
+
+Negative values count from the end. `SSIZE_MAX` keeps the current position.
+The position is clamped to the data length.
+
+_Symbol type:_ `function`
+
+#### `fio_data_read`
+
+```c
+fio_str_info_s fio_data_read(fio_data_s *d, size_t len)
+```
+
+Reads up to `len` bytes from the reading position; returns nothing at EOF.
+
+The returned buffer is valid until the next read, write or destroy.
+
+_Symbol type:_ `function`
+
+#### `fio_data_read_until`
+
+```c
+fio_str_info_s fio_data_read_until(fio_data_s *d, char token, size_t limit)
+```
+
+Reads until (and including) `token`, `limit` bytes or EOF.
+
+`limit` is ignored if zero or larger than the remaining data. The returned
+buffer is valid until the next read, write or destroy.
+
+_Symbol type:_ `function`
+
+#### `fio_data_expect`
+
+```c
+void fio_data_expect(fio_data_s *d, size_t len)
+```
+
+Prepares for `len` more bytes (may spill to a temporary file early).
+
+_Symbol type:_ `function`
+
+#### `fio_data_write`
+
+```c
+int fio_data_write(fio_data_s *d, const void *data, size_t len)
+```
+
+Appends `len` bytes from `data`, spilling to a temporary file once the RAM
+limit is exceeded.
+
+Returns 0 on success or -1 on error (data may be partially written).
+
+_Symbol type:_ `function`
 
 -----------------------------------------------------
 
@@ -32642,7 +32915,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-250-fiobj-h"></a> `./fio-stl/250 fiobj.h`
 
-66 public symbols.
+69 public symbols.
 
 ### Macros
 
@@ -32864,6 +33137,16 @@ _Symbol type:_ `macro`
 ```
 
 
+
+_Symbol type:_ `macro`
+
+#### `FIOBJ_T_DATA`
+
+```c
+#define FIOBJ_T_DATA 40
+```
+
+The `FIOBJ_TYPE` of Data objects (a `FIOBJ_T_OTHER` class).
 
 _Symbol type:_ `macro`
 
@@ -33232,6 +33515,29 @@ inline void FIO_NAME(fiobj_float_free, free)(FIOBJ i)
 ```
 
 Frees a FIOBJ Float.
+
+_Symbol type:_ `function`
+
+#### `fiobj_data_new`
+
+```c
+inline FIOBJ fiobj_data_new(size_t ram_limit)
+```
+
+Creates a new Data object - a `fio_data_s` store that keeps data in RAM
+until it exceeds `ram_limit` bytes (0 = `FIO_DATA_RAM_LIMIT`), then moves it
+to a temporary file.
+
+_Symbol type:_ `function`
+
+#### `fiobj_data_ptr`
+
+```c
+inline fio_data_s *fiobj_data_ptr(FIOBJ o)
+```
+
+Returns the `fio_data_s` store of a Data object (use the `fio_data_*` API to
+read / write), or NULL if `o` isn't a Data object.
 
 _Symbol type:_ `function`
 
@@ -36147,7 +36453,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-430-http-api-h"></a> `./fio-stl/430 http api.h`
 
-161 public symbols.
+163 public symbols.
 
 ### Macros
 
@@ -36783,7 +37089,7 @@ Arguments for the fio_http_write function.
 
 _Symbol type:_ `type`
 
-#### `fio_http_body_parse_callbacks_s`
+#### `fio_http_params_parse_callbacks_s`
 
 ```c
 typedef struct {
@@ -36819,6 +37125,9 @@ void (*map_done)(void *udata, void *map);
 *
 * Return context for this file (e.g., fd, stream, buffer).
 * Return NULL to skip this file (on_file_data/on_file_done won't be called).
+*
+* File data is streamed in chunks (the body is never fully loaded), so large
+* uploads can be written to storage as they are parsed.
 */
 void *(*on_file)(void *udata,
 fio_str_info_s name,
@@ -36833,10 +37142,10 @@ void (*on_file_done)(void *udata, void *file);
 void *(*on_error)(void *udata, void *partial);
 /** Called to free an unused object (e.g., key when map_set fails). */
 void (*free_unused)(void *udata, void *obj);
-} fio_http_body_parse_callbacks_s
+} fio_http_params_parse_callbacks_s
 ```
 
-HTTP body parser callbacks.
+HTTP params parser callbacks (query and body parsing).
 
 All callbacks receive `udata` as first parameter.
 Primitive callbacks return the created object as `void *`.
@@ -36844,20 +37153,20 @@ Container callbacks return a context for that container.
 
 _Symbol type:_ `type`
 
-#### `fio_http_body_parse_result_s`
+#### `fio_http_params_parse_result_s`
 
 ```c
 typedef struct {
 /** Top-level parsed object (caller responsible for freeing). */
 void *result;
-/** Number of bytes consumed from body. */
+/** Number of bytes consumed from the parsed input(s). */
 size_t consumed;
 /** Error code: 0 = success. */
 int err;
-} fio_http_body_parse_result_s
+} fio_http_params_parse_result_s
 ```
 
-HTTP body parse result.
+HTTP params parse result.
 
 _Symbol type:_ `type`
 
@@ -38042,7 +38351,7 @@ _Symbol type:_ `function`
 #### `fio_http_body_parse`
 
 ```c
-fio_http_body_parse_result_s fio_http_body_parse(fio_http_s *h, const fio_http_body_parse_callbacks_s *callbacks, void *udata)
+fio_http_params_parse_result_s fio_http_body_parse(fio_http_s *h, const fio_http_params_parse_callbacks_s *callbacks, void *udata)
 ```
 
 Parses the HTTP request body, auto-detecting content type.
@@ -38057,6 +38366,54 @@ Calls the appropriate callbacks for each element found.
 
 **Returns:**
 - Parse result with top-level object and status.
+
+_Symbol type:_ `function`
+
+#### `fio_http_query_parse`
+
+```c
+fio_http_params_parse_result_s fio_http_query_parse(fio_http_s *h, const fio_http_params_parse_callbacks_s *callbacks, void *udata)
+```
+
+Parses the HTTP query string (URL-encoded) into a map.
+
+All values are Strings (as with URL-encoded bodies); use
+`fio_string2primitive` to convert a value when appropriate. Missing values (`key` or `key=`) produce empty
+Strings. Keys and values are percent / `+` decoded.
+
+**Parameters:**
+- `h` - The HTTP handle.
+- `callbacks` - Parser callbacks (same as for `fio_http_body_parse`).
+- `udata` - User context passed to all callbacks.
+
+**Returns:**
+- Parse result with top-level map and status.
+
+_Symbol type:_ `function`
+
+#### `fio_http_params_parse`
+
+```c
+fio_http_params_parse_result_s fio_http_params_parse(fio_http_s *h, const fio_http_params_parse_callbacks_s *callbacks, void *udata)
+```
+
+Parses the query string and then the body (if any) into a single map.
+
+Query pairs are set first, followed by the body's fields (the `map_set`
+callback decides how duplicate keys are handled). JSON object bodies are
+merged into the map; any other JSON body (array, primitive) is set under the
+`"_json"` key. Bodies with a missing / unknown Content-Type are ignored.
+
+The result is always the params map (or whatever `on_error` returns on
+error). `consumed` is the sum of the query and body bytes consumed.
+
+**Parameters:**
+- `h` - The HTTP handle.
+- `callbacks` - Parser callbacks (same as for `fio_http_body_parse`).
+- `udata` - User context passed to all callbacks.
+
+**Returns:**
+- Parse result with top-level map and status.
 
 _Symbol type:_ `function`
 
@@ -38351,6 +38708,32 @@ fio_http_settings_s *fio_http_settings(fio_http_s *)
 ```
 
 Returns the HTTP settings associated with the HTTP object, if any.
+
+_Symbol type:_ `function`
+
+-----------------------------------------------------
+
+## <a id="fio-stl-440-http-fiobj-h"></a> `./fio-stl/440 http fiobj.h`
+
+1 public symbols.
+
+### Functions
+
+#### `fio_http_params2FIOBJ`
+
+```c
+FIOBJ fio_http_params2FIOBJ(fio_http_s *h)
+```
+
+Parses the query and body params (see `fio_http_params_parse`) into a new
+FIOBJ Hash.
+
+Duplicate keys: the last value wins (body fields override query pairs).
+File uploads are stored as a Hash with the keys `"filename"` and `"type"`
+(Strings) and `"data"` (a `FIOBJ_T_DATA` object holding the content, which
+moves to a temporary file once it grows beyond `FIO_DATA_RAM_LIMIT`).
+
+Returns `FIOBJ_INVALID` on error. The caller must `fiobj_free` the result.
 
 _Symbol type:_ `function`
 

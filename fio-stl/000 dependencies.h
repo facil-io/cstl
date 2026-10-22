@@ -378,8 +378,14 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_STATE
 #endif
 
+#if defined(FIO_HTTP) || defined(FIO_FIOBJ)
+#undef FIO_DATA
+#define FIO_DATA
+#endif
+
 #if defined(FIO_STR) || defined(FIO_HTTP) || defined(FIO_STR_NAME) ||   \
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
+    defined(FIO_DATA) ||                                                       \
     defined(FIO_MAP_KEY_KSTR) || defined(FIO_MAP_KEY_BSTR) ||                  \
     (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
     defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME) || defined(FIO_OTP) ||     \

@@ -1112,8 +1112,88 @@ FIO_SFUNC void test_archive_roundtrips(void) {
 /* =============================================================================
  * Main
  * ========================================================================== */
+/* =============================================================================
+ * Test: fio_string2primitive
+ * ========================================================================== */
+FIO_SFUNC void test_string2primitive(void) {
+  fprintf(stderr, "* Testing fio_string2primitive\n");
+  struct {
+    const char *s;
+    fio_string_primitive_e type;
+    uint8_t base;
+    int64_t i;
+    double f;
+  } t[] = {
+      {"", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"hello", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"null", FIO_STRING_PRIMITIVE_NULL, 0, 0, 0},
+      {"NuLL", FIO_STRING_PRIMITIVE_NULL, 0, 0, 0},
+      {"nIL", FIO_STRING_PRIMITIVE_NULL, 0, 0, 0},
+      {"TRUE", FIO_STRING_PRIMITIVE_TRUE, 0, 0, 0},
+      {"fAlSe", FIO_STRING_PRIMITIVE_FALSE, 0, 0, 0},
+      {"nulls", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"fals", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"tru", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"42", FIO_STRING_PRIMITIVE_NUMBER, 10, 42, 0},
+      {"-42", FIO_STRING_PRIMITIVE_NUMBER, 10, -42, 0},
+      {"+5", FIO_STRING_PRIMITIVE_NUMBER, 10, 5, 0},
+      {" 7", FIO_STRING_PRIMITIVE_NUMBER, 10, 7, 0},
+      {"0", FIO_STRING_PRIMITIVE_NUMBER, 10, 0, 0},
+      {"1_000", FIO_STRING_PRIMITIVE_NUMBER, 10, 1000, 0},
+      {"0x1F", FIO_STRING_PRIMITIVE_NUMBER, 16, 31, 0},
+      {"-0X10", FIO_STRING_PRIMITIVE_NUMBER, 16, -16, 0},
+      {"x1F", FIO_STRING_PRIMITIVE_NUMBER, 16, 31, 0},
+      {"0b101", FIO_STRING_PRIMITIVE_NUMBER, 2, 5, 0},
+      {"b101", FIO_STRING_PRIMITIVE_NUMBER, 2, 5, 0},
+      {"0123", FIO_STRING_PRIMITIVE_NUMBER, 8, 83, 0},
+      {"007", FIO_STRING_PRIMITIVE_NUMBER, 8, 7, 0},
+      {"1.5", FIO_STRING_PRIMITIVE_FLOAT, 10, 0, 1.5},
+      {"-1.5e3", FIO_STRING_PRIMITIVE_FLOAT, 10, 0, -1500},
+      {".5", FIO_STRING_PRIMITIVE_FLOAT, 10, 0, 0.5},
+      {"012.5", FIO_STRING_PRIMITIVE_FLOAT, 10, 0, 12.5},
+      {"0x1.8p1", FIO_STRING_PRIMITIVE_FLOAT, 16, 0, 3},
+      {"12abc", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"1e", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"08", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"7 ", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+      {"-", FIO_STRING_PRIMITIVE_STRING, 0, 0, 0},
+  };
+  for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
+    fio_string_primitive_s r =
+        fio_string2primitive(FIO_STR_INFO1((char *)t[i].s));
+    FIO_ASSERT(r.type == t[i].type && r.base == t[i].base,
+               "fio_string2primitive(\"%s\") type %d base %d, expected %d / %d",
+               t[i].s,
+               (int)r.type,
+               (int)r.base,
+               (int)t[i].type,
+               (int)t[i].base);
+    FIO_ASSERT(r.type != FIO_STRING_PRIMITIVE_NUMBER || r.i == t[i].i,
+               "fio_string2primitive(\"%s\") = %lld",
+               t[i].s,
+               (long long)r.i);
+    FIO_ASSERT(r.type != FIO_STRING_PRIMITIVE_FLOAT || r.f == t[i].f,
+               "fio_string2primitive(\"%s\") = %g",
+               t[i].s,
+               r.f);
+  }
+  /* special floats and length-delimited input (NUL guard inside buffer) */
+  fio_string_primitive_s r = fio_string2primitive(FIO_STR_INFO1((char *)"inf"));
+  FIO_ASSERT(r.type == FIO_STRING_PRIMITIVE_FLOAT && isinf(r.f) && r.base == 10,
+             "fio_string2primitive(inf)");
+  r = fio_string2primitive(FIO_STR_INFO1((char *)"-nan"));
+  FIO_ASSERT(r.type == FIO_STRING_PRIMITIVE_FLOAT && isnan(r.f),
+             "fio_string2primitive(-nan)");
+  r = fio_string2primitive(FIO_STR_INFO2((char *)"12\0" "34", 3));
+  FIO_ASSERT(r.type == FIO_STRING_PRIMITIVE_STRING,
+             "embedded NUL should not be a number");
+  r = fio_string2primitive(FIO_STR_INFO2(NULL, 0));
+  FIO_ASSERT(r.type == FIO_STRING_PRIMITIVE_STRING, "NULL should be a String");
+}
+
 int main(void) {
   test_str_info_macros();
+  test_string2primitive();
   test_string_write();
   test_string_replace();
   test_string_write2();

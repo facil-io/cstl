@@ -719,24 +719,25 @@ int            fio_http_body_fd(fio_http_s *h);
 void           fio_http_body_close(fio_http_s *h);
 ```
 
-The handle stores body data in RAM until the configured threshold is crossed,
+The handle stores body data in RAM until `FIO_HTTP_BODY_RAM_LIMIT` is crossed,
 then uses a temporary file. `fio_http_body_fd` returns that file descriptor or
-`-1`.
+`-1`. Body storage is implemented by the [Data Store module](./013 data.md)
+(`fio_data_s`), which can be used independently.
 
 `fio_http_body_close` releases the body's RAM buffer and temporary file (if
 any) and resets the body to empty. The body is also released automatically
 when the handle is cleared or destroyed, so calling this is only needed to
 free resources early, once the body has been consumed.
 
-### Body parsing
+### Params parsing (query / body)
 
 ```c
-typedef struct fio_http_body_parse_callbacks_s fio_http_body_parse_callbacks_s;
-typedef struct fio_http_body_parse_result_s fio_http_body_parse_result_s;
+typedef struct fio_http_params_parse_callbacks_s fio_http_params_parse_callbacks_s;
+typedef struct fio_http_params_parse_result_s fio_http_params_parse_result_s;
 
-fio_http_body_parse_result_s fio_http_body_parse(
+fio_http_params_parse_result_s fio_http_body_parse(
     fio_http_s *h,
-    const fio_http_body_parse_callbacks_s *callbacks,
+    const fio_http_params_parse_callbacks_s *callbacks,
     void *udata);
 ```
 
@@ -744,14 +745,51 @@ The body parser auto-detects JSON, URL-encoded, and multipart/form-data input.
 Callbacks build application objects for primitives, arrays, maps, and file
 uploads.
 
-`fio_http_body_parse_callbacks_s` contains primitive callbacks (`on_null`,
+`fio_http_params_parse_callbacks_s` contains primitive callbacks (`on_null`,
 `on_true`, `on_false`, `on_number`, `on_float`, `on_string`), container
 callbacks (`on_array`, `on_map`, `array_push`, `map_set`, `array_done`,
 `map_done`), multipart callbacks (`on_file`, `on_file_data`, `on_file_done`),
 and error / cleanup callbacks (`on_error`, `free_unused`).
 
-`fio_http_body_parse_result_s` reports the top-level result, consumed bytes,
+Multipart bodies are read and parsed in chunks, so file uploads are never fully
+loaded into memory. `on_file_data` receives each chunk as it's parsed. Return
+`NULL` from `on_file` to skip a file; `on_file_data` and `on_file_done` then
+aren't called.
+
+`fio_http_params_parse_result_s` reports the top-level result, consumed bytes,
 and error code.
+
+```c
+fio_http_params_parse_result_s fio_http_query_parse(
+    fio_http_s *h,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata);
+```
+
+Parses the request query string (URL-encoded) into a map using the same
+callbacks and result type as `fio_http_body_parse`. Keys and values are
+percent / `+` decoded. All values are Strings (no type guessing, so `007` stays
+`"007"`); use `fio_string2primitive` to convert a value when appropriate.
+URL-encoded bodies follow the same rule. Missing values (`key` or `key=`) produce empty Strings, never
+`NULL`. An empty query produces an empty map.
+
+```c
+fio_http_params_parse_result_s fio_http_params_parse(
+    fio_http_s *h,
+    const fio_http_params_parse_callbacks_s *callbacks,
+    void *udata);
+```
+
+Parses the query string and then the body (if any) into a single map. Query
+pairs are set first, followed by the body fields; `map_set` decides how
+duplicate keys are handled. A JSON object body is merged into the map, while any
+other JSON body (array or primitive) is set under the `"_json"` key. A body with
+a missing or unknown Content-Type is ignored (not an error). The result is
+always the params map, or whatever `on_error` returns on error; `consumed` is
+the sum of query and body bytes consumed.
+
+When the FIOBJ module is also included, `fio_http_params2FIOBJ` returns the
+params as a FIOBJ Hash (see the FIOBJ documentation).
 
 ### Cookies
 
