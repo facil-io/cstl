@@ -80,9 +80,6 @@
 #ifdef FIO_RESP3
 #include "004 resp3.h"
 #endif
-#ifdef FIO_URL_ENCODED
-#include "004 urlencoded.h"
-#endif
 #ifdef FIO_MULTIPART
 #include "004 multipart.h"
 #endif
@@ -101,12 +98,14 @@
 #include "011 string core.h"
 #endif
 
+#ifdef FIO_DATA
+#include "012 data.h"
+#endif
 #ifdef FIO_GFM
 #include "012 gfm.h"
 #endif
-
-#ifdef FIO_DATA
-#include "013 data.h"
+#ifdef FIO_URL_ENCODED
+#include "012 urlencoded.h"
 #endif
 
 #if defined(FIO_POLL) && !defined(FIO___RECURSIVE_INCLUDE)
@@ -266,7 +265,8 @@
 #include "439 http.h"
 #endif
 
-/* HTTP <=> FIOBJ bridge: compiled once both modules were included (any order) */
+/* HTTP <=> FIOBJ bridge: compiled once both modules were included (any order)
+ */
 #if defined(H___FIO_HTTP_API___H) && defined(H___FIO_FIOBJ___H) &&             \
     !defined(FIO___RECURSIVE_INCLUDE)
 #include "440 http fiobj.h"
