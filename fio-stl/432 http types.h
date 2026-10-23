@@ -2065,7 +2065,17 @@ SFUNC int fio_http_body_fd(fio_http_s *h) { return fio_data_fd(&h->body); }
 /** Releases body (payload) resources, closing any temporary files. */
 SFUNC void fio_http_body_close(fio_http_s *h) { fio_data_destroy(&h->body); }
 
-/** Adjusts the body's reading position. Negative values start at the end. */
+/** Saves the whole body to `filename` (atomic). Returns 0 or -1. */
+SFUNC int fio_http_body_save(fio_http_s *h, const char *filename) {
+  return fio_data_save(&h->body, filename);
+}
+
+/**
+ * Adjusts the body's reading position and returns the new position.
+ *
+ * `-n` is `length - n` (`-1` is the last byte), clamped to 0; any position at
+ * or past the end is EOF.
+ */
 SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
   return fio_data_seek(&h->body, pos);
 }
@@ -2094,9 +2104,9 @@ SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length) {
   fio_data_expect(&h->body, expected_length);
 }
 
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
-  fio_data_write(&h->body, data, len);
+/** Writes `data` to the body (payload). Returns 0 on success, -1 on error. */
+SFUNC int fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
+  return fio_data_write(&h->body, data, len);
 }
 
 /* *****************************************************************************
@@ -3177,6 +3187,23 @@ fio___http_json_parse_buf(fio_str_info_s body,
       body.len);
 }
 
+/**
+ * Reads the whole body (from its start) to `body`.
+ *
+ * A spilled body is memory mapped where possible; a short read (i.e., low
+ * memory without mapping) returns -1.
+ */
+FIO_SFUNC int fio___http_body_read_all(fio_http_s *h, fio_str_info_s *body) {
+  fio_http_body_seek(h, 0);
+  *body = fio_http_body_read(h, fio_http_body_length(h));
+  if (body->len == fio_http_body_length(h))
+    return 0;
+  FIO_LOG_ERROR("HTTP body couldn't be read whole for parsing (%zu of %zu)",
+                body->len,
+                fio_http_body_length(h));
+  return -1;
+}
+
 FIO_SFUNC fio_http_params_parse_result_s
 fio___http_body_parse_json(fio_http_s *h,
                            const fio_http_params_parse_callbacks_s *callbacks,
@@ -3184,8 +3211,11 @@ fio___http_body_parse_json(fio_http_s *h,
   fio_http_params_parse_result_s result = {.result = NULL,
                                            .consumed = 0,
                                            .err = 0};
-  fio_http_body_seek(h, 0);
-  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  fio_str_info_s body;
+  if (fio___http_body_read_all(h, &body)) {
+    result.err = -1;
+    return result;
+  }
   if (!body.len || !body.buf)
     return result; /* empty body - nothing to parse */
   fio_json_result_s r =
@@ -3240,40 +3270,19 @@ FIO_SFUNC void *fio___http_urlenc_on_pair(void *udata_,
 
   const fio_http_params_parse_callbacks_s *cb = a->callbacks;
 
-  /* Decode name */
-  FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
-  fio_string_write_url_dec(&decoded_name,
-                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
-                           name.buf,
-                           name.len);
-
-  /* Decode value */
-  FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
-  fio_string_write_url_dec(&decoded_value,
-                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
-                           value.buf,
-                           value.len);
-
-  /* Create key string object */
+  /* The parser supplies decoded, callback-scoped buffers. */
   void *key_obj = NULL;
-  if (cb->on_string) {
-    key_obj = cb->on_string(a->udata, decoded_name.buf, decoded_name.len);
-  }
+  if (cb->on_string)
+    key_obj = cb->on_string(a->udata, name.buf, name.len);
 
   /* Create value object - URL-encoded values are always Strings */
   void *value_obj = NULL;
   if (cb->on_string)
-    value_obj = cb->on_string(a->udata, decoded_value.buf, decoded_value.len);
+    value_obj = cb->on_string(a->udata, value.buf, value.len);
 
   /* Insert into map (consumes key_obj / value_obj) */
   if (fio___http_params_set(cb, a->udata, a->map, key_obj, value_obj))
     a->err = 1;
-
-  /* Free decoded buffers if they were reallocated */
-  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_name))
-    FIO_STRING_FREE(decoded_name.buf);
-  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_value))
-    FIO_STRING_FREE(decoded_value.buf);
 
   /* Return non-NULL to continue parsing, NULL to stop */
   return a->err ? NULL : a;
@@ -3341,10 +3350,10 @@ FIO_SFUNC fio_http_params_parse_result_s fio___http_body_parse_urlencoded(
     fio_http_s *h,
     const fio_http_params_parse_callbacks_s *callbacks,
     void *udata) {
-  fio_http_body_seek(h, 0);
-  return fio___http_parse_urlencoded_buf(fio_http_body_read(h, (size_t)-1),
-                                         callbacks,
-                                         udata);
+  fio_str_info_s body;
+  if (fio___http_body_read_all(h, &body))
+    return (fio_http_params_parse_result_s){.err = -1};
+  return fio___http_parse_urlencoded_buf(body, callbacks, udata);
 }
 
 /* *****************************************************************************
@@ -3732,22 +3741,24 @@ fio_http_params_parse(fio_http_s *h,
     return fio___http_params_finish(callbacks, udata, map, consumed, err);
 
   switch (fio___http_body_detect_content_type(h)) {
-  case FIO___HTTP_BODY_CONTENT_TYPE_JSON:
-    fio_http_body_seek(h, 0);
-    err = fio___http_params_fill_json(fio_http_body_read(h, (size_t)-1),
-                                      callbacks,
-                                      udata,
-                                      map,
-                                      &consumed);
+  case FIO___HTTP_BODY_CONTENT_TYPE_JSON: {
+    fio_str_info_s body;
+    err = fio___http_body_read_all(h, &body);
+    if (!err)
+      err = fio___http_params_fill_json(body, callbacks, udata, map, &consumed);
     break;
-  case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED:
-    fio_http_body_seek(h, 0);
-    err = fio___http_params_fill_urlencoded(fio_http_body_read(h, (size_t)-1),
-                                            callbacks,
-                                            udata,
-                                            map,
-                                            &consumed);
+  }
+  case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED: {
+    fio_str_info_s body;
+    err = fio___http_body_read_all(h, &body);
+    if (!err)
+      err = fio___http_params_fill_urlencoded(body,
+                                              callbacks,
+                                              udata,
+                                              map,
+                                              &consumed);
     break;
+  }
   case FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART:
     err = fio___http_params_fill_multipart(h, callbacks, udata, map, &consumed);
     break;

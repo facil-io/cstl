@@ -3034,6 +3034,85 @@ static void test_http_server_h1_framing(void) {
 }
 
 /* ===========================================================================
+   Server: a request body that can't be stored -> 500 + close (live reactor)
+
+   `TMPDIR` names a missing folder, so the body can't spill past the RAM limit.
+   The body is exactly one byte past the limit, so the failing chunk is the
+   last one and the server has read everything (no TCP reset on close).
+   ===========================================================================
+ */
+
+#if FIO_OS_POSIX
+static void test_http_server_body_store_failure(void) {
+  fprintf(stderr, "  * server body storage failure -> 500 + close\n");
+  static fio_io_protocol_s raw_client;
+  const size_t body_len = (size_t)FIO_HTTP_BODY_RAM_LIMIT + 1;
+  char head[160];
+  int head_len = snprintf(head,
+                          sizeof(head),
+                          "POST /upload HTTP/1.1\r\nHost: x\r\n"
+                          "Content-Length: %zu\r\n\r\n",
+                          body_len);
+  char *request = (char *)malloc((size_t)head_len + body_len + 1);
+  FIO_ASSERT_ALLOC(request);
+  FIO_MEMCPY(request, head, (size_t)head_len);
+  FIO_MEMSET(request + head_len, 'a', body_len);
+  request[head_len + body_len] = 0;
+
+  raw_client = (fio_io_protocol_s){
+      .on_attach = test_h1f_client_on_attach,
+      .on_data = test_h1f_client_on_data,
+      .on_close = test_h1f_client_on_close,
+      .on_timeout = fio_io_touch,
+      .timeout = 10000,
+  };
+  FIO_MEMSET(&test_h1f, 0, sizeof(test_h1f));
+  test_h1f.client_fd = FIO_SOCKET_INVALID;
+  test_h1f.generation = (uintptr_t)0xDA7A;
+  test_h1f.request = request;
+  char *old_tmpdir = test_tmpdir_set("tmp/test-http-no-such-folder/nope");
+  fio_io_run_every(.fn = test_h1f_timeout,
+                   .udata1 = (void *)test_h1f.generation,
+                   .every = 3000,
+                   .repetitions = 1);
+  fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                           .on_http = test_h1f_server_on_http,
+                                           .log = 0);
+  FIO_ASSERT(l, "body store failure: listener failed");
+  unsigned port = test_ws_listener_port(l);
+  FIO_ASSERT(port, "body store failure: listener port discovery failed");
+  char url[128];
+  snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", port);
+  FIO_ASSERT(fio_io_connect(url,
+                            .protocol = &raw_client,
+                            .on_failed = test_h1f_client_on_failed),
+             "body store failure: raw connect failed");
+  test_h1f.active = 1;
+  fio_io_start(0);
+  test_h1f.active = 0;
+  fio_io_listen_stop((fio_io_listener_s *)l);
+  fio_queue_perform_all(fio_io_queue());
+  test_tmpdir_restore(old_tmpdir);
+  free(request);
+
+  FIO_ASSERT(!test_h1f.connect_failed && !test_h1f.overflow,
+             "body store failure: connect / capture failure");
+  FIO_ASSERT(!test_h1f.timed_out,
+             "body store failure: server kept the connection open:\n%s",
+             test_h1f.wire);
+  FIO_ASSERT(!test_h1f.paths[0],
+             "body store failure: request dispatched (%s)",
+             test_h1f.paths);
+  FIO_ASSERT(!strncmp(test_h1f.wire, "HTTP/1.1 500 ", 13) &&
+                 test_h1f_count("HTTP/1.") == 1,
+             "body store failure: expected a single 500 response:\n%s",
+             test_h1f.wire);
+  FIO_ASSERT(test_h1f.client_closes == 1 && test_h1f.eof,
+             "body store failure: raw peer must observe clean EOF");
+}
+#endif /* FIO_OS_POSIX */
+
+/* ===========================================================================
    Main
    ===========================================================================
  */
@@ -3116,6 +3195,9 @@ int main(void) {
   test_http_server_rejects_response();
   test_http_server_close_pipeline();
   test_http_server_h1_framing();
+#if FIO_OS_POSIX
+  test_http_server_body_store_failure();
+#endif
 
   fprintf(stderr, "\nAll high-level HTTP tests passed!\n");
   return 0;

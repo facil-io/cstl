@@ -130,8 +130,8 @@ int main(void) {
              2,
              strlen("name=value&&foo=bar"));
 
-  /* URL-encoded data (not decoded by parser) */
-  TEST_PARSE("URL-encoded data (not decoded)",
+  /* URL-encoded data */
+  TEST_PARSE("URL-encoded data",
              "name=hello%20world&foo=bar%26baz",
              2,
              strlen("name=hello%20world&foo=bar%26baz"));
@@ -188,8 +188,8 @@ int main(void) {
     }
   }
 
-  /* Plus sign as space (parser doesn't decode, just finds boundaries) */
-  TEST_PARSE("Plus sign in value (not decoded)",
+  /* Plus sign as space */
+  TEST_PARSE("Plus sign in value",
              "name=hello+world&foo=bar",
              2,
              strlen("name=hello+world&foo=bar"));
@@ -232,8 +232,7 @@ int main(void) {
              3,
              strlen("color=red&color=blue&color=green"));
 
-  /* Malformed percent encoding - parser doesn't validate, just finds boundaries
-   */
+  /* Malformed percent encoding remains literal. */
   TEST_PARSE("Incomplete percent encoding (%)",
              "name=hello%&foo=bar",
              2,
@@ -367,6 +366,47 @@ int main(void) {
     FIO_ASSERT(r.err == 1,
                "Verify test: expected err=1 (stopped), got %d",
                r.err);
+  }
+
+  /* Verify decoded callback bytes, including binary data and permissive input.
+   */
+  {
+    static const fio_url_encoded_parser_callbacks_s verify_callbacks = {
+        .on_pair = on_pair_verify,
+    };
+    static const struct {
+      const char *input;
+      const char *name;
+      size_t name_len;
+      const char *value;
+      size_t value_len;
+    } cases[] = {
+        {"first+name=hello%20world", "first name", 10, "hello world", 11},
+        {"%26%3d=%2b+%26%3D", "&=", 2, "+ &=", 4},
+        {"%2526=%252B%2B+", "%26", 3, "%2B+ ", 5},
+        {"%00key=a%00b", "\0key", 4, "a\0b", 3},
+        {"%E6%97%A5=%E6%9C%AC", "\xE6\x97\xA5", 3, "\xE6\x9C\xAC", 3},
+        {"a%ZZ%=b%2%GG", "a%ZZ%", 5, "b%2%GG", 6},
+        {"%u0041=%u20AC", "A", 1, "\xE2\x82\xAC", 3},
+        {"name+only", "name only", 9, "", 0},
+        {"=%2B", "", 0, "+", 1},
+        {"=", "", 0, "", 0},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+      verify_ctx_s ctx = {.expected_name = cases[i].name,
+                          .expected_name_len = cases[i].name_len,
+                          .expected_value = cases[i].value,
+                          .expected_value_len = cases[i].value_len};
+      fio_url_encoded_result_s r =
+          fio_url_encoded_parse(&verify_callbacks,
+                                &ctx,
+                                cases[i].input,
+                                strlen(cases[i].input));
+      FIO_ASSERT(ctx.verified, "Decoded pair mismatch (case %zu)", i);
+      FIO_ASSERT(r.err && r.count == 1 && r.consumed == strlen(cases[i].input),
+                 "Decoded callback stop result mismatch (case %zu)",
+                 i);
+    }
   }
 
   /* Test that value without = has correct empty value pointer */

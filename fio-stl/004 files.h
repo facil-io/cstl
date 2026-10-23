@@ -59,7 +59,16 @@ SFUNC int fio_filename_is_unsafe(const char *path);
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe_url(const char *path);
 
-/** Creates a temporary file, returning its file descriptor. */
+/**
+ * Creates a temporary file, returning its file descriptor (or -1 on error).
+ *
+ * The file is created in the folder named by the `TMPDIR`, `TMP` or `TEMP`
+ * environment variables (or `P_tmpdir`, or the current folder) and is
+ * anonymous: it has no name once this function returns (`O_TMPFILE`, or
+ * unlinked right after it is opened on POSIX systems; delete-on-close
+ * `O_TEMPORARY` on Windows). The file is removed when `fd` is closed (or the
+ * process exits), so no temporary files are left behind.
+ */
 SFUNC int fio_filename_tmp(void);
 
 /** Arguments for `fio_filename_remove`. */
@@ -118,17 +127,27 @@ SFUNC int fio_filename_make_path(fio_filename_make_path_args_s args);
   fio_filename_make_path((fio_filename_make_path_args_s){__VA_ARGS__})
 
 /**
- * Overwrites `filename` with the data in the buffer.
+ * Overwrites `filename` with `len` bytes from `buf`, atomically replacing any
+ * existing file (readers see either the old or the complete new content).
  *
- * If `path` starts with a `"~/"` than it will be relative to the user's home
- * folder (on Windows, testing for `"~\"`).
+ * If `filename` starts with a `"~/"` than it will be relative to the user's
+ * home folder (on Windows, also testing for `"~\"`), as in `fio_filename_open`.
  *
- * Returns -1 on error or 0 on success. On error, the state of the file is
- * undefined (may be doesn't exit / nothing written / partially written).
+ * The data is written to a new sibling file in the target's folder
+ * (`<filename>.fio-tmp-<random>`, created with `O_CREAT | O_EXCL`, mode `0666`
+ * minus the `umask`), flushed to storage (`fsync`) and renamed over
+ * `filename` (`MoveFileExA` on Windows). Exactly one `fsync` (the file, not
+ * the folder): a crash right after saving may leave the previous version.
+ *
+ * Returns -1 on error or 0 on success. On error, any existing `filename` is
+ * left untouched, the sibling file is removed and `errno` is preserved.
+ *
+ * Uses fixed size stack buffers (zero allocations); over-long paths fail with
+ * `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
  */
-FIO_IFUNC int fio_filename_overwrite(const char *filename,
-                                     const void *buf,
-                                     size_t len);
+SFUNC int fio_filename_overwrite(const char *filename,
+                                 const void *buf,
+                                 size_t len);
 
 /** Returns the file size (or 0 on both error / empty file). */
 FIO_IFUNC size_t fio_filename_size(const char *filename);
@@ -179,9 +198,31 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
  * a time, this function fragments the system calls into smaller `read` blocks,
  * allowing large data to be read.
  *
+ * Interrupted calls (`EINTR`) are retried. Fewer than `len` bytes are returned
+ * only at EOF or on error (`errno` is set by the failed call on error, but is
+ * left unchanged at EOF).
+ *
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
+
+/**
+ * Saves the first `len` bytes of the file `fd` (`[0, len)`) to `filename`,
+ * atomically replacing any existing file (same semantics, `"~/"` expansion and
+ * cleanup guarantees as `fio_filename_overwrite`).
+ *
+ * On Linux the data is copied by the kernel (`copy_file_range`, which may
+ * share storage on copy-on-write file systems); where that isn't available or
+ * stops (e.g., `EXDEV`, `ENOSYS`, `EINVAL`), the copy continues from where it
+ * stopped using positional block reads and writes.
+ *
+ * `fd` must be readable. Its content is not changed. A source shorter than
+ * `len` fails (`errno == EIO` unless the read reported an error). Without
+ * `pread` (e.g., some non-glibc systems), `fd`'s file offset may move.
+ *
+ * Returns 0 on success or -1 on error.
+ */
+SFUNC int fio_fd_save(int fd, const char *filename, size_t len);
 
 /** A result type for the filename parsing helper. */
 typedef struct {
@@ -284,27 +325,23 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
   return total;
 }
 
-/**
- * Overwrites `filename` with the data in the buffer.
- *
- * If `path` starts with a `"~/"` than it will be relative to the user's home
- * folder (on Windows, testing for `"~\"`).
- */
-FIO_IFUNC int fio_filename_overwrite(const char *filename,
-                                     const void *buf,
-                                     size_t len) {
-  int fd = fio_filename_open(filename, O_RDWR | O_CREAT | O_TRUNC);
-  if (fd == -1)
+/** A single positional read (`pread`, or `lseek` + `read`). */
+FIO_IFUNC ssize_t fio___fd_pread(int fd, void *buf, size_t len, off_t at) {
+#if (defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE + 1) > 200809L)
+  return pread(fd, buf, len, at);
+#else
+  if ((off_t)lseek(fd, (at + (at < 0)), ((at < 0) ? SEEK_END : SEEK_SET)) ==
+      (off_t)-1)
     return -1;
-  ssize_t w = fio_fd_write(fd, buf, len);
-  int saved_errno = errno; /* preserve the write's errno across close() */
-  close(fd);
-  if ((size_t)w != len) {
-    errno = saved_errno;
-    return -1;
-  }
-  return 0;
+  return read(fd, buf, len);
+#endif
 }
+
+#ifndef FIO___FD_PREAD
+/** Positional read (a testing hook: same contract as `fio___fd_pread`). */
+#define FIO___FD_PREAD(fd, buf, len, at)                                       \
+  fio___fd_pread((fd), (buf), (len), (at))
+#endif
 
 /**
  * Reads up to `len` bytes from `fd`, returning the number of bytes read.
@@ -325,9 +362,8 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
   for (;;) {
     const size_t to_read = /* use read sizes of up to 27 bits */
         (len & (((size_t)1 << 27) - 1)) | ((!!(len >> 27)) << 27);
-    ssize_t act;
-#if (defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE + 1) > 200809L)
-    if ((act = pread(fd, d + r, to_read, start_at)) > 0) {
+    ssize_t act = FIO___FD_PREAD(fd, d + r, to_read, start_at);
+    if (act > 0) {
       r += act;
       len -= act;
       start_at += act;
@@ -335,26 +371,9 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
         return r;
       continue;
     }
-#else
-    if ((off_t)lseek(fd,
-                     (start_at + (start_at < 0)),
-                     ((start_at < 0) ? SEEK_END : SEEK_SET)) == (off_t)-1) {
-      if (errno == EINTR)
-        continue;
-      return -1;
-    }
-    if ((act = read(fd, d + r, to_read)) > 0) {
-      r += act;
-      len -= act;
-      start_at += act;
-      if (!len)
-        return r;
+    if (act == -1 && errno == EINTR) /* interrupted: retry */
       continue;
-    }
-#endif
-    if (act == -1 && errno == EINTR)
-      continue;
-    return r;
+    return r; /* EOF or error (errno set by the failed call) */
   }
 }
 
@@ -415,35 +434,56 @@ File Helper Implementation
  * If `path` starts with a `"~/"` than it will be relative to the user's home
  * folder (on Windows, testing for `"~\"`).
  */
+/**
+ * Expands a leading `"~/"` in `filename` to the user's home folder, writing
+ * the path to `dst` (capacity `dst->capa`) with room for `extra` more bytes.
+ *
+ * Returns the path to use: `filename` itself if it isn't expanded and `copy`
+ * is 0, otherwise `dst->buf` (NUL terminated, length in `dst->len`). Returns
+ * NULL with `errno == ENAMETOOLONG` if the path doesn't fit.
+ */
+FIO_SFUNC const char *fio___filename_expand(fio_str_info_s *dst,
+                                            const char *filename,
+                                            size_t extra,
+                                            int copy) {
+  const char *home = NULL;
+  size_t home_len = 0;
+  if (filename[0] == '~' &&
+      (filename[1] == FIO_FOLDER_SEPARATOR || filename[1] == '/') &&
+      (home = fio_sys_env("HOME"))) {
+    home_len = FIO_STRLEN(home);
+    if (home_len && (home[home_len - 1] == FIO_FOLDER_SEPARATOR ||
+                     home[home_len - 1] == '/'))
+      --home_len;
+    ++filename; /* keep the separator, drop the `~` */
+  } else if (!copy) {
+    return filename;
+  }
+  const size_t filename_len = FIO_STRLEN(filename);
+  if (home_len + filename_len + extra >= dst->capa) {
+    errno = ENAMETOOLONG;
+    FIO_LOG_ERROR("filename is too long %.*s...",
+                  (int)16,
+                  (filename_len >= 16 ? filename : (home ? home : filename)));
+    return NULL;
+  }
+  if (home_len)
+    FIO_MEMCPY(dst->buf, home, home_len);
+  FIO_MEMCPY(dst->buf + home_len, filename, filename_len);
+  dst->len = home_len + filename_len;
+  dst->buf[dst->len] = 0;
+  return dst->buf;
+}
+
 SFUNC int fio_filename_open(const char *filename, int flags) {
   /* POSIX implementations. */
   if (filename == NULL)
     return -1;
-  if (filename[0] != '~' ||
-      (filename[1] != FIO_FOLDER_SEPARATOR && filename[1] != '/'))
-    return open(filename, flags, (S_IWUSR | S_IRUSR));
-  /* expand "~/" relative to the user's home folder */
-  char *home = fio_sys_env("HOME");
-  if (!home)
-    return open(filename, flags, (S_IWUSR | S_IRUSR));
   FIO_STR_INFO_TMP_VAR(path, FIO_FILENAME_PATH_CAPA);
-  const size_t filename_len = FIO_STRLEN(filename);
-  size_t home_len = FIO_STRLEN(home);
-  if (home_len &&
-      (home[home_len - 1] == FIO_FOLDER_SEPARATOR || home[home_len - 1] == '/'))
-    --home_len;
-  if (home_len + filename_len - 1 >= path.capa) {
-    /* too long */
-    errno = ENAMETOOLONG;
-    FIO_LOG_ERROR("couldn't open file, as filename is too long %.*s...",
-                  (int)16,
-                  (filename_len >= 16 ? filename : home));
+  const char *p = fio___filename_expand(&path, filename, 0, 0);
+  if (!p)
     return -1;
-  }
-  FIO_MEMCPY(path.buf, home, home_len);
-  FIO_MEMCPY(path.buf + home_len, filename + 1, filename_len);
-  path.buf[home_len + filename_len - 1] = 0;
-  return open(path.buf, flags, (S_IWUSR | S_IRUSR));
+  return open(p, flags, (S_IWUSR | S_IRUSR));
 }
 
 /** Returns 1 if `path` possibly folds backwards (has "/../", "/..", "//"). */
@@ -520,11 +560,25 @@ SFUNC int fio_filename_tmp(void) {
   name_template[len++] = sep;
   FIO_MEMCPY(name_template + len, "facil_io_tmp_", 13);
   len += 13;
-  len += fio_ltoa(name_template + len, fio_rand64(), 32);
+  len += fio_ltoa(name_template + len, (fio_rand64() >> 1), 32);
+#if FIO_OS_WIN && defined(O_TEMPORARY)
+  /* Windows can't unlink an open file: use delete-on-close instead. */
+  const int flags = O_CREAT | O_EXCL | O_RDWR | O_TEMPORARY;
+#else
+  const int flags = O_CREAT | O_EXCL | O_RDWR;
+#endif
   do {
-    fio_ltoa(name_template + len, fio_rand64(), 32);
-    fd = open(name_template, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+    fio_ltoa(name_template + len, (fio_rand64() >> 1), 32);
+    fd = open(name_template, flags, S_IRUSR | S_IWUSR);
   } while (fd == -1 && errno == EEXIST);
+#if !FIO_OS_WIN
+  /* POSIX: remove the name, the data lives until `fd` is closed. */
+  if (fd != -1 && unlink(name_template))
+    FIO_LOG_WARNING("fio_filename_tmp couldn't unlink %s (%d) %s",
+                    name_template,
+                    errno,
+                    strerror(errno));
+#endif
   return fd;
   (void)tmp;
 }
@@ -681,6 +735,25 @@ SFUNC int fio_filename_remove FIO_NOOP(fio_filename_remove_args_s args) {
   return fio___filename_remove_simple(args.path, 1);
 }
 
+#if FIO_OS_WIN
+/** Maps a Win32 file error (`GetLastError()`) to an `errno` value. */
+FIO_SFUNC int fio___filename_win2errno(DWORD err) {
+  switch (err) {
+  case ERROR_FILE_NOT_FOUND: /* fall through */
+  case ERROR_PATH_NOT_FOUND: return ENOENT;
+  case ERROR_ACCESS_DENIED: return EACCES;
+  case ERROR_SHARING_VIOLATION: /* fall through */
+  case ERROR_LOCK_VIOLATION: return EBUSY;
+  case ERROR_ALREADY_EXISTS: /* fall through */
+  case ERROR_FILE_EXISTS: return EEXIST;
+  case ERROR_DISK_FULL: /* fall through */
+  case ERROR_HANDLE_DISK_FULL: return ENOSPC;
+  case ERROR_NOT_SAME_DEVICE: return EXDEV;
+  default: return EIO;
+  }
+}
+#endif /* FIO_OS_WIN */
+
 void fio_filename_make_path___(void); /* IDE Marker */
 /** Creates a single folder; 0 = created, 1 = already exists, -1 = error. */
 FIO_SFUNC int fio___filename_mkdir(const char *path, uint32_t mode) {
@@ -688,7 +761,11 @@ FIO_SFUNC int fio___filename_mkdir(const char *path, uint32_t mode) {
   (void)mode;
   if (CreateDirectoryA(path, NULL))
     return 0;
-  return (GetLastError() == ERROR_ALREADY_EXISTS) ? 1 : -1;
+  DWORD err = GetLastError();
+  if (err == ERROR_ALREADY_EXISTS)
+    return 1;
+  errno = fio___filename_win2errno(err);
+  return -1;
 #else
   if (!mkdir(path, (mode_t)mode))
     return 0;
@@ -755,6 +832,181 @@ SFUNC int fio_filename_make_path FIO_NOOP(fio_filename_make_path_args_s args) {
     buf.buf[i] = sep;
   }
   return 0;
+}
+
+/* *****************************************************************************
+Atomic Save Implementation
+***************************************************************************** */
+
+#ifndef FIO___FILENAME_FSYNC
+/** Flushes a file to storage (a testing hook: same contract as `fsync`). */
+#if FIO_OS_WIN
+#define FIO___FILENAME_FSYNC(fd) _commit((fd))
+#else
+#define FIO___FILENAME_FSYNC(fd) fsync((fd))
+#endif
+#endif
+
+#if !defined(FIO___FILENAME_COPY_RANGE) && defined(__linux__)
+#include <sys/syscall.h>
+#if defined(SYS_copy_file_range)
+/**
+ * Kernel side file copy (a testing hook: same contract as `copy_file_range`
+ * with `int64_t` offsets and no flags). Undefined where unsupported.
+ */
+#define FIO___FILENAME_COPY_RANGE(in, in_at, out, out_at, len)                 \
+  syscall(SYS_copy_file_range, (in), (in_at), (out), (out_at), (len), 0U)
+#endif
+#endif
+
+#ifndef FIO___FILENAME_COPY_BLOCK
+/** Stack buffer used for block copies (when the kernel can't copy). */
+#define FIO___FILENAME_COPY_BLOCK 16384
+#endif
+
+/** Writes all of `buf` to `fd` (at its file offset). Returns 0 or -1. */
+FIO_SFUNC int fio___filename_write_all(int fd, const char *buf, size_t len) {
+  while (len) {
+    ssize_t w = fio_fd_write(fd, buf, len);
+    if (w <= 0)
+      return -1;
+    buf += w;
+    len -= (size_t)w;
+  }
+  return 0;
+}
+
+/** Copies `[0, len)` of `in` to `out` (from offset 0). Returns 0 or -1. */
+FIO_SFUNC int fio___filename_copy_fd(int out, int in, size_t len) {
+  size_t done = 0;
+#ifdef FIO___FILENAME_COPY_RANGE
+  while (done < len) { /* kernel copy (may share storage / reflink) */
+    int64_t at_in = (int64_t)done, at_out = (int64_t)done;
+    size_t want = len - done;
+    if (want > ((size_t)1 << 30))
+      want = ((size_t)1 << 30);
+    ssize_t c = (ssize_t)
+        FIO___FILENAME_COPY_RANGE(in, &at_in, out, &at_out, want);
+    if (c > 0) {
+      done += ((size_t)c > want) ? want : (size_t)c;
+      continue;
+    }
+    if (c == -1 && errno == EINTR)
+      continue;
+    /* EOF / unsupported (EXDEV, ENOSYS, EINVAL, EOPNOTSUPP...) / failed:
+     * continue from `done` with block copies (they report real errors). */
+    break;
+  }
+  if (done == len)
+    return 0;
+  if ((off_t)lseek(out, (off_t)done, SEEK_SET) == (off_t)-1)
+    return -1;
+#endif
+  char tmp[FIO___FILENAME_COPY_BLOCK];
+  while (done < len) {
+    size_t want = len - done;
+    if (want > sizeof(tmp))
+      want = sizeof(tmp);
+    errno = 0;
+    size_t got = fio_fd_read(in, tmp, want, (off_t)done);
+    if (got != want) { /* EOF before `len`, or a read error */
+      if (!errno)
+        errno = EIO;
+      return -1;
+    }
+    if (fio___filename_write_all(out, tmp, got))
+      return -1;
+    done += got;
+  }
+  return 0;
+}
+
+/**
+ * Atomically replaces `filename` with `buf` (if `src == -1`) or `[0, len)` of
+ * `src`: sibling file (`O_CREAT | O_EXCL`) + `fsync` + `rename`. The single
+ * routine behind `fio_filename_overwrite` and `fio_fd_save`.
+ */
+FIO_SFUNC int fio___filename_save(const char *filename,
+                                  const char *buf,
+                                  int src,
+                                  size_t len) {
+  if (!filename || !filename[0] || (src == -1 && !buf && len)) {
+    errno = EINVAL;
+    return -1;
+  }
+  FIO_STR_INFO_TMP_VAR(path, FIO_FILENAME_PATH_CAPA);
+  FIO_STR_INFO_TMP_VAR(sibling, FIO_FILENAME_PATH_CAPA);
+  /* the sibling (temporary) name: `<filename>.fio-tmp-<random>` */
+  const char *target = fio___filename_expand(&path, filename, 0, 0);
+  if (!target || !fio___filename_expand(&sibling, target, 32, 1))
+    return -1;
+  FIO_MEMCPY(sibling.buf + sibling.len, ".fio-tmp-", 9);
+  const size_t rpos = sibling.len + 9;
+#if FIO_OS_WIN
+  const int mode = (S_IRUSR | S_IWUSR);
+#ifdef O_BINARY
+  const int flags = O_CREAT | O_EXCL | O_WRONLY | O_BINARY;
+#else
+  const int flags = O_CREAT | O_EXCL | O_WRONLY;
+#endif
+#else
+  const int mode = 0666; /* minus the umask (applied by `open`) */
+  const int flags = O_CREAT | O_EXCL | O_WRONLY;
+#endif
+  int fd = -1;
+  for (size_t i = 0; fd == -1 && i < 16; ++i) {
+    sibling.buf[rpos + fio_ltoa(sibling.buf + rpos,
+                                (int64_t)(fio_rand64() >> 1),
+                                32)] = 0;
+    fd = open(sibling.buf, flags, mode);
+    if (fd == -1 && errno != EEXIST)
+      return -1;
+  }
+  if (fd == -1)
+    return -1;
+  int r = (src == -1) ? fio___filename_write_all(fd, buf, len)
+                      : fio___filename_copy_fd(fd, src, len);
+  if (!r && FIO___FILENAME_FSYNC(fd))
+    r = -1;
+  int e = errno;
+  if (close(fd) && !r) {
+    r = -1;
+    e = errno;
+  }
+#if FIO_OS_WIN
+  if (!r && !MoveFileExA(sibling.buf,
+                         target,
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    r = -1;
+    e = fio___filename_win2errno(GetLastError());
+  }
+#else
+  if (!r && rename(sibling.buf, target)) {
+    r = -1;
+    e = errno;
+  }
+#endif
+  if (r) {
+    unlink(sibling.buf);
+    errno = e;
+  }
+  return r;
+}
+
+/** Overwrites `filename` with `buf` (atomic replace). */
+SFUNC int fio_filename_overwrite(const char *filename,
+                                 const void *buf,
+                                 size_t len) {
+  return fio___filename_save(filename, (const char *)buf, -1, len);
+}
+
+/** Saves `[0, len)` of the file `fd` to `filename` (atomic replace). */
+SFUNC int fio_fd_save(int fd, const char *filename, size_t len) {
+  if (fd == -1) {
+    errno = EBADF;
+    return -1;
+  }
+  return fio___filename_save(filename, NULL, fd, len);
 }
 
 /** Parses a file name to folder, base name and extension (zero-copy). */

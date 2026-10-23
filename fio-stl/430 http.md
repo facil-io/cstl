@@ -714,15 +714,46 @@ fio_str_info_s fio_http_body_read_until(fio_http_s *h,
                                         char token,
                                         size_t limit);
 void           fio_http_body_expect(fio_http_s *h, size_t expected_length);
-void           fio_http_body_write(fio_http_s *h, const void *data, size_t len);
+int            fio_http_body_write(fio_http_s *h, const void *data, size_t len);
 int            fio_http_body_fd(fio_http_s *h);
 void           fio_http_body_close(fio_http_s *h);
+int            fio_http_body_save(fio_http_s *h, const char *filename);
 ```
 
 The handle stores body data in RAM until `FIO_HTTP_BODY_RAM_LIMIT` is crossed,
 then uses a temporary file. `fio_http_body_fd` returns that file descriptor or
 `-1`. Body storage is implemented by the [Data Store module](./013 data.md)
 (`fio_data_s`), which can be used independently.
+
+`fio_http_body_seek` sets the reading position and returns it. Negative values
+count back from the end: `-n` is `length - n`, so `-1` is the last byte (as
+with `lseek(fd, -1, SEEK_END)`), and values before the start clamp to `0`. Any
+position at or past the end is EOF, so `fio_http_body_seek(h,
+fio_http_body_length(h))` (or `SSIZE_MAX`) seeks to the end. Buffers returned
+by `fio_http_body_read` / `fio_http_body_read_until` are borrowed: any later
+`fio_http_body_*` call on the same handle MAY invalidate them. Once the body is
+in a temporary file, reads point into a memory mapping of the file (see the
+Data Store module), so `fio_http_body_read(h, fio_http_body_length(h))` returns
+the whole body without copying it. Without mapping, the body is copied to a
+heap buffer; if that buffer can't be allocated, an error is logged and the
+read returns an empty result without moving the position (`fio_http_body_pos(h)
+< fio_http_body_length(h)` tells it apart from EOF). JSON and URL encoded body
+parsing read the whole body this way, and fail if it can't be read whole.
+
+`fio_http_body_save` saves the whole body to a file, atomically replacing an
+existing file (see `fio_data_save` and `fio_fd_save`: a sibling file
+is written, `fsync`ed and renamed; on Linux a temporary-file body is copied by
+the kernel), for example to keep a large upload without copying it through RAM.
+It returns `0` on success or `-1` on error (including a body in a write error
+state or a short read of the body's temporary file). The body and its reading
+position are unchanged. A leading `"~/"` is the home folder. Never derive
+`filename` from client input without validating it.
+
+`fio_http_body_write` returns `0` on success or `-1` on error (for example,
+when no temporary file can be created). Errors are sticky: later writes fail
+until the body is closed, and the stored prefix stays readable. When an
+HTTP/1.1 server can't store a request body, it responds with `500` and closes
+the connection; a client closes the connection.
 
 `fio_http_body_close` releases the body's RAM buffer and temporary file (if
 any) and resets the body to empty. The body is also released automatically

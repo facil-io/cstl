@@ -77,9 +77,73 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj_data)(void) {
   fiobj_free(e);
 }
 
+/* FIOBJ_T_DATA: larger content (many 4096 byte compare chunks), RAM vs file */
+FIO_SFUNC void FIO_NAME_TEST(stl, fiobj_data_large)(void) {
+  fprintf(stderr, "* Testing FIOBJ Data equality / fiobj2cstr (RAM vs file)\n");
+  const size_t len = (4096 * 5) + 123;
+  char *src = (char *)malloc(len);
+  FIO_ASSERT_ALLOC(src);
+  for (size_t i = 0; i < len; ++i)
+    src[i] = (char)('a' + ((i * 7) % 26));
+  FIOBJ ram = fiobj_data_new(len);   /* stays in RAM */
+  FIOBJ file = fiobj_data_new(1000); /* spills */
+  fio_data_s *dr = fiobj_data_ptr(ram), *df = fiobj_data_ptr(file);
+  for (size_t i = 0; i < len; i += 1000) {
+    size_t l = (len - i) < 1000 ? (len - i) : 1000;
+    FIO_ASSERT(!fio_data_write(dr, src + i, l) &&
+                   !fio_data_write(df, src + i, l),
+               "Data write failed");
+  }
+  FIO_ASSERT(fio_data_fd(dr) == -1 && fio_data_fd(df) != -1, "Data modes");
+  fio_data_seek(dr, 17);
+  fio_data_seek(df, -100);
+  const size_t pf = fio_data_pos(df);
+  FIO_ASSERT(FIO_NAME_BL(fiobj, eq)(ram, file) &&
+                 FIO_NAME_BL(fiobj, eq)(file, ram),
+             "RAM and spilled Data with equal content should be equal");
+  FIO_ASSERT(fio_data_pos(dr) == 17 && fio_data_pos(df) == pf,
+             "eq should preserve reading positions");
+  fio_str_info_s s = fiobj2cstr(file);
+  FIO_ASSERT(s.len == len && !memcmp(s.buf, src, len),
+             "fiobj2cstr of spilled Data (len %zu)",
+             s.len);
+  FIO_ASSERT(fio_data_pos(df) == pf, "fiobj2cstr should preserve position");
+#if FIO___DATA_MMAP
+  FIO_ASSERT(df->map == 1 && s.buf == df->buf,
+             "fiobj2cstr of spilled Data should point into the mapping");
+#endif
+  /* appending invalidates the mapping: the new content is visible */
+  FIO_ASSERT(!fio_data_write(df, "+", 1), "Data append failed");
+  s = fiobj2cstr(file);
+  FIO_ASSERT(s.len == len + 1 && !memcmp(s.buf, src, len) && s.buf[len] == '+',
+             "fiobj2cstr after append (len %zu)",
+             s.len);
+  FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(ram, file), "appended Data differs");
+  FIO_ASSERT(!fio_data_write(dr, "+", 1) && FIO_NAME_BL(fiobj, eq)(ram, file),
+             "equal again after the same append");
+  s = fiobj2cstr(ram);
+  FIO_ASSERT(s.len == len + 1 && !memcmp(s.buf, src, len), "fiobj2cstr RAM");
+  s = fiobj2cstr(ram);
+  FIO_ASSERT(s.len == len + 1 && !memcmp(s.buf, src, len),
+             "fiobj2cstr RAM Data");
+  /* a difference in the last chunk */
+  FIOBJ other = fiobj_data_new(1000);
+  FIO_ASSERT(!fio_data_write(fiobj_data_ptr(other), src, len) &&
+                 !fio_data_write(fiobj_data_ptr(other), "#", 1),
+             "Data write failed");
+  FIO_ASSERT(!FIO_NAME_BL(fiobj, eq)(ram, other) &&
+                 !FIO_NAME_BL(fiobj, eq)(other, file),
+             "Data differing in the last byte should differ");
+  fiobj_free(other);
+  fiobj_free(ram);
+  fiobj_free(file);
+  free(src);
+}
+
 int main(void) {
   FIOBJ o = FIOBJ_INVALID;
   FIO_NAME_TEST(stl, fiobj_data)();
+  FIO_NAME_TEST(stl, fiobj_data_large)();
   if (!FIOBJ_MARK_MEMORY_ENABLED) {
     FIO_LOG_WARNING("FIOBJ defined without allocation counter. "
                     "Tests might not be complete.");

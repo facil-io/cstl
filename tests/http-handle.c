@@ -750,8 +750,22 @@ static void test_handle_body(void) {
   FIO_ASSERT(r.len == 5, "read length mismatch");
   FIO_ASSERT(!memcmp(r.buf, "Hello", 5), "read content mismatch");
 
-  fio_http_body_seek(h, -6); /* negative from end */
+  FIO_ASSERT(fio_http_body_seek(h, -1) == 10 && fio_http_body_pos(h) == 10,
+             "seek(-1) should be the last byte");
   r = fio_http_body_read(h, 6);
+  FIO_ASSERT(r.len == 1 && r.buf[0] == 'd', "seek(-1) reads the last byte");
+  FIO_ASSERT(fio_http_body_seek(h, 11) == 11 && fio_http_body_pos(h) == 11,
+             "seek(length) should be EOF");
+  FIO_ASSERT(!fio_http_body_read(h, 6).len, "read at EOF should be empty");
+  FIO_ASSERT(fio_http_body_seek(h, SSIZE_MAX) == 11, "seek(SSIZE_MAX) is EOF");
+  FIO_ASSERT(fio_http_body_seek(h, -11) == 0, "seek(-length) is 0");
+  FIO_ASSERT(fio_http_body_seek(h, 3) == 3 && fio_http_body_seek(h, -12) == 0,
+             "seek before the start clamps to 0");
+  FIO_ASSERT(fio_http_body_seek(h, -100) == 0 && fio_http_body_pos(h) == 0,
+             "negative seek past the start clamps to 0");
+  FIO_ASSERT(fio_http_body_seek(h, 100) == 11, "seek past EOF clamps to EOF");
+  FIO_ASSERT(fio_http_body_seek(h, -6) == 5, "seek(-6) position");
+  r = fio_http_body_read(h, 6); /* -n == length - n */
   FIO_ASSERT(r.len == 6, "negative seek read length mismatch");
   FIO_ASSERT(!memcmp(r.buf, " World", 6),
              "negative seek read content mismatch");
@@ -760,9 +774,42 @@ static void test_handle_body(void) {
   r = fio_http_body_read_until(h, ' ', 0);
   FIO_ASSERT(r.len == 6, "read_until length mismatch");
   FIO_ASSERT(r.buf[r.len - 1] == ' ', "read_until token mismatch");
+  FIO_ASSERT(fio_http_body_pos(h) == 6, "read_until position");
 
   fio_http_free(h);
 }
+
+#if FIO_OS_POSIX
+static void test_handle_body_write_failure(void) {
+  fprintf(stderr, "  * body write failure (no temporary folder) returns -1\n");
+  fio_http_s *h = fio_http_new();
+  size_t chunk = 4096;
+  char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, chunk, 0);
+  FIO_ASSERT_ALLOC(buf);
+  FIO_MEMSET(buf, 'x', chunk);
+  char *old = test_tmpdir_set("tmp/test-http-handle-no-such-folder/nope");
+  size_t total = 0;
+  int r = 0;
+  while (!r && total < (FIO_HTTP_BODY_RAM_LIMIT << 1)) {
+    r = fio_http_body_write(h, buf, chunk);
+    total += (!r) * chunk;
+  }
+  test_tmpdir_restore(old);
+  FIO_ASSERT(r == -1, "body write past the RAM limit should fail");
+  FIO_ASSERT(fio_http_body_length(h) == total &&
+                 total <= FIO_HTTP_BODY_RAM_LIMIT,
+             "body length should be the stored data (%zu)",
+             fio_http_body_length(h));
+  FIO_ASSERT(fio_http_body_write(h, "x", 1) == -1 &&
+                 fio_http_body_length(h) == total,
+             "body errors are sticky");
+  fio_http_body_close(h);
+  FIO_ASSERT(!fio_http_body_write(h, "x", 1) && fio_http_body_length(h) == 1,
+             "closing the body clears the error");
+  FIO_MEM_FREE(buf, chunk);
+  fio_http_free(h);
+}
+#endif
 
 static void test_handle_body_file_spill(void) {
   fprintf(stderr, "  * body spills to file above RAM limit\n");
@@ -790,6 +837,46 @@ static void test_handle_body_file_spill(void) {
   FIO_MEM_FREE(buf, chunk);
   fio_http_free(h);
 }
+
+#if FIO_OS_POSIX
+/* Saves the body (RAM and spilled) to a file; the body is unchanged. */
+static void test_handle_body_save(void) {
+  fprintf(stderr, "  * body save (RAM and spilled)\n");
+  char dir[128], name[160];
+  snprintf(dir, sizeof(dir), "tmp/test-http-body-save-%d", (int)getpid());
+  snprintf(name, sizeof(name), "%s/body.bin", dir);
+  fio_filename_remove(.path = dir, .recursive = 1);
+  FIO_ASSERT(!fio_filename_make_path(.path = dir), "couldn't create %s", dir);
+  const size_t len = (FIO_HTTP_BODY_RAM_LIMIT << 1) + 13;
+  char *src = (char *)FIO_MEM_REALLOC(NULL, 0, len, 0);
+  FIO_ASSERT_ALLOC(src);
+  for (size_t i = 0; i < len; ++i)
+    src[i] = (char)('a' + (i % 19));
+  const size_t sizes[] = {100, len};
+  for (size_t t = 0; t < 2; ++t) {
+    fio_http_s *h = fio_http_new();
+    FIO_ASSERT(!fio_http_body_write(h, src, sizes[t]), "body save: write");
+    FIO_ASSERT((fio_http_body_fd(h) != -1) == (t == 1), "body save: mode");
+    fio_http_body_seek(h, 7);
+    FIO_ASSERT(!fio_http_body_save(h, name), "body save %zu failed", t);
+    FIO_ASSERT(fio_http_body_pos(h) == 7 && fio_http_body_length(h) == sizes[t],
+               "body save: body unchanged");
+    char *f = fio_bstr_readfile(NULL, name, 0, 0);
+    FIO_ASSERT(fio_bstr_len(f) == sizes[t] && !memcmp(f, src, sizes[t]),
+               "body save %zu: file content (%zu bytes)",
+               t,
+               fio_bstr_len(f));
+    fio_bstr_free(f);
+    fio_str_info_s r = fio_http_body_read(h, 5);
+    FIO_ASSERT(r.len == 5 && !memcmp(r.buf, src + 7, 5),
+               "body save: body readable after save");
+    FIO_ASSERT(test_dir_count(dir) == 1, "body save: sibling files left");
+    fio_http_free(h);
+  }
+  FIO_MEM_FREE(src, len);
+  fio_filename_remove(.path = dir, .recursive = 1);
+}
+#endif
 
 /* ===========================================================================
    Cookies
@@ -1466,6 +1553,55 @@ static void test_body_parse_json_simple(void) {
              ctx.last_number);
   test_body_free_result(&r);
   fio_http_free(h);
+}
+
+/* JSON / urlencoded bodies larger than the RAM limit (spilled) parse whole. */
+static void test_body_parse_spilled(void) {
+  fprintf(stderr, "  * body_parse JSON / urlencoded spilled bodies\n");
+  const size_t pad = (FIO_HTTP_BODY_RAM_LIMIT << 1);
+  char *buf = (char *)FIO_MEM_REALLOC(NULL, 0, pad + 128, 0);
+  FIO_ASSERT_ALLOC(buf);
+  for (int type = 0; type < 2; ++type) {
+    size_t len = 0;
+    if (type == 0) {
+      FIO_MEMCPY(buf, "{\"key\": \"value\", \"pad\": \"", 25);
+      len = 25;
+      FIO_MEMSET(buf + len, 'x', pad);
+      len += pad;
+      FIO_MEMCPY(buf + len, "\", \"num\": 42}", 13);
+      len += 13;
+    } else {
+      FIO_MEMCPY(buf, "key=value&pad=", 14);
+      len = 14;
+      FIO_MEMSET(buf + len, 'x', pad);
+      len += pad;
+      FIO_MEMCPY(buf + len, "&num=42", 7);
+      len += 7;
+    }
+    const char *ct =
+        type ? "application/x-www-form-urlencoded" : "application/json";
+    for (int api = 0; api < 2; ++api) {
+      fio_http_s *h = test_body_make_handle(ct, buf, len);
+      FIO_ASSERT(fio_http_body_fd(h) != -1 && fio_http_body_length(h) == len,
+                 "spilled parse: body should be in a file");
+      test_body_ctx_s ctx = {0};
+      fio_http_params_parse_result_s r =
+          api ? fio_http_params_parse(h, &TEST_BODY_CALLBACKS, &ctx)
+              : fio_http_body_parse(h, &TEST_BODY_CALLBACKS, &ctx);
+      FIO_ASSERT(!r.err, "spilled parse %d/%d failed (%d)", type, api, r.err);
+      test_body_pair_s *pk = test_body_find(&ctx, "key");
+      test_body_pair_s *pn = test_body_find(&ctx, "num");
+      test_body_pair_s *pp = test_body_find(&ctx, "pad");
+      FIO_ASSERT(pk && !strcmp(pk->val, "value") && pn &&
+                     !strcmp(pn->val, "42") && pp && pp->val[0] == 'x',
+                 "spilled parse %d/%d: values",
+                 type,
+                 api);
+      test_body_free_result(&r);
+      fio_http_free(h);
+    }
+  }
+  FIO_MEM_FREE(buf, pad + 128);
 }
 
 static void test_body_parse_json_array(void) {
@@ -2440,6 +2576,12 @@ int main(void) {
   test_handle_should_close_http10();
   test_handle_body();
   test_handle_body_file_spill();
+#if FIO_OS_POSIX
+  test_handle_body_save();
+#endif
+#if FIO_OS_POSIX
+  test_handle_body_write_failure();
+#endif
   test_handle_cookies();
   test_handle_path_sections();
   test_handle_helpers();
@@ -2456,6 +2598,7 @@ int main(void) {
   test_body_parse_multipart_skip_file();
   test_body_parse_multipart_stream_large();
   test_body_parse_json_simple();
+  test_body_parse_spilled();
   test_body_parse_json_array();
   test_body_parse_multipart_simple_field();
   test_body_parse_multipart_file_upload();

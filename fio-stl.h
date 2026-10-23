@@ -17356,7 +17356,16 @@ SFUNC int fio_filename_is_unsafe(const char *path);
 /** Returns 1 if `path` does folds backwards (has "/../" or "//"). */
 SFUNC int fio_filename_is_unsafe_url(const char *path);
 
-/** Creates a temporary file, returning its file descriptor. */
+/**
+ * Creates a temporary file, returning its file descriptor (or -1 on error).
+ *
+ * The file is created in the folder named by the `TMPDIR`, `TMP` or `TEMP`
+ * environment variables (or `P_tmpdir`, or the current folder) and is
+ * anonymous: it has no name once this function returns (`O_TMPFILE`, or
+ * unlinked right after it is opened on POSIX systems; delete-on-close
+ * `O_TEMPORARY` on Windows). The file is removed when `fd` is closed (or the
+ * process exits), so no temporary files are left behind.
+ */
 SFUNC int fio_filename_tmp(void);
 
 /** Arguments for `fio_filename_remove`. */
@@ -17415,17 +17424,27 @@ SFUNC int fio_filename_make_path(fio_filename_make_path_args_s args);
   fio_filename_make_path((fio_filename_make_path_args_s){__VA_ARGS__})
 
 /**
- * Overwrites `filename` with the data in the buffer.
+ * Overwrites `filename` with `len` bytes from `buf`, atomically replacing any
+ * existing file (readers see either the old or the complete new content).
  *
- * If `path` starts with a `"~/"` than it will be relative to the user's home
- * folder (on Windows, testing for `"~\"`).
+ * If `filename` starts with a `"~/"` than it will be relative to the user's
+ * home folder (on Windows, also testing for `"~\"`), as in `fio_filename_open`.
  *
- * Returns -1 on error or 0 on success. On error, the state of the file is
- * undefined (may be doesn't exit / nothing written / partially written).
+ * The data is written to a new sibling file in the target's folder
+ * (`<filename>.fio-tmp-<random>`, created with `O_CREAT | O_EXCL`, mode `0666`
+ * minus the `umask`), flushed to storage (`fsync`) and renamed over
+ * `filename` (`MoveFileExA` on Windows). Exactly one `fsync` (the file, not
+ * the folder): a crash right after saving may leave the previous version.
+ *
+ * Returns -1 on error or 0 on success. On error, any existing `filename` is
+ * left untouched, the sibling file is removed and `errno` is preserved.
+ *
+ * Uses fixed size stack buffers (zero allocations); over-long paths fail with
+ * `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
  */
-FIO_IFUNC int fio_filename_overwrite(const char *filename,
-                                     const void *buf,
-                                     size_t len);
+SFUNC int fio_filename_overwrite(const char *filename,
+                                 const void *buf,
+                                 size_t len);
 
 /** Returns the file size (or 0 on both error / empty file). */
 FIO_IFUNC size_t fio_filename_size(const char *filename);
@@ -17476,9 +17495,31 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf, size_t len);
  * a time, this function fragments the system calls into smaller `read` blocks,
  * allowing large data to be read.
  *
+ * Interrupted calls (`EINTR`) are retried. Fewer than `len` bytes are returned
+ * only at EOF or on error (`errno` is set by the failed call on error, but is
+ * left unchanged at EOF).
+ *
  * If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
  */
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
+
+/**
+ * Saves the first `len` bytes of the file `fd` (`[0, len)`) to `filename`,
+ * atomically replacing any existing file (same semantics, `"~/"` expansion and
+ * cleanup guarantees as `fio_filename_overwrite`).
+ *
+ * On Linux the data is copied by the kernel (`copy_file_range`, which may
+ * share storage on copy-on-write file systems); where that isn't available or
+ * stops (e.g., `EXDEV`, `ENOSYS`, `EINVAL`), the copy continues from where it
+ * stopped using positional block reads and writes.
+ *
+ * `fd` must be readable. Its content is not changed. A source shorter than
+ * `len` fails (`errno == EIO` unless the read reported an error). Without
+ * `pread` (e.g., some non-glibc systems), `fd`'s file offset may move.
+ *
+ * Returns 0 on success or -1 on error.
+ */
+SFUNC int fio_fd_save(int fd, const char *filename, size_t len);
 
 /** A result type for the filename parsing helper. */
 typedef struct {
@@ -17581,27 +17622,23 @@ FIO_IFUNC ssize_t fio_fd_write(int fd, const void *buf_, size_t len) {
   return total;
 }
 
-/**
- * Overwrites `filename` with the data in the buffer.
- *
- * If `path` starts with a `"~/"` than it will be relative to the user's home
- * folder (on Windows, testing for `"~\"`).
- */
-FIO_IFUNC int fio_filename_overwrite(const char *filename,
-                                     const void *buf,
-                                     size_t len) {
-  int fd = fio_filename_open(filename, O_RDWR | O_CREAT | O_TRUNC);
-  if (fd == -1)
+/** A single positional read (`pread`, or `lseek` + `read`). */
+FIO_IFUNC ssize_t fio___fd_pread(int fd, void *buf, size_t len, off_t at) {
+#if (defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE + 1) > 200809L)
+  return pread(fd, buf, len, at);
+#else
+  if ((off_t)lseek(fd, (at + (at < 0)), ((at < 0) ? SEEK_END : SEEK_SET)) ==
+      (off_t)-1)
     return -1;
-  ssize_t w = fio_fd_write(fd, buf, len);
-  int saved_errno = errno; /* preserve the write's errno across close() */
-  close(fd);
-  if ((size_t)w != len) {
-    errno = saved_errno;
-    return -1;
-  }
-  return 0;
+  return read(fd, buf, len);
+#endif
 }
+
+#ifndef FIO___FD_PREAD
+/** Positional read (a testing hook: same contract as `fio___fd_pread`). */
+#define FIO___FD_PREAD(fd, buf, len, at)                                       \
+  fio___fd_pread((fd), (buf), (len), (at))
+#endif
 
 /**
  * Reads up to `len` bytes from `fd`, returning the number of bytes read.
@@ -17622,9 +17659,8 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
   for (;;) {
     const size_t to_read = /* use read sizes of up to 27 bits */
         (len & (((size_t)1 << 27) - 1)) | ((!!(len >> 27)) << 27);
-    ssize_t act;
-#if (defined(_POSIX_C_SOURCE) && (_POSIX_C_SOURCE + 1) > 200809L)
-    if ((act = pread(fd, d + r, to_read, start_at)) > 0) {
+    ssize_t act = FIO___FD_PREAD(fd, d + r, to_read, start_at);
+    if (act > 0) {
       r += act;
       len -= act;
       start_at += act;
@@ -17632,26 +17668,9 @@ FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at) {
         return r;
       continue;
     }
-#else
-    if ((off_t)lseek(fd,
-                     (start_at + (start_at < 0)),
-                     ((start_at < 0) ? SEEK_END : SEEK_SET)) == (off_t)-1) {
-      if (errno == EINTR)
-        continue;
-      return -1;
-    }
-    if ((act = read(fd, d + r, to_read)) > 0) {
-      r += act;
-      len -= act;
-      start_at += act;
-      if (!len)
-        return r;
+    if (act == -1 && errno == EINTR) /* interrupted: retry */
       continue;
-    }
-#endif
-    if (act == -1 && errno == EINTR)
-      continue;
-    return r;
+    return r; /* EOF or error (errno set by the failed call) */
   }
 }
 
@@ -17712,35 +17731,56 @@ File Helper Implementation
  * If `path` starts with a `"~/"` than it will be relative to the user's home
  * folder (on Windows, testing for `"~\"`).
  */
+/**
+ * Expands a leading `"~/"` in `filename` to the user's home folder, writing
+ * the path to `dst` (capacity `dst->capa`) with room for `extra` more bytes.
+ *
+ * Returns the path to use: `filename` itself if it isn't expanded and `copy`
+ * is 0, otherwise `dst->buf` (NUL terminated, length in `dst->len`). Returns
+ * NULL with `errno == ENAMETOOLONG` if the path doesn't fit.
+ */
+FIO_SFUNC const char *fio___filename_expand(fio_str_info_s *dst,
+                                            const char *filename,
+                                            size_t extra,
+                                            int copy) {
+  const char *home = NULL;
+  size_t home_len = 0;
+  if (filename[0] == '~' &&
+      (filename[1] == FIO_FOLDER_SEPARATOR || filename[1] == '/') &&
+      (home = fio_sys_env("HOME"))) {
+    home_len = FIO_STRLEN(home);
+    if (home_len && (home[home_len - 1] == FIO_FOLDER_SEPARATOR ||
+                     home[home_len - 1] == '/'))
+      --home_len;
+    ++filename; /* keep the separator, drop the `~` */
+  } else if (!copy) {
+    return filename;
+  }
+  const size_t filename_len = FIO_STRLEN(filename);
+  if (home_len + filename_len + extra >= dst->capa) {
+    errno = ENAMETOOLONG;
+    FIO_LOG_ERROR("filename is too long %.*s...",
+                  (int)16,
+                  (filename_len >= 16 ? filename : (home ? home : filename)));
+    return NULL;
+  }
+  if (home_len)
+    FIO_MEMCPY(dst->buf, home, home_len);
+  FIO_MEMCPY(dst->buf + home_len, filename, filename_len);
+  dst->len = home_len + filename_len;
+  dst->buf[dst->len] = 0;
+  return dst->buf;
+}
+
 SFUNC int fio_filename_open(const char *filename, int flags) {
   /* POSIX implementations. */
   if (filename == NULL)
     return -1;
-  if (filename[0] != '~' ||
-      (filename[1] != FIO_FOLDER_SEPARATOR && filename[1] != '/'))
-    return open(filename, flags, (S_IWUSR | S_IRUSR));
-  /* expand "~/" relative to the user's home folder */
-  char *home = fio_sys_env("HOME");
-  if (!home)
-    return open(filename, flags, (S_IWUSR | S_IRUSR));
   FIO_STR_INFO_TMP_VAR(path, FIO_FILENAME_PATH_CAPA);
-  const size_t filename_len = FIO_STRLEN(filename);
-  size_t home_len = FIO_STRLEN(home);
-  if (home_len &&
-      (home[home_len - 1] == FIO_FOLDER_SEPARATOR || home[home_len - 1] == '/'))
-    --home_len;
-  if (home_len + filename_len - 1 >= path.capa) {
-    /* too long */
-    errno = ENAMETOOLONG;
-    FIO_LOG_ERROR("couldn't open file, as filename is too long %.*s...",
-                  (int)16,
-                  (filename_len >= 16 ? filename : home));
+  const char *p = fio___filename_expand(&path, filename, 0, 0);
+  if (!p)
     return -1;
-  }
-  FIO_MEMCPY(path.buf, home, home_len);
-  FIO_MEMCPY(path.buf + home_len, filename + 1, filename_len);
-  path.buf[home_len + filename_len - 1] = 0;
-  return open(path.buf, flags, (S_IWUSR | S_IRUSR));
+  return open(p, flags, (S_IWUSR | S_IRUSR));
 }
 
 /** Returns 1 if `path` possibly folds backwards (has "/../", "/..", "//"). */
@@ -17817,11 +17857,25 @@ SFUNC int fio_filename_tmp(void) {
   name_template[len++] = sep;
   FIO_MEMCPY(name_template + len, "facil_io_tmp_", 13);
   len += 13;
-  len += fio_ltoa(name_template + len, fio_rand64(), 32);
+  len += fio_ltoa(name_template + len, (fio_rand64() >> 1), 32);
+#if FIO_OS_WIN && defined(O_TEMPORARY)
+  /* Windows can't unlink an open file: use delete-on-close instead. */
+  const int flags = O_CREAT | O_EXCL | O_RDWR | O_TEMPORARY;
+#else
+  const int flags = O_CREAT | O_EXCL | O_RDWR;
+#endif
   do {
-    fio_ltoa(name_template + len, fio_rand64(), 32);
-    fd = open(name_template, O_CREAT | O_EXCL | O_RDWR, S_IRUSR | S_IWUSR);
+    fio_ltoa(name_template + len, (fio_rand64() >> 1), 32);
+    fd = open(name_template, flags, S_IRUSR | S_IWUSR);
   } while (fd == -1 && errno == EEXIST);
+#if !FIO_OS_WIN
+  /* POSIX: remove the name, the data lives until `fd` is closed. */
+  if (fd != -1 && unlink(name_template))
+    FIO_LOG_WARNING("fio_filename_tmp couldn't unlink %s (%d) %s",
+                    name_template,
+                    errno,
+                    strerror(errno));
+#endif
   return fd;
   (void)tmp;
 }
@@ -17978,6 +18032,25 @@ SFUNC int fio_filename_remove FIO_NOOP(fio_filename_remove_args_s args) {
   return fio___filename_remove_simple(args.path, 1);
 }
 
+#if FIO_OS_WIN
+/** Maps a Win32 file error (`GetLastError()`) to an `errno` value. */
+FIO_SFUNC int fio___filename_win2errno(DWORD err) {
+  switch (err) {
+  case ERROR_FILE_NOT_FOUND: /* fall through */
+  case ERROR_PATH_NOT_FOUND: return ENOENT;
+  case ERROR_ACCESS_DENIED: return EACCES;
+  case ERROR_SHARING_VIOLATION: /* fall through */
+  case ERROR_LOCK_VIOLATION: return EBUSY;
+  case ERROR_ALREADY_EXISTS: /* fall through */
+  case ERROR_FILE_EXISTS: return EEXIST;
+  case ERROR_DISK_FULL: /* fall through */
+  case ERROR_HANDLE_DISK_FULL: return ENOSPC;
+  case ERROR_NOT_SAME_DEVICE: return EXDEV;
+  default: return EIO;
+  }
+}
+#endif /* FIO_OS_WIN */
+
 void fio_filename_make_path___(void); /* IDE Marker */
 /** Creates a single folder; 0 = created, 1 = already exists, -1 = error. */
 FIO_SFUNC int fio___filename_mkdir(const char *path, uint32_t mode) {
@@ -17985,7 +18058,11 @@ FIO_SFUNC int fio___filename_mkdir(const char *path, uint32_t mode) {
   (void)mode;
   if (CreateDirectoryA(path, NULL))
     return 0;
-  return (GetLastError() == ERROR_ALREADY_EXISTS) ? 1 : -1;
+  DWORD err = GetLastError();
+  if (err == ERROR_ALREADY_EXISTS)
+    return 1;
+  errno = fio___filename_win2errno(err);
+  return -1;
 #else
   if (!mkdir(path, (mode_t)mode))
     return 0;
@@ -18052,6 +18129,181 @@ SFUNC int fio_filename_make_path FIO_NOOP(fio_filename_make_path_args_s args) {
     buf.buf[i] = sep;
   }
   return 0;
+}
+
+/* *****************************************************************************
+Atomic Save Implementation
+***************************************************************************** */
+
+#ifndef FIO___FILENAME_FSYNC
+/** Flushes a file to storage (a testing hook: same contract as `fsync`). */
+#if FIO_OS_WIN
+#define FIO___FILENAME_FSYNC(fd) _commit((fd))
+#else
+#define FIO___FILENAME_FSYNC(fd) fsync((fd))
+#endif
+#endif
+
+#if !defined(FIO___FILENAME_COPY_RANGE) && defined(__linux__)
+#include <sys/syscall.h>
+#if defined(SYS_copy_file_range)
+/**
+ * Kernel side file copy (a testing hook: same contract as `copy_file_range`
+ * with `int64_t` offsets and no flags). Undefined where unsupported.
+ */
+#define FIO___FILENAME_COPY_RANGE(in, in_at, out, out_at, len)                 \
+  syscall(SYS_copy_file_range, (in), (in_at), (out), (out_at), (len), 0U)
+#endif
+#endif
+
+#ifndef FIO___FILENAME_COPY_BLOCK
+/** Stack buffer used for block copies (when the kernel can't copy). */
+#define FIO___FILENAME_COPY_BLOCK 16384
+#endif
+
+/** Writes all of `buf` to `fd` (at its file offset). Returns 0 or -1. */
+FIO_SFUNC int fio___filename_write_all(int fd, const char *buf, size_t len) {
+  while (len) {
+    ssize_t w = fio_fd_write(fd, buf, len);
+    if (w <= 0)
+      return -1;
+    buf += w;
+    len -= (size_t)w;
+  }
+  return 0;
+}
+
+/** Copies `[0, len)` of `in` to `out` (from offset 0). Returns 0 or -1. */
+FIO_SFUNC int fio___filename_copy_fd(int out, int in, size_t len) {
+  size_t done = 0;
+#ifdef FIO___FILENAME_COPY_RANGE
+  while (done < len) { /* kernel copy (may share storage / reflink) */
+    int64_t at_in = (int64_t)done, at_out = (int64_t)done;
+    size_t want = len - done;
+    if (want > ((size_t)1 << 30))
+      want = ((size_t)1 << 30);
+    ssize_t c = (ssize_t)
+        FIO___FILENAME_COPY_RANGE(in, &at_in, out, &at_out, want);
+    if (c > 0) {
+      done += ((size_t)c > want) ? want : (size_t)c;
+      continue;
+    }
+    if (c == -1 && errno == EINTR)
+      continue;
+    /* EOF / unsupported (EXDEV, ENOSYS, EINVAL, EOPNOTSUPP...) / failed:
+     * continue from `done` with block copies (they report real errors). */
+    break;
+  }
+  if (done == len)
+    return 0;
+  if ((off_t)lseek(out, (off_t)done, SEEK_SET) == (off_t)-1)
+    return -1;
+#endif
+  char tmp[FIO___FILENAME_COPY_BLOCK];
+  while (done < len) {
+    size_t want = len - done;
+    if (want > sizeof(tmp))
+      want = sizeof(tmp);
+    errno = 0;
+    size_t got = fio_fd_read(in, tmp, want, (off_t)done);
+    if (got != want) { /* EOF before `len`, or a read error */
+      if (!errno)
+        errno = EIO;
+      return -1;
+    }
+    if (fio___filename_write_all(out, tmp, got))
+      return -1;
+    done += got;
+  }
+  return 0;
+}
+
+/**
+ * Atomically replaces `filename` with `buf` (if `src == -1`) or `[0, len)` of
+ * `src`: sibling file (`O_CREAT | O_EXCL`) + `fsync` + `rename`. The single
+ * routine behind `fio_filename_overwrite` and `fio_fd_save`.
+ */
+FIO_SFUNC int fio___filename_save(const char *filename,
+                                  const char *buf,
+                                  int src,
+                                  size_t len) {
+  if (!filename || !filename[0] || (src == -1 && !buf && len)) {
+    errno = EINVAL;
+    return -1;
+  }
+  FIO_STR_INFO_TMP_VAR(path, FIO_FILENAME_PATH_CAPA);
+  FIO_STR_INFO_TMP_VAR(sibling, FIO_FILENAME_PATH_CAPA);
+  /* the sibling (temporary) name: `<filename>.fio-tmp-<random>` */
+  const char *target = fio___filename_expand(&path, filename, 0, 0);
+  if (!target || !fio___filename_expand(&sibling, target, 32, 1))
+    return -1;
+  FIO_MEMCPY(sibling.buf + sibling.len, ".fio-tmp-", 9);
+  const size_t rpos = sibling.len + 9;
+#if FIO_OS_WIN
+  const int mode = (S_IRUSR | S_IWUSR);
+#ifdef O_BINARY
+  const int flags = O_CREAT | O_EXCL | O_WRONLY | O_BINARY;
+#else
+  const int flags = O_CREAT | O_EXCL | O_WRONLY;
+#endif
+#else
+  const int mode = 0666; /* minus the umask (applied by `open`) */
+  const int flags = O_CREAT | O_EXCL | O_WRONLY;
+#endif
+  int fd = -1;
+  for (size_t i = 0; fd == -1 && i < 16; ++i) {
+    sibling.buf[rpos + fio_ltoa(sibling.buf + rpos,
+                                (int64_t)(fio_rand64() >> 1),
+                                32)] = 0;
+    fd = open(sibling.buf, flags, mode);
+    if (fd == -1 && errno != EEXIST)
+      return -1;
+  }
+  if (fd == -1)
+    return -1;
+  int r = (src == -1) ? fio___filename_write_all(fd, buf, len)
+                      : fio___filename_copy_fd(fd, src, len);
+  if (!r && FIO___FILENAME_FSYNC(fd))
+    r = -1;
+  int e = errno;
+  if (close(fd) && !r) {
+    r = -1;
+    e = errno;
+  }
+#if FIO_OS_WIN
+  if (!r && !MoveFileExA(sibling.buf,
+                         target,
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    r = -1;
+    e = fio___filename_win2errno(GetLastError());
+  }
+#else
+  if (!r && rename(sibling.buf, target)) {
+    r = -1;
+    e = errno;
+  }
+#endif
+  if (r) {
+    unlink(sibling.buf);
+    errno = e;
+  }
+  return r;
+}
+
+/** Overwrites `filename` with `buf` (atomic replace). */
+SFUNC int fio_filename_overwrite(const char *filename,
+                                 const void *buf,
+                                 size_t len) {
+  return fio___filename_save(filename, (const char *)buf, -1, len);
+}
+
+/** Saves `[0, len)` of the file `fd` to `filename` (atomic replace). */
+SFUNC int fio_fd_save(int fd, const char *filename, size_t len) {
+  if (fd == -1) {
+    errno = EBADF;
+    return -1;
+  }
+  return fio___filename_save(filename, NULL, fd, len);
 }
 
 /** Parses a file name to folder, base name and extension (zero-copy). */
@@ -23225,21 +23477,9 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
     }
   } else {
     unlink(addr.sun_path);
-    int btmp; // the bind result
-#if !defined(FIO_SOCK_AVOID_UMASK) && !defined(FIO_OS_WIN)
-    if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
-      int umask_org = umask(0x1FF);
-      btmp = fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-      int old_err = errno;
-      umask(umask_org);
-      errno = old_err;
-      FIO_LOG_DEBUG("umask was used temporarily for Unix Socket (was 0x%04X)",
-                    umask_org);
-    } else
-#endif /* FIO_SOCK_AVOID_UMASK */
-      /* else */ btmp =
-          fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-    if (btmp == -1) {
+    /* no `umask` games (process-global, races other threads): public sockets
+     * are opened up with `chmod` after `bind`. */
+    if (fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       FIO_LOG_ERROR("couldn't bind unix socket to %s\n\terrno(%d): %s",
                     address,
                     errno,
@@ -23248,7 +23488,7 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
       // unlink(addr.sun_path);
       return FIO_SOCKET_INVALID;
     }
-#ifndef FIO_OS_WIN
+#if !FIO_OS_WIN /* FIO_OS_WIN is always defined (0 / 1) */
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
       fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
@@ -24560,14 +24800,22 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_URL_ENCODED) && !defined(H___FIO_URL_ENCODED___H)
 #define H___FIO_URL_ENCODED___H
 
+/* Dependency: string decoding and temporary-buffer allocation helpers. */
+#ifndef H___FIO_STR___H
+#define FIO_STR
+#define FIO___RECURSIVE_INCLUDE 99 /* preserve FIO_EXTERN linkage */
+#include FIO_INCLUDE_FILE
+#undef FIO___RECURSIVE_INCLUDE
+#endif
+
 /* *****************************************************************************
 URL-Encoded Parser - Overview
 
-This is a non-allocating, callback-based URL-encoded (application/x-www-form-
-urlencoded) parser.
+This is a callback-based URL-encoded (application/x-www-form-urlencoded) parser.
 
-The parser finds boundaries between name=value pairs without decoding the data.
-Decoding is the caller's responsibility (use `fio_string_write_url_dec`).
+The parser splits name=value pairs and decodes each name and value before
+calling on_pair. Decoding uses temporary stack buffers with heap fallback for
+long fields. The input is not modified.
 
 URL-encoded format:
 - Pairs separated by `&`
@@ -24578,7 +24826,7 @@ Usage:
     static void *my_on_pair(void *udata, fio_buf_info_s name, fio_buf_info_s
 value) {
         // Process name=value pair
-        // name and value point directly into the original data
+        // name and value are decoded and valid only during this callback
         return udata;
     }
 
@@ -24609,18 +24857,19 @@ typedef struct {
   /**
    * Called for each name=value pair found.
    *
-   * `name` and `value` point directly into the original input data.
-   * The data is NOT decoded - caller must decode if needed.
+   * `name` and `value` are decoded (percent escapes and '+' to spaces).
+   * Buffers are borrowed, valid only during this callback, and may contain NUL
+   * bytes. Copy any data needed after the callback returns; do not free it.
    *
    * Returns the (possibly updated) udata, or NULL to stop parsing.
    */
   void *(*on_pair)(void *udata, fio_buf_info_s name, fio_buf_info_s value);
 
   /**
-   * Called on parsing error (optional).
+   * Called if decoding cannot allocate a temporary buffer (optional).
    *
-   * Currently not used since URL-encoded parsing is very permissive,
-   * but reserved for future use.
+   * Receives the current udata after temporary buffers are freed. The failed
+   * pair is not reported. Not called when on_pair returns NULL.
    */
   void (*on_error)(void *udata);
 
@@ -24632,7 +24881,7 @@ typedef struct {
   size_t consumed;
   /** Number of name=value pairs found. */
   size_t count;
-  /** Non-zero if an error occurred (callback returned NULL). */
+  /** Non-zero if decoding failed or a callback returned NULL. */
   int err;
 } fio_url_encoded_result_s;
 
@@ -24651,7 +24900,7 @@ URL-Encoded Parser API
  * Returns a result struct containing:
  * - `consumed`: Number of bytes consumed from the buffer
  * - `count`: Number of name=value pairs found
- * - `err`: Non-zero if parsing was stopped (callback returned NULL)
+ * - `err`: Non-zero if decoding failed or a callback returned NULL
  *
  * Parsing rules:
  * - Pairs are separated by `&`
@@ -24661,8 +24910,12 @@ URL-Encoded Parser API
  * - Empty name with value: `=value` → name.len = 0, value="value"
  * - Empty pairs (`&&`) are skipped
  *
- * Note: The parser does NOT decode percent-encoded characters.
- * Use `fio_string_write_url_dec` to decode if needed.
+ * Names and values are decoded once using `fio_string_write_url_dec`, including
+ * '+' to spaces. Invalid percent escapes remain literal. Callback buffers are
+ * borrowed and valid only until the callback returns. The input is not
+ * modified. Long fields may allocate temporary memory, which is freed after the
+ * callback. On allocation failure, on_error is called and consumed excludes the
+ * failed pair; count includes only pairs passed to on_pair.
  */
 SFUNC fio_url_encoded_result_s
 fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
@@ -24759,14 +25012,34 @@ fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
       value.len = 0;
     }
 
-    /* Call the callback */
-    udata = cb.on_pair(udata, name, value);
-    ++result.count;
+    /* Decode before the callback, retaining ownership of both buffers. */
+    FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
+    FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
+    int decode_err = fio_string_write_url_dec(&decoded_name,
+                                              FIO_STRING_ALLOC_COPY,
+                                              name.buf,
+                                              name.len) ||
+                     fio_string_write_url_dec(&decoded_value,
+                                              FIO_STRING_ALLOC_COPY,
+                                              value.buf,
+                                              value.len);
+    if (!decode_err) {
+      udata = cb.on_pair(udata,
+                         FIO_STR2BUF_INFO(decoded_name),
+                         FIO_STR2BUF_INFO(decoded_value));
+      ++result.count;
+    }
+    if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_name))
+      FIO_STRING_FREE2(decoded_name);
+    if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_value))
+      FIO_STRING_FREE2(decoded_value);
 
-    /* Check if callback wants to stop parsing */
-    if (!udata) {
+    /* Clean up even when decoding fails or the callback stops parsing. */
+    if (decode_err || !udata) {
       result.err = 1;
-      result.consumed = (size_t)(pair_end - data);
+      result.consumed = (size_t)((decode_err ? pos : pair_end) - data);
+      if (decode_err)
+        cb.on_error(udata);
       return result;
     }
 
@@ -37483,6 +37756,25 @@ Data Store - Settings
 #define FIO_DATA_RAM_LIMIT (1UL << 17)
 #endif
 
+#ifndef FIO_DATA_READ_BLOCK
+/**
+ * Block size used when the temporary file can't be memory mapped (block reads
+ * for `fio_data_read_until`, smallest read buffer).
+ */
+#define FIO_DATA_READ_BLOCK (1UL << 14)
+#endif
+
+/*
+ * Define `FIO_DATA_NO_MMAP` to never memory map temporary files (always use
+ * the heap read buffer fallback). Systems without `sys/mman.h` always do.
+ */
+#if !defined(FIO_DATA_NO_MMAP) && (FIO_OS_POSIX || __has_include("sys/mman.h"))
+#include <sys/mman.h>
+#define FIO___DATA_MMAP 1
+#else
+#define FIO___DATA_MMAP 0
+#endif
+
 /* *****************************************************************************
 Data Store - Type
 ***************************************************************************** */
@@ -37495,21 +37787,30 @@ Data Store - Type
  * `fio_data_destroy`. Fields are read-only for users; use the API.
  */
 typedef struct {
-  /** RAM data (`fio_bstr`), or the last read once spilled to `fd`. */
+  /** RAM data (`fio_bstr`); once spilled, the file mapping or a read buffer. */
   char *buf;
-  /** Total data length. */
+  /** Total data length (bytes actually stored). */
   size_t len;
   /** Reading position. */
   size_t pos;
   /** RAM limit before spilling to a temporary file (0 = default). */
   size_t limit;
+  /** Once spilled: bytes mapped (if `map == 1`) or read buffer capacity. */
+  size_t capa;
   /** Temporary file descriptor (-1 while the data is in RAM). */
   int fd;
+  /** Sticky error flag (set when a write fails; cleared by destroy). */
+  int err;
+  /** Once spilled: 1 if `buf` maps the file, 2 if mapping failed, else 0. */
+  int map;
 } fio_data_s;
 
 /** Initializes a `fio_data_s` using the default RAM limit. */
 #define FIO_DATA_INIT                                                          \
-  { .buf = NULL, .len = 0, .pos = 0, .limit = 0, .fd = -1 }
+  {                                                                            \
+    .buf = NULL, .len = 0, .pos = 0, .limit = 0, .capa = 0, .fd = -1,          \
+    .err = 0, .map = 0                                                         \
+  }
 
 /* *****************************************************************************
 Data Store - API
@@ -37518,10 +37819,13 @@ Data Store - API
 /** Initializes `d`, setting the RAM limit (0 = `FIO_DATA_RAM_LIMIT`). */
 FIO_IFUNC void fio_data_init(fio_data_s *d, size_t ram_limit);
 
-/** Releases all resources (closing any temporary file). `d` stays usable. */
+/**
+ * Releases all resources (closing any temporary file) and clears the error
+ * state. `d` stays usable (and keeps its RAM limit).
+ */
 SFUNC void fio_data_destroy(fio_data_s *d);
 
-/** Returns the data length. */
+/** Returns the data length (bytes actually stored). */
 FIO_IFUNC size_t fio_data_len(fio_data_s *d);
 
 /** Returns the reading position. */
@@ -37531,40 +37835,108 @@ FIO_IFUNC size_t fio_data_pos(fio_data_s *d);
 FIO_IFUNC int fio_data_fd(fio_data_s *d);
 
 /**
+ * Returns the RAM data (a `fio_bstr`), or NULL once spilled to a temporary
+ * file (when `fio_data_fd(d) != -1`) or before any data was stored. The
+ * inverse of `fio_data_fd`.
+ *
+ * Borrowed: any later `fio_data_*` call MAY invalidate it. To keep a
+ * reference, use `fio_bstr_copy` (zero-copy; later writes copy the buffer
+ * before changing it) and release it with `fio_bstr_free`.
+ */
+FIO_IFUNC char *fio_data_bstr(fio_data_s *d);
+
+/**
+ * Returns 1 if the store is in an error state (a write failed), 0 otherwise.
+ *
+ * Once set, the state is sticky: all writes fail (return -1) without writing
+ * until `fio_data_destroy` is called. The data that was stored before the
+ * failure (`fio_data_len` bytes) remains readable.
+ */
+FIO_IFUNC int fio_data_is_error(fio_data_s *d);
+
+/**
  * Sets the reading position and returns the new position.
  *
- * Negative values count from the end. `SSIZE_MAX` keeps the current position.
- * The position is clamped to the data length.
+ * Negative values count back from the end: `-n` is `len - n`, so `-1` is the
+ * last byte (as with `lseek(fd, -1, SEEK_END)`); values before the start clamp
+ * to 0. Any position at or past the end is EOF (i.e., `fio_data_len(d)` or
+ * `SSIZE_MAX`).
  */
 SFUNC size_t fio_data_seek(fio_data_s *d, ssize_t pos);
 
 /**
  * Reads up to `len` bytes from the reading position; returns nothing at EOF.
  *
- * The returned buffer is valid until the next read, write or destroy.
+ * Use `(size_t)-1` to read all the remaining data. Once spilled, data is read
+ * through a memory mapping of the temporary file; if mapping isn't available,
+ * through a heap buffer of the requested size.
+ *
+ * If that buffer can't be allocated, or the file returns fewer bytes than
+ * requested (a short read: an I/O error or a file truncated by someone else;
+ * `EINTR` is retried), an error is logged and an empty result is returned
+ * without moving the reading position and keeping `errno` (`EIO` for a short
+ * read without an error). Tell it apart from EOF by
+ * `fio_data_pos(d) < fio_data_len(d)`. Truncated data is never returned. The
+ * stored data stays intact (this is not a store error state).
+ *
+ * The returned buffer is borrowed: any later `fio_data_*` call on the same
+ * store MAY invalidate it.
  */
 SFUNC fio_str_info_s fio_data_read(fio_data_s *d, size_t len);
 
 /**
  * Reads until (and including) `token`, `limit` bytes or EOF.
  *
- * `limit` is ignored if zero or larger than the remaining data. The returned
- * buffer is valid until the next read, write or destroy.
+ * `limit` is ignored if zero or larger than the remaining data. Fails like
+ * `fio_data_read` (empty result, position unchanged, errno kept) if the heap
+ * read buffer can't be allocated or a block read is short.
+ *
+ * The returned buffer is borrowed: any later `fio_data_*` call on the same
+ * store MAY invalidate it.
  */
 SFUNC fio_str_info_s fio_data_read_until(fio_data_s *d,
                                          char token,
                                          size_t limit);
 
-/** Prepares for `len` more bytes (may spill to a temporary file early). */
+/**
+ * Prepares for `len` more bytes: reserves RAM, or moves the data to a
+ * temporary file early if the expected size crosses the RAM limit.
+ *
+ * This is only a hint: if no temporary file can be created, the data stays in
+ * RAM (no error state is set; a later write past the limit will fail).
+ */
 SFUNC void fio_data_expect(fio_data_s *d, size_t len);
 
 /**
  * Appends `len` bytes from `data`, spilling to a temporary file once the RAM
- * limit is exceeded.
+ * limit would be exceeded.
  *
- * Returns 0 on success or -1 on error (data may be partially written).
+ * Returns 0 on success or -1 on error. Failed file writes are retried for as
+ * long as they make progress; after two consecutive attempts that store
+ * nothing, the store enters a (sticky) error state: only the data actually
+ * stored is kept (`fio_data_len`) and all later writes fail (see
+ * `fio_data_is_error`). RAM never grows past the RAM limit.
  */
 SFUNC int fio_data_write(fio_data_s *d, const void *data, size_t len);
+
+/**
+ * Saves all the data to `filename`, atomically replacing any existing file.
+ *
+ * Uses `fio_filename_overwrite` for RAM data and `fio_fd_save` for spilled
+ * data (a kernel side copy of the temporary file where available):
+ * the data is written to a new sibling file in `filename`'s folder, flushed
+ * (`fsync`) and renamed over `filename` (new files use mode `0666`, minus the
+ * `umask`; a leading `"~/"` is the home folder). On error, any existing
+ * `filename` is left untouched, no new file is left behind and `errno` is
+ * kept. A short read of the temporary file fails the save (never truncates).
+ * One `fsync` (the file, not the folder): a crash right after saving may leave
+ * the previous version.
+ *
+ * Returns 0 on success or -1 on error (refuses with `EIO` while
+ * `fio_data_is_error`). The store's data, reading position and previously
+ * returned buffers are unchanged.
+ */
+SFUNC int fio_data_save(fio_data_s *d, const char *filename);
 
 /* *****************************************************************************
 Data Store - Inline Implementation
@@ -37577,81 +37949,301 @@ FIO_IFUNC void fio_data_init(fio_data_s *d, size_t ram_limit) {
 FIO_IFUNC size_t fio_data_len(fio_data_s *d) { return d->len; }
 FIO_IFUNC size_t fio_data_pos(fio_data_s *d) { return d->pos; }
 FIO_IFUNC int fio_data_fd(fio_data_s *d) { return d->fd; }
+FIO_IFUNC char *fio_data_bstr(fio_data_s *d) {
+  return (d->fd == -1) ? d->buf : NULL;
+}
+FIO_IFUNC int fio_data_is_error(fio_data_s *d) { return !!d->err; }
 
 /* *****************************************************************************
 Data Store - Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+/** The largest RAM buffer (kept below the `fio_bstr` size limit). */
+#define FIO___DATA_RAM_MAX ((size_t)0x7FFFFFF0UL)
+
+/* `fio_data_s.map` values (spilled data). */
+#define FIO___DATA_MAP_NONE   0 /* `buf` is NULL or a heap read buffer */
+#define FIO___DATA_MAP_ON     1 /* `buf` maps the first `capa` file bytes */
+#define FIO___DATA_MAP_FAILED 2 /* as NONE, mapping failed (until a write) */
+
+#ifndef FIO___DATA_REALLOC
+/** Read buffer (re)allocation (a testing hook: same as `FIO_MEM_REALLOC_`). */
+#define FIO___DATA_REALLOC(ptr, old_size, new_size, copy_len)                  \
+  FIO_MEM_REALLOC_((ptr), (old_size), (new_size), (copy_len))
+#endif
+
+#ifndef FIO___DATA_WRITE
+/** Low level file write (a testing hook: same contract as `fio_fd_write`). */
+#define FIO___DATA_WRITE(fd, buf, len) fio_fd_write((fd), (buf), (len))
+#endif
+
+/** The effective RAM limit (default when 0, clamped to the bstr limit). */
 FIO_IFUNC size_t fio___data_limit(fio_data_s *d) {
-  return d->limit ? d->limit : (size_t)FIO_DATA_RAM_LIMIT;
+  size_t r = d->limit ? d->limit : (size_t)FIO_DATA_RAM_LIMIT;
+  return (r > FIO___DATA_RAM_MAX) ? FIO___DATA_RAM_MAX : r;
 }
 
-/** Moves RAM data to a new temporary file. Returns -1 on error. */
-FIO_SFUNC int fio___data_move2fd(fio_data_s *d) {
-  d->fd = fio_filename_tmp();
-  if (d->fd == -1) {
-    static int error_printed = 0;
-    if (!error_printed) {
-      error_printed = 1;
-      FIO_LOG_ERROR("fio_data_s couldn't open temporary file! (%d) %s",
-                    errno,
-                    strerror(errno));
+/**
+ * Makes sure the RAM data (`d->buf`) can hold `total` bytes (+ NUL), keeping
+ * its content.
+ *
+ * Grows geometrically, up to `max` bytes. `total` MUST NOT exceed
+ * `FIO___DATA_RAM_MAX`. Aborts on allocation failure.
+ */
+FIO_SFUNC void fio___data_reserve(fio_data_s *d, size_t total, size_t max) {
+  fio_str_info_s i = fio_bstr_info(d->buf);
+  if (d->buf && total < i.capa) /* (a shared buffer reports capa 1: COW) */
+    return;
+  size_t grow = i.capa + (i.capa >> 1);
+  if (grow > total && grow <= max)
+    total = grow;
+  FIO_ASSERT_ALLOC(!fio_bstr_reallocate(&i, total) ? i.buf : NULL);
+  d->buf = fio_bstr_len_set(i.buf, i.len);
+}
+
+/** Enters the (sticky) error state. Always returns -1. */
+FIO_SFUNC int fio___data_set_error(fio_data_s *d, const char *what) {
+  d->err = 1;
+  FIO_LOG_ERROR("fio_data_s %s (%d) %s - entering error state (stored %zu)",
+                what,
+                errno,
+                strerror(errno),
+                d->len);
+  return -1;
+}
+
+/**
+ * Writes `len` bytes to `fd` at offset `at`, returning the bytes written.
+ *
+ * Retries for as long as attempts make progress; gives up after two
+ * consecutive attempts that write nothing.
+ */
+FIO_SFUNC size_t fio___data_write_at(int fd,
+                                     const char *buf,
+                                     size_t len,
+                                     size_t at) {
+  size_t total = 0;
+  for (int fails = 0; total < len && fails < 2;) {
+    ssize_t w = -1;
+    if (lseek(fd, (off_t)(at + total), SEEK_SET) != (off_t)-1)
+      w = FIO___DATA_WRITE(fd, buf + total, len - total);
+    if (w <= 0) {
+      ++fails;
+      continue;
     }
+    fails = 0;
+    total += ((size_t)w > len - total) ? (len - total) : (size_t)w;
+  }
+  return total;
+}
+
+/** Releases the read buffer / mapping of spilled data (resets `map`). */
+FIO_SFUNC void fio___data_release_view(fio_data_s *d) {
+#if FIO___DATA_MMAP
+  if (d->map == FIO___DATA_MAP_ON) {
+    munmap((void *)d->buf, d->capa);
+    d->buf = NULL;
+    d->capa = 0;
+  }
+#endif
+  if (d->buf)
+    FIO_MEM_FREE_(d->buf, d->capa);
+  d->buf = NULL;
+  d->capa = 0;
+  d->map = FIO___DATA_MAP_NONE;
+}
+
+/** Invalidates the mapping (if any) before a write changes the file. */
+FIO_IFUNC void fio___data_unmap(fio_data_s *d) {
+  if (d->map == FIO___DATA_MAP_ON)
+    fio___data_release_view(d);
+  d->map = FIO___DATA_MAP_NONE; /* a write gives mapping another chance */
+}
+
+/**
+ * Returns a pointer to all of the data (RAM or a mapping of the temporary
+ * file, mapped lazily), or NULL if the heap read buffer must be used.
+ */
+FIO_SFUNC char *fio___data_ptr(fio_data_s *d) {
+  if (d->fd == -1)
+    return d->buf;
+#if FIO___DATA_MMAP
+  if (d->map == FIO___DATA_MAP_NONE && d->len) {
+    void *m = mmap(NULL, d->len, PROT_READ, MAP_SHARED, d->fd, 0);
+    if (m == MAP_FAILED) {
+      d->map = FIO___DATA_MAP_FAILED;
+      FIO_LOG_DEBUG2("fio_data_s couldn't map %zu bytes (%d) %s - using heap",
+                     d->len,
+                     errno,
+                     strerror(errno));
+      return NULL;
+    }
+    fio___data_release_view(d); /* frees any heap read buffer */
+    d->buf = (char *)m;
+    d->capa = d->len;
+    d->map = FIO___DATA_MAP_ON;
+  }
+  if (d->map == FIO___DATA_MAP_ON)
+    return d->buf;
+#endif
+  return NULL;
+}
+
+/**
+ * Makes the heap read buffer hold at least `want` bytes, keeping the first
+ * `keep` bytes. Returns 0 on success.
+ *
+ * On allocation failure, logs an error and returns -1 (the read buffer stays
+ * valid if `keep`). Never aborts: `want` may be controlled by a remote peer.
+ */
+FIO_SFUNC int fio___data_heap_reserve(fio_data_s *d, size_t want, size_t keep) {
+  if (d->capa >= want)
+    return 0;
+  if (!keep && d->buf) { /* nothing to keep: avoid copying on realloc */
+    FIO_MEM_FREE_(d->buf, d->capa);
+    d->buf = NULL;
+    d->capa = 0;
+  }
+  void *tmp = FIO___DATA_REALLOC(d->buf, d->capa, want, keep);
+  if (!tmp) {
+    FIO_LOG_ERROR("fio_data_s couldn't allocate a %zu byte read buffer "
+                  "(read failed, data intact)",
+                  want);
     return -1;
   }
+  d->buf = (char *)tmp;
+  d->capa = want;
+  return 0;
+}
+
+/**
+ * Reads exactly `len` bytes at `at` from the temporary file to `dest`.
+ *
+ * `fio_fd_read` retries `EINTR`; a short read (EOF before `d->len` or a read
+ * error) is logged and returns -1, keeping errno (`EIO` if the read didn't set
+ * one). Data is never returned truncated.
+ */
+FIO_SFUNC int fio___data_fd_read(fio_data_s *d,
+                                 char *dest,
+                                 size_t len,
+                                 size_t at) {
+  errno = 0;
+  size_t got = fio_fd_read(d->fd, dest, len, (off_t)at);
+  if (got == len)
+    return 0;
+  if (!errno)
+    errno = EIO;
+  int e = errno;
+  FIO_LOG_ERROR("fio_data_s short read from temporary file (%zu / %zu bytes "
+                "at %zu) (%d) %s - read failed",
+                (got > len ? (size_t)0 : got),
+                len,
+                at,
+                e,
+                strerror(e));
+  errno = e;
+  return -1;
+}
+
+/**
+ * Reads up to `len` bytes at `at` (`at < d->len`) to the heap read buffer.
+ *
+ * Returns an empty result if the buffer can't be allocated or on a short read.
+ */
+FIO_SFUNC fio_str_info_s fio___data_heap_read(fio_data_s *d,
+                                              size_t at,
+                                              size_t len) {
+  fio_str_info_s r = {0};
+  if (len > d->len - at)
+    len = d->len - at;
+  if (fio___data_heap_reserve(d, len, 0) ||
+      fio___data_fd_read(d, d->buf, len, at))
+    return r;
+  r = FIO_STR_INFO2(d->buf, len);
+  return r;
+}
+
+/**
+ * Moves RAM data to a new temporary file.
+ *
+ * On success the RAM buffer is released. On failure the RAM data is kept
+ * intact and -1 is returned (the error state is NOT set).
+ */
+FIO_SFUNC int fio___data_move2fd(fio_data_s *d) {
   fio_buf_info_s b = fio_bstr_buf(d->buf);
-  if (!b.len)
+  int fd = fio_filename_tmp();
+  if (fd == -1) /* retry once (zero progress) */
+    fd = fio_filename_tmp();
+  if (fd == -1)
+    return -1;
+  if (fio___data_write_at(fd, b.buf, b.len, 0) != b.len) {
+    int e = errno;
+    close(fd);
+    errno = e;
+    return -1;
+  }
+  fio_bstr_free(d->buf);
+  d->buf = NULL;
+  d->capa = 0;
+  d->map = FIO___DATA_MAP_NONE;
+  d->fd = fd;
+  return 0;
+}
+
+/** Appends to the temporary file; sets the error state on error. */
+FIO_SFUNC int fio___data_fd_write(fio_data_s *d, const char *data, size_t len) {
+  if (len > ((size_t)SSIZE_MAX - d->len)) {
+    errno = EFBIG;
+    return fio___data_set_error(d, "length overflow");
+  }
+  fio___data_unmap(d);
+  /* always append at `len` (reads may move the file offset). */
+  size_t w = fio___data_write_at(d->fd, data, len, d->len);
+  d->len += w;
+  if (w == len)
     return 0;
-  ssize_t written = fio_fd_write(d->fd, b.buf, b.len);
-  if (written == (ssize_t)b.len)
-    return 0;
-  close(d->fd);
-  FIO_LOG_ERROR("fio_data_s couldn't transfer data to temporary file "
-                "(transferred %zd / %zu)",
-                written,
-                b.len);
-  return (d->fd = -1);
+  return fio___data_set_error(d, "couldn't write to temporary file");
 }
 
 SFUNC void fio_data_destroy(fio_data_s *d) {
   if (!d)
     return;
-  fio_bstr_free(d->buf);
-  if (d->fd != -1)
+  if (d->fd == -1) {
+    fio_bstr_free(d->buf);
+    d->buf = NULL;
+  } else {
+    fio___data_release_view(d);
     close(d->fd);
+  }
   d->buf = NULL;
-  d->len = d->pos = 0;
+  d->len = d->pos = d->capa = 0;
   d->fd = -1;
+  d->err = 0;
+  d->map = FIO___DATA_MAP_NONE;
 }
 
 SFUNC size_t fio_data_seek(fio_data_s *d, ssize_t pos) {
-  if (pos == SSIZE_MAX)
-    pos = (ssize_t)d->pos;
-  if (pos < 0) {
-    pos += (ssize_t)d->len;
-    if (pos < 0)
-      pos = 0;
+  if (pos < 0) { /* -n == len - n (-1 is the last byte), clamped to 0 */
+    size_t back = (size_t)(-(pos + 1)) + 1; /* no overflow for SSIZE_MIN */
+    d->pos = (back >= d->len) ? 0 : (d->len - back);
+    return d->pos;
   }
-  if ((size_t)pos >= d->len)
-    pos = (ssize_t)d->len;
-  d->pos = (size_t)pos;
+  d->pos = ((size_t)pos > d->len) ? d->len : (size_t)pos;
   return d->pos;
 }
 
 SFUNC fio_str_info_s fio_data_read(fio_data_s *d, size_t len) {
   fio_str_info_s r = {0};
-  if (d->pos >= d->len)
+  if (d->pos >= d->len || !len)
     return r;
   if (len > d->len - d->pos)
     len = d->len - d->pos;
-  if (d->fd == -1) {
-    r = FIO_STR_INFO2((d->buf + d->pos), len);
-  } else {
-    d->buf = fio_bstr_len_set(d->buf, 0);
-    d->buf = fio_bstr_readfd(d->buf, d->fd, (intptr_t)d->pos, (intptr_t)len);
-    r = fio_bstr_info(d->buf);
-  }
+  char *p = fio___data_ptr(d);
+  if (p)
+    r = FIO_STR_INFO2((p + d->pos), len);
+  else
+    r = fio___data_heap_read(d, d->pos, len);
   d->pos += r.len;
   return r;
 }
@@ -37664,15 +38256,38 @@ SFUNC fio_str_info_s fio_data_read_until(fio_data_s *d,
     return r;
   if (!limit || limit > d->len - d->pos)
     limit = d->len - d->pos;
-  if (d->fd == -1) {
-    r = FIO_STR_INFO2((d->buf + d->pos), limit);
+  char *p = fio___data_ptr(d);
+  if (p) { /* RAM or mapped: pointer math only */
+    r = FIO_STR_INFO2((p + d->pos), limit);
     char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
     if (end)
       r.len = (size_t)(end + 1 - r.buf);
-  } else {
-    d->buf = fio_bstr_len_set(d->buf, 0);
-    d->buf = fio_bstr_getdelim_fd(d->buf, d->fd, (intptr_t)d->pos, token, limit);
-    r = fio_bstr_info(d->buf);
+  } else { /* heap: single pass, read blocks, scan each new block once */
+    for (;;) {
+      size_t want = limit - r.len;
+      if (want > (size_t)FIO_DATA_READ_BLOCK)
+        want = (size_t)FIO_DATA_READ_BLOCK;
+      if (d->capa < r.len + want) {
+        size_t grow = d->capa + (d->capa >> 1);
+        if (grow < r.len + want)
+          grow = r.len + want;
+        if (grow > limit)
+          grow = limit;
+        if (fio___data_heap_reserve(d, grow, r.len))
+          return (fio_str_info_s){0}; /* `pos` unchanged */
+      }
+      if (fio___data_fd_read(d, d->buf + r.len, want, d->pos + r.len))
+        return (fio_str_info_s){0}; /* `pos` unchanged, errno kept */
+      char *end = (char *)FIO_MEMCHR(d->buf + r.len, token, want);
+      if (end) {
+        r.len = (size_t)(end + 1 - d->buf);
+        break;
+      }
+      r.len += want;
+      if (r.len >= limit)
+        break;
+    }
+    r.buf = d->buf;
   }
   d->pos += r.len;
   if (!r.len)
@@ -37681,29 +38296,57 @@ SFUNC fio_str_info_s fio_data_read_until(fio_data_s *d,
 }
 
 SFUNC void fio_data_expect(fio_data_s *d, size_t len) {
-  if (d->fd != -1)
+  if (d->fd != -1 || d->err)
     return;
-  if (len + d->len > fio___data_limit(d)) {
-    fio___data_move2fd(d);
+  const size_t limit = fio___data_limit(d);
+  if (d->len > limit || len > limit - d->len) {
+    if (fio___data_move2fd(d))
+      FIO_LOG_WARNING("fio_data_s couldn't spill to a temporary file (%d) %s",
+                      errno,
+                      strerror(errno));
     return;
   }
-  d->buf = fio_bstr_reserve(d->buf, len);
+  fio___data_reserve(d, d->len + len, limit);
 }
 
 SFUNC int fio_data_write(fio_data_s *d, const void *data, size_t len) {
+  if (d->err)
+    return -1;
   if (!data || !len)
     return 0;
   if (d->fd == -1) {
-    if (len + d->len <= fio___data_limit(d) || fio___data_move2fd(d)) {
-      d->buf = fio_bstr_write(d->buf, data, len); /* RAM (or spill failed) */
+    const size_t limit = fio___data_limit(d);
+    if (d->len <= limit && len <= limit - d->len) { /* fits in RAM */
+      fio___data_reserve(d, d->len + len, limit);
+      FIO_MEMCPY(d->buf + d->len, data, len);
       d->len += len;
+      d->buf = fio_bstr_len_set(d->buf, d->len);
       return 0;
     }
+    if (fio___data_move2fd(d)) /* RAM data stays intact */
+      return fio___data_set_error(d, "couldn't spill to a temporary file");
   }
-  ssize_t written = fio_fd_write(d->fd, data, len);
-  if (written > 0)
-    d->len += (size_t)written;
-  return 0 - (written != (ssize_t)len);
+  return fio___data_fd_write(d, (const char *)data, len);
+}
+
+/* *****************************************************************************
+Data Store - Saving to a File
+***************************************************************************** */
+
+SFUNC int fio_data_save(fio_data_s *d, const char *filename) {
+  if (!d || !filename || !filename[0]) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (d->err) {
+    errno = EIO;
+    return -1;
+  }
+  /* RAM: save the buffer; spilled: the kernel copies the temporary file (the
+   * mapping / heap read buffer is left untouched). */
+  if (d->fd == -1)
+    return fio_filename_overwrite(filename, d->buf, d->len);
+  return fio_fd_save(d->fd, filename, d->len);
 }
 
 /* *****************************************************************************
@@ -104194,6 +104837,10 @@ FIO_IFUNC FIOBJ fiobj_data_new(size_t ram_limit);
 /**
  * Returns the `fio_data_s` store of a Data object (use the `fio_data_*` API to
  * read / write), or NULL if `o` isn't a Data object.
+ *
+ * Note: `fiobj2cstr`, JSON output and equality tests read through the store
+ * and MAY invalidate buffers previously returned by `fio_data_*` calls (and by
+ * an earlier `fiobj2cstr` of the same object).
  */
 FIO_IFUNC fio_data_s *fiobj_data_ptr(FIOBJ o);
 
@@ -105576,7 +106223,10 @@ FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___FLOAT_CLASS_VTBL = {
 FIOBJ Data - vtable
 ***************************************************************************** */
 
-/** Returns the whole content (temporary; may read a spilled file to RAM). */
+/**
+ * Returns the whole content (borrowed; a spilled store is memory mapped, or
+ * read to a heap buffer where mapping isn't available - empty if that fails).
+ */
 FIO_SFUNC fio_str_info_s fiobj___data2cstr(FIOBJ o) {
   fio_data_s *d = (fio_data_s *)FIOBJ_PTR_UNTAG(o);
   size_t pos = fio_data_pos(d);
@@ -105588,7 +106238,7 @@ FIO_SFUNC fio_str_info_s fiobj___data2cstr(FIOBJ o) {
   return r;
 }
 
-/** Data objects compare by content (read in chunks). */
+/** Data objects compare by content (unequal if the content can't be read). */
 FIO_SFUNC unsigned char fiobj___data_eq(FIOBJ restrict a, FIOBJ restrict b) {
   fio_data_s *da = (fio_data_s *)FIOBJ_PTR_UNTAG(a);
   fio_data_s *db = (fio_data_s *)FIOBJ_PTR_UNTAG(b);
@@ -105597,13 +106247,13 @@ FIO_SFUNC unsigned char fiobj___data_eq(FIOBJ restrict a, FIOBJ restrict b) {
   if (fio_data_len(da) != fio_data_len(db))
     return 0;
   size_t pa = fio_data_pos(da), pb = fio_data_pos(db);
-  unsigned char r = 1;
+  unsigned char r;
   fio_data_seek(da, 0);
   fio_data_seek(db, 0);
-  for (fio_str_info_s x; r && (x = fio_data_read(da, 4096)).len;) {
-    fio_str_info_s y = fio_data_read(db, x.len);
-    r = (x.len == y.len && !FIO_MEMCMP(x.buf, y.buf, x.len));
-  }
+  fio_str_info_s x = fio_data_read(da, (size_t)-1);
+  fio_str_info_s y = fio_data_read(db, (size_t)-1);
+  r = (x.len == fio_data_len(da) && y.len == x.len &&
+       (!x.len || !FIO_MEMCMP(x.buf, y.buf, x.len)));
   fio_data_seek(da, (ssize_t)pa);
   fio_data_seek(db, (ssize_t)pb);
   return r;
@@ -120984,16 +121634,24 @@ SFUNC size_t fio_http_request_header_each(fio_http_s *,
 SFUNC size_t fio_http_body_length(fio_http_s *);
 
 /**
- * Adjusts the body's reading position. Negative values start at the end.
+ * Adjusts the body's reading position and returns the new position.
  *
- * If `pos == SSIZE_MAX`, returns `fio_http_body_pos`.
+ * Negative values count back from the end: `-n` is `length - n`, so `-1` is
+ * the last byte (as with `lseek`); values before the start clamp to 0. Any
+ * position at or past the end is EOF (i.e., `fio_http_body_length(h)` or
+ * `SSIZE_MAX`).
  */
 SFUNC size_t fio_http_body_seek(fio_http_s *, ssize_t pos);
 
 /** Returns the body's reading position. */
 SFUNC size_t fio_http_body_pos(fio_http_s *h);
 
-/** Reads up to `length` of data from the body, returns nothing on EOF. */
+/**
+ * Reads up to `length` of data from the body, returns nothing on EOF.
+ *
+ * The returned buffer is borrowed: any later `fio_http_body_*` call on the
+ * same handle MAY invalidate it.
+ */
 SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
 
 /**
@@ -121001,6 +121659,9 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
  *
  * Note: `limit` is ignored if zero or if the remaining data is lower than
  * limit.
+ *
+ * The returned buffer is borrowed: any later `fio_http_body_*` call on the
+ * same handle MAY invalidate it.
  */
 SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
                                               char token,
@@ -121009,8 +121670,14 @@ SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
 /** Allocates a body (payload) of (at least) the `expected_length`. */
 SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
 
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
+/**
+ * Writes `data` to the body (payload) associated with the HTTP handle.
+ *
+ * Returns 0 on success or -1 on error (i.e., the body couldn't be moved to a
+ * temporary file). After an error, the body is in a sticky error state: later
+ * writes fail until the body is closed (see `fio_data_write`).
+ */
+SFUNC int fio_http_body_write(fio_http_s *, const void *data, size_t len);
 
 /**
  * If the body is stored in a temporary file, returns the file's handle.
@@ -121021,6 +121688,14 @@ SFUNC int fio_http_body_fd(fio_http_s *);
 
 /** Releases body (payload) resources, closing any temporary files. */
 SFUNC void fio_http_body_close(fio_http_s *);
+
+/**
+ * Saves the whole body to `filename`, atomically replacing any existing file
+ * (see `fio_data_save`). The body and its reading position are unchanged.
+ *
+ * Returns 0 on success or -1 on error (i.e., after a body write error).
+ */
+SFUNC int fio_http_body_save(fio_http_s *, const char *filename);
 
 /* *****************************************************************************
 Path Section Looping
@@ -124084,7 +124759,17 @@ SFUNC int fio_http_body_fd(fio_http_s *h) { return fio_data_fd(&h->body); }
 /** Releases body (payload) resources, closing any temporary files. */
 SFUNC void fio_http_body_close(fio_http_s *h) { fio_data_destroy(&h->body); }
 
-/** Adjusts the body's reading position. Negative values start at the end. */
+/** Saves the whole body to `filename` (atomic). Returns 0 or -1. */
+SFUNC int fio_http_body_save(fio_http_s *h, const char *filename) {
+  return fio_data_save(&h->body, filename);
+}
+
+/**
+ * Adjusts the body's reading position and returns the new position.
+ *
+ * `-n` is `length - n` (`-1` is the last byte), clamped to 0; any position at
+ * or past the end is EOF.
+ */
 SFUNC size_t fio_http_body_seek(fio_http_s *h, ssize_t pos) {
   return fio_data_seek(&h->body, pos);
 }
@@ -124113,9 +124798,9 @@ SFUNC void fio_http_body_expect(fio_http_s *h, size_t expected_length) {
   fio_data_expect(&h->body, expected_length);
 }
 
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
-  fio_data_write(&h->body, data, len);
+/** Writes `data` to the body (payload). Returns 0 on success, -1 on error. */
+SFUNC int fio_http_body_write(fio_http_s *h, const void *data, size_t len) {
+  return fio_data_write(&h->body, data, len);
 }
 
 /* *****************************************************************************
@@ -125196,6 +125881,23 @@ fio___http_json_parse_buf(fio_str_info_s body,
       body.len);
 }
 
+/**
+ * Reads the whole body (from its start) to `body`.
+ *
+ * A spilled body is memory mapped where possible; a short read (i.e., low
+ * memory without mapping) returns -1.
+ */
+FIO_SFUNC int fio___http_body_read_all(fio_http_s *h, fio_str_info_s *body) {
+  fio_http_body_seek(h, 0);
+  *body = fio_http_body_read(h, fio_http_body_length(h));
+  if (body->len == fio_http_body_length(h))
+    return 0;
+  FIO_LOG_ERROR("HTTP body couldn't be read whole for parsing (%zu of %zu)",
+                body->len,
+                fio_http_body_length(h));
+  return -1;
+}
+
 FIO_SFUNC fio_http_params_parse_result_s
 fio___http_body_parse_json(fio_http_s *h,
                            const fio_http_params_parse_callbacks_s *callbacks,
@@ -125203,8 +125905,11 @@ fio___http_body_parse_json(fio_http_s *h,
   fio_http_params_parse_result_s result = {.result = NULL,
                                            .consumed = 0,
                                            .err = 0};
-  fio_http_body_seek(h, 0);
-  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  fio_str_info_s body;
+  if (fio___http_body_read_all(h, &body)) {
+    result.err = -1;
+    return result;
+  }
   if (!body.len || !body.buf)
     return result; /* empty body - nothing to parse */
   fio_json_result_s r =
@@ -125259,40 +125964,19 @@ FIO_SFUNC void *fio___http_urlenc_on_pair(void *udata_,
 
   const fio_http_params_parse_callbacks_s *cb = a->callbacks;
 
-  /* Decode name */
-  FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
-  fio_string_write_url_dec(&decoded_name,
-                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
-                           name.buf,
-                           name.len);
-
-  /* Decode value */
-  FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
-  fio_string_write_url_dec(&decoded_value,
-                           FIO_STRING_ALLOC_COPY, /* allocates new memory */
-                           value.buf,
-                           value.len);
-
-  /* Create key string object */
+  /* The parser supplies decoded, callback-scoped buffers. */
   void *key_obj = NULL;
-  if (cb->on_string) {
-    key_obj = cb->on_string(a->udata, decoded_name.buf, decoded_name.len);
-  }
+  if (cb->on_string)
+    key_obj = cb->on_string(a->udata, name.buf, name.len);
 
   /* Create value object - URL-encoded values are always Strings */
   void *value_obj = NULL;
   if (cb->on_string)
-    value_obj = cb->on_string(a->udata, decoded_value.buf, decoded_value.len);
+    value_obj = cb->on_string(a->udata, value.buf, value.len);
 
   /* Insert into map (consumes key_obj / value_obj) */
   if (fio___http_params_set(cb, a->udata, a->map, key_obj, value_obj))
     a->err = 1;
-
-  /* Free decoded buffers if they were reallocated */
-  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_name))
-    FIO_STRING_FREE(decoded_name.buf);
-  if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_value))
-    FIO_STRING_FREE(decoded_value.buf);
 
   /* Return non-NULL to continue parsing, NULL to stop */
   return a->err ? NULL : a;
@@ -125360,10 +126044,10 @@ FIO_SFUNC fio_http_params_parse_result_s fio___http_body_parse_urlencoded(
     fio_http_s *h,
     const fio_http_params_parse_callbacks_s *callbacks,
     void *udata) {
-  fio_http_body_seek(h, 0);
-  return fio___http_parse_urlencoded_buf(fio_http_body_read(h, (size_t)-1),
-                                         callbacks,
-                                         udata);
+  fio_str_info_s body;
+  if (fio___http_body_read_all(h, &body))
+    return (fio_http_params_parse_result_s){.err = -1};
+  return fio___http_parse_urlencoded_buf(body, callbacks, udata);
 }
 
 /* *****************************************************************************
@@ -125751,22 +126435,24 @@ fio_http_params_parse(fio_http_s *h,
     return fio___http_params_finish(callbacks, udata, map, consumed, err);
 
   switch (fio___http_body_detect_content_type(h)) {
-  case FIO___HTTP_BODY_CONTENT_TYPE_JSON:
-    fio_http_body_seek(h, 0);
-    err = fio___http_params_fill_json(fio_http_body_read(h, (size_t)-1),
-                                      callbacks,
-                                      udata,
-                                      map,
-                                      &consumed);
+  case FIO___HTTP_BODY_CONTENT_TYPE_JSON: {
+    fio_str_info_s body;
+    err = fio___http_body_read_all(h, &body);
+    if (!err)
+      err = fio___http_params_fill_json(body, callbacks, udata, map, &consumed);
     break;
-  case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED:
-    fio_http_body_seek(h, 0);
-    err = fio___http_params_fill_urlencoded(fio_http_body_read(h, (size_t)-1),
-                                            callbacks,
-                                            udata,
-                                            map,
-                                            &consumed);
+  }
+  case FIO___HTTP_BODY_CONTENT_TYPE_URLENCODED: {
+    fio_str_info_s body;
+    err = fio___http_body_read_all(h, &body);
+    if (!err)
+      err = fio___http_params_fill_urlencoded(body,
+                                              callbacks,
+                                              udata,
+                                              map,
+                                              &consumed);
     break;
+  }
   case FIO___HTTP_BODY_CONTENT_TYPE_MULTIPART:
     err = fio___http_params_fill_multipart(h, callbacks, udata, map, &consumed);
     break;
@@ -127129,15 +127815,21 @@ static void fio_http1_on_complete(void *udata) {
 HTTP/1.1 Parser callbacks
 ***************************************************************************** */
 
-FIO_IFUNC void fio___http_request_too_big(fio___http_connection_s *c) {
+/** Sends an error response and detaches the request (stops processing it). */
+FIO_IFUNC void fio___http_request_abort(fio___http_connection_s *c,
+                                        size_t status) {
   fio_http_s *h = c->h;
   fio_io_dup(c->io); /* sending the response will result in fio_undup */
   fio_io_suspend(c->io);
   c->h = NULL;
   c->suspend = 1;
-  if (fio_http_send_error_response(h, 413))
+  if (fio_http_send_error_response(h, status))
     fio_io_free(c->io); /* response not sent, we need to fio_undup */
   fio_http_free(h);
+}
+
+FIO_IFUNC void fio___http_request_too_big(fio___http_connection_s *c) {
+  fio___http_request_abort(c, 413);
 }
 
 FIO_IFUNC void fio_http1_attach_handle(fio___http_connection_s *c) {
@@ -127305,8 +127997,18 @@ static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
     return 0; /* don't overwrite client payload on redirect */
   if (chunk.len + fio_http_body_length(c->h) > c->settings->max_body_size)
     goto too_big;
-  fio_http_body_write(c->h, chunk.buf, chunk.len);
+  if (fio_http_body_write(c->h, chunk.buf, chunk.len))
+    goto write_failed;
   return 0;
+write_failed:
+  /* the body couldn't be stored (i.e., no temporary file): the server sends
+   * a 500 error response, both sides close the connection. */
+  FIO_LOG_DEBUG2("(%d) HTTP/1.1 couldn't store body, closing connection %d",
+                 fio_io_pid(),
+                 fio_io_fd(c->io));
+  if (!c->is_client)
+    fio___http_request_abort(c, 500);
+  return -1; /* parser error: closes the connection (after the response) */
 too_big:
   fio___http_request_too_big(c);
   return 0;
@@ -127496,12 +128198,15 @@ FIO_SFUNC void fio___http1_send_request(fio_http_s *h) {
     return;
   fio_http_body_seek(h, 0);
   if (fio_http_body_fd(h) == -1) {
-    buf = fio_http_body_read(h, (size_t)-1);
+    /* zero-copy: send a reference to the RAM body (its own allocation) */
     fio_io_write2(c->io,
-                  .buf = (char *)fio_http_dup(h),
-                  .len = buf.len,
-                  .offset = (size_t)(buf.buf - (char *)h),
-                  .dealloc = (void (*)(void *))fio_http_free);
+                  .buf = fio_bstr_copy(fio_data_bstr(&h->body)),
+                  .len = fio_http_body_length(h),
+                  .dealloc = ((union {
+                               void (*bstr)(char *);
+                               void (*dealloc)(void *);
+                             }){.bstr = fio_bstr_free})
+                                 .dealloc);
   } else {
     fio_io_write2(c->io,
                   .fd = fio_http_body_fd(h),

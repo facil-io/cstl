@@ -28,9 +28,7 @@ Default target used by `fio_sock_maximize_limits(0)`.
 #define FIO_SOCK_AVOID_UMASK
 ```
 
-If defined before including the implementation, Unix socket creation avoids the temporary `umask` call used when making public Unix sockets. This avoids `umask`'s process-global race, but may affect permissions on systems where `chmod` on Unix socket files is not enough.
-
-Windows behaves as if this concern does not apply.
+Deprecated, has no effect. Unix socket creation never changes the process-global `umask`: public Unix sockets are opened up (`0777`) with `chmod` after `bind`.
 
 ### Types and Flags
 
@@ -93,8 +91,8 @@ Flags for `fio_sock_open`, `fio_sock_open2`, and `fio_sock_open_unix`.
 - `FIO_SOCK_NONBLOCK` - set non-blocking mode
 - `FIO_SOCK_TCP` - stream socket
 - `FIO_SOCK_UDP` - datagram socket
-- `FIO_SOCK_UNIX` - Unix domain socket where supported, otherwise `0`
-- `FIO_SOCK_UNIX_PRIVATE` - Unix socket with private permissions where supported, otherwise `0`
+- `FIO_SOCK_UNIX` - Unix domain socket where supported, otherwise `0`. Server sockets are public (mode `0777`): any local process or user may connect.
+- `FIO_SOCK_UNIX_PRIVATE` - Unix socket with private permissions where supported, otherwise `0`. Server sockets keep the process `umask` (connecting needs write permission, so a `umask` of `022` or `077` keeps other users out).
 
 `FIO_SOCK_TCP` and `FIO_SOCK_UDP` are exclusive. If neither is set, network sockets default to TCP.
 
@@ -402,7 +400,7 @@ The `fio___sock_wsa*` helpers are internal implementation details, not regular a
 
 Socket handles are owned by the caller and should be closed with `fio_sock_close`. `fio_sock_address_new` results are owned by the caller and should be freed with `fio_sock_address_free`.
 
-Socket operations are as thread-safe as the operating system calls they wrap. `fio_sock_peer_addr` uses shared static buffers and has the 128-call/thread caveat described above. Unix socket creation may touch process-global `umask` unless `FIO_SOCK_AVOID_UMASK` is defined.
+Socket operations are as thread-safe as the operating system calls they wrap. `fio_sock_peer_addr` uses shared static buffers and has the 128-call/thread caveat described above. Unix socket creation never touches the process-global `umask`.
 
 ### Example
 

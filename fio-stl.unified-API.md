@@ -4,7 +4,7 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3196.
+Total symbols: 3202.
 
 ## Contents
 
@@ -25,7 +25,7 @@ Total symbols: 3196.
 - [`./fio-stl/002 threads.h`](#fio-stl-002-threads-h) — 33
 - [`./fio-stl/002 url.h`](#fio-stl-002-url-h) — 7
 - [`./fio-stl/003 entities.h`](#fio-stl-003-entities-h) — 1
-- [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 28
+- [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 29
 - [`./fio-stl/004 http1 parser.h`](#fio-stl-004-http1-parser-h) — 3
 - [`./fio-stl/004 json.h`](#fio-stl-004-json-h) — 4
 - [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 6
@@ -39,7 +39,7 @@ Total symbols: 3196.
 - [`./fio-stl/010 mem.h`](#fio-stl-010-mem-h) — 50
 - [`./fio-stl/011 string core.h`](#fio-stl-011-string-core-h) — 106
 - [`./fio-stl/012 gfm.h`](#fio-stl-012-gfm-h) — 10
-- [`./fio-stl/013 data.h`](#fio-stl-013-data-h) — 13
+- [`./fio-stl/013 data.h`](#fio-stl-013-data-h) — 17
 - [`./fio-stl/102 poll api.h`](#fio-stl-102-poll-api-h) — 16
 - [`./fio-stl/102 queue.h`](#fio-stl-102-queue-h) — 28
 - [`./fio-stl/102 stream.h`](#fio-stl-102-stream-h) — 16
@@ -79,7 +79,7 @@ Total symbols: 3196.
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
-- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 163
+- [`./fio-stl/430 http api.h`](#fio-stl-430-http-api-h) — 164
 - [`./fio-stl/440 http fiobj.h`](#fio-stl-440-http-fiobj-h) — 1
 
 -----------------------------------------------------
@@ -20969,7 +20969,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-004-files-h"></a> `./fio-stl/004 files.h`
 
-28 public symbols.
+29 public symbols.
 
 ### Macros
 
@@ -21105,7 +21105,14 @@ _Symbol type:_ `function`
 int fio_filename_tmp(void)
 ```
 
-Creates a temporary file, returning its file descriptor.
+Creates a temporary file, returning its file descriptor (or -1 on error).
+
+The file is created in the folder named by the `TMPDIR`, `TMP` or `TEMP`
+environment variables (or `P_tmpdir`, or the current folder) and is
+anonymous: it has no name once this function returns (`O_TMPFILE`, or
+unlinked right after it is opened on POSIX systems; delete-on-close
+`O_TEMPORARY` on Windows). The file is removed when `fd` is closed (or the
+process exits), so no temporary files are left behind.
 
 _Symbol type:_ `function`
 
@@ -21181,16 +21188,26 @@ _Symbol type:_ `macro`
 #### `fio_filename_overwrite`
 
 ```c
-inline int fio_filename_overwrite(const char *filename, const void *buf, size_t len)
+int fio_filename_overwrite(const char *filename, const void *buf, size_t len)
 ```
 
-Overwrites `filename` with the data in the buffer.
+Overwrites `filename` with `len` bytes from `buf`, atomically replacing any
+existing file (readers see either the old or the complete new content).
 
-If `path` starts with a `"~/"` than it will be relative to the user's home
-folder (on Windows, testing for `"~\"`).
+If `filename` starts with a `"~/"` than it will be relative to the user's
+home folder (on Windows, also testing for `"~\"`), as in `fio_filename_open`.
 
-Returns -1 on error or 0 on success. On error, the state of the file is
-undefined (may be doesn't exit / nothing written / partially written).
+The data is written to a new sibling file in the target's folder
+(`<filename>.fio-tmp-<random>`, created with `O_CREAT | O_EXCL`, mode `0666`
+minus the `umask`), flushed to storage (`fsync`) and renamed over
+`filename` (`MoveFileExA` on Windows). Exactly one `fsync` (the file, not
+the folder): a crash right after saving may leave the previous version.
+
+Returns -1 on error or 0 on success. On error, any existing `filename` is
+left untouched, the sibling file is removed and `errno` is preserved.
+
+Uses fixed size stack buffers (zero allocations); over-long paths fail with
+`errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
 
 _Symbol type:_ `function`
 
@@ -21293,7 +21310,34 @@ Since some systems have a limit on the number of bytes that can be read at
 a time, this function fragments the system calls into smaller `read` blocks,
 allowing large data to be read.
 
+Interrupted calls (`EINTR`) are retried. Fewer than `len` bytes are returned
+only at EOF or on error (`errno` is set by the failed call on error, but is
+left unchanged at EOF).
+
 If the file descriptor is non-blocking, test errno for EAGAIN / EWOULDBLOCK.
+
+_Symbol type:_ `function`
+
+#### `fio_fd_save`
+
+```c
+int fio_fd_save(int fd, const char *filename, size_t len)
+```
+
+Saves the first `len` bytes of the file `fd` (`[0, len)`) to `filename`,
+atomically replacing any existing file (same semantics, `"~/"` expansion and
+cleanup guarantees as `fio_filename_overwrite`).
+
+On Linux the data is copied by the kernel (`copy_file_range`, which may
+share storage on copy-on-write file systems); where that isn't available or
+stops (e.g., `EXDEV`, `ENOSYS`, `EINVAL`), the copy continues from where it
+stopped using positional block reads and writes.
+
+`fd` must be readable. Its content is not changed. A source shorter than
+`len` fails (`errno == EIO` unless the read reported an error). Without
+`pread` (e.g., some non-glibc systems), `fd`'s file offset may move.
+
+Returns 0 on success or -1 on error.
 
 _Symbol type:_ `function`
 
@@ -22779,17 +22823,18 @@ typedef struct {
 /**
 * Called for each name=value pair found.
 *
-* `name` and `value` point directly into the original input data.
-* The data is NOT decoded - caller must decode if needed.
+* `name` and `value` are decoded (percent escapes and '+' to spaces).
+* Buffers are borrowed, valid only during this callback, and may contain NUL
+* bytes. Copy any data needed after the callback returns; do not free it.
 *
 * Returns the (possibly updated) udata, or NULL to stop parsing.
 */
 void *(*on_pair)(void *udata, fio_buf_info_s name, fio_buf_info_s value);
 /**
-* Called on parsing error (optional).
+* Called if decoding cannot allocate a temporary buffer (optional).
 *
-* Currently not used since URL-encoded parsing is very permissive,
-* but reserved for future use.
+* Receives the current udata after temporary buffers are freed. The failed
+* pair is not reported. Not called when on_pair returns NULL.
 */
 void (*on_error)(void *udata);
 } fio_url_encoded_parser_callbacks_s
@@ -22809,7 +22854,7 @@ typedef struct {
 size_t consumed;
 /** Number of name=value pairs found. */
 size_t count;
-/** Non-zero if an error occurred (callback returned NULL). */
+/** Non-zero if decoding failed or a callback returned NULL. */
 int err;
 } fio_url_encoded_result_s
 ```
@@ -22836,7 +22881,7 @@ Parse URL-encoded data from buffer.
 Returns a result struct containing:
 - `consumed`: Number of bytes consumed from the buffer
 - `count`: Number of name=value pairs found
-- `err`: Non-zero if parsing was stopped (callback returned NULL)
+- `err`: Non-zero if decoding failed or a callback returned NULL
 
 Parsing rules:
 - Pairs are separated by `&`
@@ -22846,8 +22891,12 @@ Parsing rules:
 - Empty name with value: `=value` → name.len = 0, value="value"
 - Empty pairs (`&&`) are skipped
 
-Note: The parser does NOT decode percent-encoded characters.
-Use `fio_string_write_url_dec` to decode if needed.
+Names and values are decoded once using `fio_string_write_url_dec`, including
+'+' to spaces. Invalid percent escapes remain literal. Callback buffers are
+borrowed and valid only until the callback returns. The input is not
+modified. Long fields may allocate temporary memory, which is freed after the
+callback. On allocation failure, on_error is called and consumed excludes the
+failed pair; count includes only pairs passed to on_pair.
 
 _Symbol type:_ `function`
 
@@ -25468,7 +25517,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-013-data-h"></a> `./fio-stl/013 data.h`
 
-13 public symbols.
+17 public symbols.
 
 ### Macros
 
@@ -25482,11 +25531,25 @@ Default number of bytes kept in RAM before spilling to a temporary file.
 
 _Symbol type:_ `macro`
 
+#### `FIO_DATA_READ_BLOCK`
+
+```c
+#define FIO_DATA_READ_BLOCK (1UL << 14)
+```
+
+Block size used when the temporary file can't be memory mapped (block reads
+for `fio_data_read_until`, smallest read buffer).
+
+_Symbol type:_ `macro`
+
 #### `FIO_DATA_INIT`
 
 ```c
 #define FIO_DATA_INIT   \
-  { .buf = NULL, .len = 0, .pos = 0, .limit = 0, .fd = -1 }
+  {   \
+    .buf = NULL, .len = 0, .pos = 0, .limit = 0, .capa = 0, .fd = -1,   \
+    .err = 0, .map = 0   \
+  }
 ```
 
 Initializes a `fio_data_s` using the default RAM limit.
@@ -25499,16 +25562,22 @@ _Symbol type:_ `macro`
 
 ```c
 typedef struct {
-/** RAM data (`fio_bstr`), or the last read once spilled to `fd`. */
+/** RAM data (`fio_bstr`); once spilled, the file mapping or a read buffer. */
 char *buf;
-/** Total data length. */
+/** Total data length (bytes actually stored). */
 size_t len;
 /** Reading position. */
 size_t pos;
 /** RAM limit before spilling to a temporary file (0 = default). */
 size_t limit;
+/** Once spilled: bytes mapped (if `map == 1`) or read buffer capacity. */
+size_t capa;
 /** Temporary file descriptor (-1 while the data is in RAM). */
 int fd;
+/** Sticky error flag (set when a write fails; cleared by destroy). */
+int err;
+/** Once spilled: 1 if `buf` maps the file, 2 if mapping failed, else 0. */
+int map;
 } fio_data_s
 ```
 
@@ -25538,7 +25607,8 @@ _Symbol type:_ `function`
 void fio_data_destroy(fio_data_s *d)
 ```
 
-Releases all resources (closing any temporary file). `d` stays usable.
+Releases all resources (closing any temporary file) and clears the error
+state. `d` stays usable (and keeps its RAM limit).
 
 _Symbol type:_ `function`
 
@@ -25548,7 +25618,7 @@ _Symbol type:_ `function`
 inline size_t fio_data_len(fio_data_s *d)
 ```
 
-Returns the data length.
+Returns the data length (bytes actually stored).
 
 _Symbol type:_ `function`
 
@@ -25572,6 +25642,36 @@ Returns the temporary file's descriptor, or -1 if the data is in RAM.
 
 _Symbol type:_ `function`
 
+#### `fio_data_bstr`
+
+```c
+inline char *fio_data_bstr(fio_data_s *d)
+```
+
+Returns the RAM data (a `fio_bstr`), or NULL once spilled to a temporary
+file (when `fio_data_fd(d) != -1`) or before any data was stored. The
+inverse of `fio_data_fd`.
+
+Borrowed: any later `fio_data_*` call MAY invalidate it. To keep a
+reference, use `fio_bstr_copy` (zero-copy; later writes copy the buffer
+before changing it) and release it with `fio_bstr_free`.
+
+_Symbol type:_ `function`
+
+#### `fio_data_is_error`
+
+```c
+inline int fio_data_is_error(fio_data_s *d)
+```
+
+Returns 1 if the store is in an error state (a write failed), 0 otherwise.
+
+Once set, the state is sticky: all writes fail (return -1) without writing
+until `fio_data_destroy` is called. The data that was stored before the
+failure (`fio_data_len` bytes) remains readable.
+
+_Symbol type:_ `function`
+
 #### `fio_data_seek`
 
 ```c
@@ -25580,8 +25680,10 @@ size_t fio_data_seek(fio_data_s *d, ssize_t pos)
 
 Sets the reading position and returns the new position.
 
-Negative values count from the end. `SSIZE_MAX` keeps the current position.
-The position is clamped to the data length.
+Negative values count back from the end: `-n` is `len - n`, so `-1` is the
+last byte (as with `lseek(fd, -1, SEEK_END)`); values before the start clamp
+to 0. Any position at or past the end is EOF (i.e., `fio_data_len(d)` or
+`SSIZE_MAX`).
 
 _Symbol type:_ `function`
 
@@ -25593,7 +25695,20 @@ fio_str_info_s fio_data_read(fio_data_s *d, size_t len)
 
 Reads up to `len` bytes from the reading position; returns nothing at EOF.
 
-The returned buffer is valid until the next read, write or destroy.
+Use `(size_t)-1` to read all the remaining data. Once spilled, data is read
+through a memory mapping of the temporary file; if mapping isn't available,
+through a heap buffer of the requested size.
+
+If that buffer can't be allocated, or the file returns fewer bytes than
+requested (a short read: an I/O error or a file truncated by someone else;
+`EINTR` is retried), an error is logged and an empty result is returned
+without moving the reading position and keeping `errno` (`EIO` for a short
+read without an error). Tell it apart from EOF by
+`fio_data_pos(d) < fio_data_len(d)`. Truncated data is never returned. The
+stored data stays intact (this is not a store error state).
+
+The returned buffer is borrowed: any later `fio_data_*` call on the same
+store MAY invalidate it.
 
 _Symbol type:_ `function`
 
@@ -25605,8 +25720,12 @@ fio_str_info_s fio_data_read_until(fio_data_s *d, char token, size_t limit)
 
 Reads until (and including) `token`, `limit` bytes or EOF.
 
-`limit` is ignored if zero or larger than the remaining data. The returned
-buffer is valid until the next read, write or destroy.
+`limit` is ignored if zero or larger than the remaining data. Fails like
+`fio_data_read` (empty result, position unchanged, errno kept) if the heap
+read buffer can't be allocated or a block read is short.
+
+The returned buffer is borrowed: any later `fio_data_*` call on the same
+store MAY invalidate it.
 
 _Symbol type:_ `function`
 
@@ -25616,7 +25735,11 @@ _Symbol type:_ `function`
 void fio_data_expect(fio_data_s *d, size_t len)
 ```
 
-Prepares for `len` more bytes (may spill to a temporary file early).
+Prepares for `len` more bytes: reserves RAM, or moves the data to a
+temporary file early if the expected size crosses the RAM limit.
+
+This is only a hint: if no temporary file can be created, the data stays in
+RAM (no error state is set; a later write past the limit will fail).
 
 _Symbol type:_ `function`
 
@@ -25627,9 +25750,37 @@ int fio_data_write(fio_data_s *d, const void *data, size_t len)
 ```
 
 Appends `len` bytes from `data`, spilling to a temporary file once the RAM
-limit is exceeded.
+limit would be exceeded.
 
-Returns 0 on success or -1 on error (data may be partially written).
+Returns 0 on success or -1 on error. Failed file writes are retried for as
+long as they make progress; after two consecutive attempts that store
+nothing, the store enters a (sticky) error state: only the data actually
+stored is kept (`fio_data_len`) and all later writes fail (see
+`fio_data_is_error`). RAM never grows past the RAM limit.
+
+_Symbol type:_ `function`
+
+#### `fio_data_save`
+
+```c
+int fio_data_save(fio_data_s *d, const char *filename)
+```
+
+Saves all the data to `filename`, atomically replacing any existing file.
+
+Uses `fio_filename_overwrite` for RAM data and `fio_fd_save` for spilled
+data (a kernel side copy of the temporary file where available):
+the data is written to a new sibling file in `filename`'s folder, flushed
+(`fsync`) and renamed over `filename` (new files use mode `0666`, minus the
+`umask`; a leading `"~/"` is the home folder). On error, any existing
+`filename` is left untouched, no new file is left behind and `errno` is
+kept. A short read of the temporary file fails the save (never truncates).
+One `fsync` (the file, not the folder): a crash right after saving may leave
+the previous version.
+
+Returns 0 on success or -1 on error (refuses with `EIO` while
+`fio_data_is_error`). The store's data, reading position and previously
+returned buffers are unchanged.
 
 _Symbol type:_ `function`
 
@@ -33539,6 +33690,10 @@ inline fio_data_s *fiobj_data_ptr(FIOBJ o)
 Returns the `fio_data_s` store of a Data object (use the `fio_data_*` API to
 read / write), or NULL if `o` isn't a Data object.
 
+Note: `fiobj2cstr`, JSON output and equality tests read through the store
+and MAY invalidate buffers previously returned by `fio_data_*` calls (and by
+an earlier `fiobj2cstr` of the same object).
+
 _Symbol type:_ `function`
 
 #### `fiobj_str_new_cstr`
@@ -36453,7 +36608,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-430-http-api-h"></a> `./fio-stl/430 http api.h`
 
-163 public symbols.
+164 public symbols.
 
 ### Macros
 
@@ -37985,9 +38140,12 @@ _Symbol type:_ `function`
 size_t fio_http_body_seek(fio_http_s *, ssize_t pos)
 ```
 
-Adjusts the body's reading position. Negative values start at the end.
+Adjusts the body's reading position and returns the new position.
 
-If `pos == SSIZE_MAX`, returns `fio_http_body_pos`.
+Negative values count back from the end: `-n` is `length - n`, so `-1` is
+the last byte (as with `lseek`); values before the start clamp to 0. Any
+position at or past the end is EOF (i.e., `fio_http_body_length(h)` or
+`SSIZE_MAX`).
 
 _Symbol type:_ `function`
 
@@ -38009,6 +38167,9 @@ fio_str_info_s fio_http_body_read(fio_http_s *, size_t length)
 
 Reads up to `length` of data from the body, returns nothing on EOF.
 
+The returned buffer is borrowed: any later `fio_http_body_*` call on the
+same handle MAY invalidate it.
+
 _Symbol type:_ `function`
 
 #### `fio_http_body_read_until`
@@ -38021,6 +38182,9 @@ Reads from the body until finding `token`, reaching `limit` or EOF.
 
 Note: `limit` is ignored if zero or if the remaining data is lower than
 limit.
+
+The returned buffer is borrowed: any later `fio_http_body_*` call on the
+same handle MAY invalidate it.
 
 _Symbol type:_ `function`
 
@@ -38037,10 +38201,14 @@ _Symbol type:_ `function`
 #### `fio_http_body_write`
 
 ```c
-void fio_http_body_write(fio_http_s *, const void *data, size_t len)
+int fio_http_body_write(fio_http_s *, const void *data, size_t len)
 ```
 
 Writes `data` to the body (payload) associated with the HTTP handle.
+
+Returns 0 on success or -1 on error (i.e., the body couldn't be moved to a
+temporary file). After an error, the body is in a sticky error state: later
+writes fail until the body is closed (see `fio_data_write`).
 
 _Symbol type:_ `function`
 
@@ -38063,6 +38231,19 @@ void fio_http_body_close(fio_http_s *)
 ```
 
 Releases body (payload) resources, closing any temporary files.
+
+_Symbol type:_ `function`
+
+#### `fio_http_body_save`
+
+```c
+int fio_http_body_save(fio_http_s *, const char *filename)
+```
+
+Saves the whole body to `filename`, atomically replacing any existing file
+(see `fio_data_save`). The body and its reading position are unchanged.
+
+Returns 0 on success or -1 on error (i.e., after a body write error).
 
 _Symbol type:_ `function`
 

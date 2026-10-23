@@ -5479,21 +5479,27 @@ Opens `filename` with POSIX `open` semantics. If `filename` starts with `"~/"` (
 SFUNC int fio_filename_tmp(void);
 ```
 
-Creates a temporary file and returns its descriptor. Tries `TMPDIR`, `TMP`, `TEMP`, `P_tmpdir`, then the current directory. On Linux it attempts `O_TMPFILE` first; otherwise it builds a name prefixed with `facil_io_tmp_` and opens with `O_CREAT | O_EXCL`.
+Creates an anonymous temporary file and returns its descriptor. Tries `TMPDIR`, `TMP`, `TEMP`, `P_tmpdir`, then the current directory. On Linux it attempts `O_TMPFILE` first; otherwise it builds a name prefixed with `facil_io_tmp_` and opens with `O_CREAT | O_EXCL`. On POSIX systems the name is unlinked right after the file is opened; on Windows the file is opened with delete-on-close (`O_TEMPORARY`). Either way, the file is removed once the descriptor is closed (or the process exits), so no temporary files are left behind.
 
 **Returns:** file descriptor on success, `-1` on error.
 
 #### `fio_filename_overwrite`
 
 ```c
-FIO_IFUNC int fio_filename_overwrite(const char *filename,
-                                     const void *buf,
-                                     size_t len);
+SFUNC int fio_filename_overwrite(const char *filename,
+                                 const void *buf,
+                                 size_t len);
 ```
 
-Opens `filename` with `O_RDWR | O_CREAT | O_TRUNC`, writes `len` bytes from `buf`, and closes the file.
+Overwrites `filename` with `len` bytes from `buf`, atomically replacing any existing file: readers see either the old file or the complete new one.
 
-**Returns:** `0` on success, `-1` on error. On error the file state is undefined.
+The data is written to a new sibling file in the target's folder (`<filename>.fio-tmp-<random>`, opened with `O_CREAT | O_EXCL`, mode `0666` minus the `umask`), flushed to storage (`fsync`; `_commit` on Windows) and renamed over `filename` (`rename`; `MoveFileExA` with `MOVEFILE_REPLACE_EXISTING` on Windows). A leading `"~/"` (or `"~\\"` on Windows) is expanded exactly as by `fio_filename_open`. An empty buffer (`len == 0`) creates an empty file.
+
+**Durability:** exactly one `fsync` per save, on the new file before the rename. This makes the replace atomic across crashes: after a crash, `filename` holds either the old or the complete new content, never a partial or empty file. The folder isn't `fsync`ed (it would cost a second blocking call; `syncfs` flushes the whole file system), so the rename itself may not survive a crash (or power loss) right after the save returns: `filename` then still holds the previous version (or doesn't exist, if it was new). Call `fsync` on the folder yourself if you need the rename to be durable.
+
+**Returns:** `0` on success, `-1` on error (`errno` is preserved from the failing call; `EINVAL` for a missing `filename`, or `buf == NULL` with `len > 0`). On error, any existing `filename` is untouched and the sibling file is removed. On Windows, a failed `MoveFileExA` maps `GetLastError()` to `errno`: `ENOENT` (file / path not found), `EACCES` (access denied), `EBUSY` (sharing / lock violation), `EEXIST`, `ENOSPC` (disk full), `EXDEV` (not the same device), otherwise `EIO`.
+
+**Note:** uses fixed size stack buffers (zero allocations); over-long paths fail with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`). `fio_fd_save` does the same with a file descriptor as the source.
 
 ### Removing Files and Folders
 
@@ -5582,7 +5588,7 @@ Writes `len` bytes to `fd`, fragmenting the syscall into `write` blocks of up to
 FIO_IFUNC size_t fio_fd_read(int fd, void *buf, size_t len, off_t start_at);
 ```
 
-Reads up to `len` bytes from `fd` starting at `start_at`. On POSIX systems with `pread`, the file offset is preserved; otherwise it seeks. Reads are fragmented to `1 << 27` byte chunks. Retries on `EINTR`.
+Reads up to `len` bytes from `fd` starting at `start_at`. On POSIX systems with `pread`, the file offset is preserved; otherwise it seeks. Reads are fragmented to `1 << 27` byte chunks. Retries on `EINTR`, and keeps reading after partial reads, so fewer than `len` bytes are returned only at EOF or on error (`errno` is set by the failing call on error and left unchanged at EOF - clear it first to tell them apart).
 
 **Parameters:**
 - `fd` - file descriptor
@@ -5591,6 +5597,20 @@ Reads up to `len` bytes from `fd` starting at `start_at`. On POSIX systems with 
 - `start_at` - offset; negative values seek from end
 
 **Returns:** bytes read, or `0` on error / EOF. Sets `errno = ENOENT` if `fd == -1`, `buf == NULL`, or `len == 0`.
+
+#### `fio_fd_save`
+
+```c
+SFUNC int fio_fd_save(int fd, const char *filename, size_t len);
+```
+
+Saves the first `len` bytes of the file `fd` (`[0, len)`) to `filename`, with the same atomic replace semantics, `"~/"` expansion and cleanup guarantees as `fio_filename_overwrite` (both use the same internal routine).
+
+On Linux the copy is done by the kernel (`copy_file_range`, which may share storage - reflink - on copy-on-write file systems). If the kernel copy isn't available or stops (for example `EXDEV`, `ENOSYS`, `EINVAL`, `EOPNOTSUPP`, or an early `0`), the copy continues from where it stopped with positional block reads (`fio_fd_read`) and writes, which report any real error. Elsewhere only the block copy is used.
+
+`fd` must be readable; its content isn't changed (its file offset may move on systems without `pread`). A source shorter than `len` fails with `errno == EIO` (or the read error's `errno`), never saving truncated data.
+
+**Returns:** `0` on success, `-1` on error (`EBADF` if `fd == -1`).
 
 ### File Information
 
@@ -6882,9 +6902,7 @@ Default target used by `fio_sock_maximize_limits(0)`.
 #define FIO_SOCK_AVOID_UMASK
 ```
 
-If defined before including the implementation, Unix socket creation avoids the temporary `umask` call used when making public Unix sockets. This avoids `umask`'s process-global race, but may affect permissions on systems where `chmod` on Unix socket files is not enough.
-
-Windows behaves as if this concern does not apply.
+Deprecated, has no effect. Unix socket creation never changes the process-global `umask`: public Unix sockets are opened up (`0777`) with `chmod` after `bind`.
 
 ### Types and Flags
 
@@ -6947,8 +6965,8 @@ Flags for `fio_sock_open`, `fio_sock_open2`, and `fio_sock_open_unix`.
 - `FIO_SOCK_NONBLOCK` - set non-blocking mode
 - `FIO_SOCK_TCP` - stream socket
 - `FIO_SOCK_UDP` - datagram socket
-- `FIO_SOCK_UNIX` - Unix domain socket where supported, otherwise `0`
-- `FIO_SOCK_UNIX_PRIVATE` - Unix socket with private permissions where supported, otherwise `0`
+- `FIO_SOCK_UNIX` - Unix domain socket where supported, otherwise `0`. Server sockets are public (mode `0777`): any local process or user may connect.
+- `FIO_SOCK_UNIX_PRIVATE` - Unix socket with private permissions where supported, otherwise `0`. Server sockets keep the process `umask` (connecting needs write permission, so a `umask` of `022` or `077` keeps other users out).
 
 `FIO_SOCK_TCP` and `FIO_SOCK_UDP` are exclusive. If neither is set, network sockets default to TCP.
 
@@ -7256,7 +7274,7 @@ The `fio___sock_wsa*` helpers are internal implementation details, not regular a
 
 Socket handles are owned by the caller and should be closed with `fio_sock_close`. `fio_sock_address_new` results are owned by the caller and should be freed with `fio_sock_address_free`.
 
-Socket operations are as thread-safe as the operating system calls they wrap. `fio_sock_peer_addr` uses shared static buffers and has the 128-call/thread caveat described above. Unix socket creation may touch process-global `umask` unless `FIO_SOCK_AVOID_UMASK` is defined.
+Socket operations are as thread-safe as the operating system calls they wrap. `fio_sock_peer_addr` uses shared static buffers and has the 128-call/thread caveat described above. Unix socket creation never touches the process-global `umask`.
 
 ### Example
 
@@ -7651,14 +7669,14 @@ int main(void) {
 ```
 
 ---
-# URL-Encoded Parser
+## URL-Encoded Parser
 
 ```c
 #define FIO_URL_ENCODED
 #include "fio-stl.h"
 ```
 
-A non-allocating parser for `application/x-www-form-urlencoded` data. It splits `name=value&...` pairs and leaves decoding to you. No copies, no drama. Implemented in [`./004 urlencoded.h`](./004%20urlencoded.h).
+A callback-based parser for `application/x-www-form-urlencoded` data. It splits `name=value&...` pairs and decodes each name and value before invoking the callback, without modifying the input. Temporary buffers use stack storage with heap fallback for long fields. Implemented in [`./004 urlencoded.h`](./004%20urlencoded.h).
 
 ### Types
 
@@ -7674,8 +7692,8 @@ typedef struct {
 Parser callbacks. `udata` is passed to callbacks and updated from `on_pair`'s return value.
 
 **Members:**
-- `on_pair` - called for each pair. `name` and `value` point into the original input and are **not decoded**. Return non-NULL to continue, or `NULL` to stop.
-- `on_error` - optional and currently unused; reserved because parsers enjoy having a rainy-day pocket.
+- `on_pair` - called for each non-empty pair with decoded `name` and `value`. Buffers are borrowed and valid **only during the callback**; copy anything needed later and do not free them. Lengths are in bytes and may include embedded NUL bytes. Return the (possibly updated) non-NULL `udata` to continue, or `NULL` to stop.
+- `on_error` - optional; called once with the current `udata` if decoding cannot allocate a temporary buffer. Buffers are freed before this callback, and the failed pair is not passed to `on_pair`. Not called when `on_pair` returns `NULL`.
 
 If `callbacks` or a member is `NULL`, an internal no-op callback is used.
 
@@ -7692,9 +7710,9 @@ typedef struct {
 Parse result.
 
 **Members:**
-- `consumed` - number of input bytes consumed
-- `count` - number of non-empty pairs reported
-- `err` - non-zero when parsing stopped because `on_pair` returned `NULL`
+- `consumed` - number of original input bytes consumed. On success this equals `len`. When `on_pair` returns `NULL`, includes that pair but excludes its following `&`. On decoding failure, excludes the failed pair.
+- `count` - number of non-empty pairs passed to `on_pair`, including a pair whose callback returned `NULL`.
+- `err` - zero on success; non-zero when decoding failed or `on_pair` returned `NULL`.
 
 ### Parsing
 
@@ -7708,7 +7726,15 @@ fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
                       size_t len);
 ```
 
-Parses `data[0..len)` as URL-encoded form data.
+Parses `data[0..len)` as URL-encoded form data, decoding each name and value exactly once using `fio_string_write_url_dec`.
+
+**Parameters:**
+- `callbacks` - borrowed callback table, or `NULL` for no-op callbacks; valid for the call.
+- `udata` - caller-owned context passed to callbacks, possibly `NULL`; updated from each `on_pair` return value. A real `on_pair` callback must return non-NULL to continue.
+- `data` - borrowed readable buffer containing at least `len` bytes; not modified. A trailing NUL is not required.
+- `len` - number of input bytes to parse; may be zero.
+
+**Returns:** parse result containing original input bytes consumed, pairs reported, and error status. Allocation failure stops parsing without reporting the failed pair; callers may retry from `data + result.consumed` after resolving the allocation failure. Retrying from the beginning repeats earlier callback side effects.
 
 Rules from the implementation:
 - pairs are separated by `&`
@@ -7717,13 +7743,16 @@ Rules from the implementation:
 - `name` is valid and has an empty value
 - `=value` is valid and has an empty name
 - empty pairs such as leading `&` or `&&` are skipped
-- percent escapes are not decoded
+- pair boundaries are determined before decoding, so encoded `&` and `=` remain part of their fields
+- percent escapes are decoded and `+` becomes a space in both names and values
+- `%2B` decodes to a literal `+`, not a space; `%2526` decodes to `%26`, not `&`
+- invalid or incomplete percent escapes remain literal, following `fio_string_write_url_dec` (including its `%uXXXX` extension)
 
-Use a string helper such as `fio_string_write_url_dec` when you need decoded values.
+**Ownership:** the caller retains `data`, `callbacks`, and `udata`. The parser owns temporary decoded buffers and releases any heap fallback using `FIO_STRING_FREE2` after the callback returns, including when the callback stops parsing. No buffer ownership is transferred to callbacks.
 
-**Ownership:** callback buffers borrow the original `data`; keep `data` alive while parsing and copy anything you need later.
+**Thread-safety:** independent calls are reentrant and share no parser state; callback state and any configured allocator must support the caller's concurrency requirements. Work is linear in the input length, with temporary space proportional to the largest pair.
 
-**Thread-safety:** parsing uses only caller-provided state and stack locals.
+**Note**: callbacks now receive decoded data rather than slices of the encoded input. Remove caller-side URL decoding to avoid decoding twice.
 
 ### Example
 
@@ -7749,8 +7778,13 @@ int main(void) {
   fio_url_encoded_result_s r =
       fio_url_encoded_parse(&cb, (void *)1, form, strlen(form));
 
-  printf("pairs=%zu consumed=%zu err=%d\n", r.count, r.consumed, r.err);
-  return r.err;
+  /* The callback sees encoded=a b, not encoded=a%20b. */
+  if (r.err) {
+    fprintf(stderr, "Parsing stopped after %zu bytes\n", r.consumed);
+    return 1;
+  }
+  printf("pairs=%zu consumed=%zu\n", r.count, r.consumed);
+  return 0;
 }
 ```
 
@@ -9918,38 +9952,59 @@ A seekable data store that keeps data in RAM until it grows past a limit, then m
 ### Settings
 
 ```c
-#define FIO_DATA_RAM_LIMIT (1UL << 17) /* default RAM limit, in bytes */
+#define FIO_DATA_RAM_LIMIT  (1UL << 17) /* default RAM limit, in bytes */
+#define FIO_DATA_READ_BLOCK (1UL << 14) /* block size without mmap (spilled) */
+/* #define FIO_DATA_NO_MMAP */          /* never memory map temporary files */
 ```
+
+The effective RAM limit is clamped below the `fio_bstr` size limit (about 2GiB), so RAM data never hits that limit. Spilled data has no such limit.
+
+`FIO_DATA_NO_MMAP` (define before including the module) disables memory mapping, forcing the heap read buffer described below. It's always the case on systems without `sys/mman.h` (i.e., Windows).
 
 ### Type and lifetime
 
 ```c
 typedef struct {
-  char *buf;    /* RAM data (fio_bstr), or the last read once spilled */
-  size_t len;   /* total length */
+  char *buf;    /* RAM data (fio_bstr); once spilled, the mapping / read buffer */
+  size_t len;   /* total length (bytes actually stored) */
   size_t pos;   /* reading position */
   size_t limit; /* RAM limit (0 = FIO_DATA_RAM_LIMIT) */
+  size_t capa;  /* once spilled: bytes mapped, or read buffer capacity */
   int fd;       /* temporary file, or -1 while in RAM */
+  int err;      /* sticky error flag (see fio_data_is_error) */
+  int map;      /* once spilled: mapping state */
 } fio_data_s;
 
-#define FIO_DATA_INIT { .buf = NULL, .len = 0, .pos = 0, .limit = 0, .fd = -1 }
+#define FIO_DATA_INIT /* all zero, except .fd = -1 */
 
 void fio_data_init(fio_data_s *d, size_t ram_limit);
 void fio_data_destroy(fio_data_s *d);
 ```
 
-Initialize with `FIO_DATA_INIT` or `fio_data_init`, and release with `fio_data_destroy`. Destroying closes the temporary file (if any) and resets the store to empty, so it can be reused. It keeps the RAM limit. Treat the fields as read-only and use the functions below.
+Initialize with `FIO_DATA_INIT` or `fio_data_init`, and release with `fio_data_destroy`. Destroying unmaps and closes the temporary file (if any), clears the error state and resets the store to empty, so it can be reused. It keeps the RAM limit. Treat the fields as read-only and use the functions below.
+
+Temporary files are anonymous (see `fio_filename_tmp`): they have no name in the file system and disappear when closed, so nothing is left behind, even if the process crashes.
 
 ### Writing
 
 ```c
 int  fio_data_write(fio_data_s *d, const void *data, size_t len);
 void fio_data_expect(fio_data_s *d, size_t len);
+int  fio_data_is_error(fio_data_s *d);
 ```
 
-`fio_data_write` appends data. Once the total would exceed the RAM limit, the data moves to a temporary file and later writes go there. It returns `0` on success or `-1` if the data couldn't be fully written. If no temporary file can be created, the data stays in RAM.
+`fio_data_write` appends data. Once the total would exceed the RAM limit, the data moves to a temporary file (and the RAM buffer is released); later writes go to the file. It returns `0` on success or `-1` on error.
 
-`fio_data_expect` prepares for `len` more bytes. It reserves RAM, or moves to a temporary file early if the expected size crosses the limit.
+**Write errors are sticky.** Writing to a file (moving the RAM data, or appending) is retried for as long as it makes progress. It fails after two consecutive attempts that write nothing (creating the temporary file is also tried twice). The store then enters an error state:
+
+- `fio_data_len` is the number of bytes actually stored. They are a readable prefix of the data written (on a failed move, the RAM data stays intact).
+- The failing write and all later writes return `-1` without writing.
+- RAM never grows past the RAM limit.
+- `fio_data_is_error` returns `1`, until `fio_data_destroy` clears the state.
+
+Memory allocation failures while writing are fatal (`FIO_ASSERT_ALLOC`); read buffer allocation failures aren't (see below).
+
+`fio_data_expect` prepares for `len` more bytes. It reserves RAM, or moves to a temporary file early if the expected size crosses the limit. It's only a hint: if no temporary file can be created, the data stays in RAM and no error state is set (a later write past the limit will fail).
 
 ### Reading
 
@@ -9957,15 +10012,32 @@ void fio_data_expect(fio_data_s *d, size_t len);
 size_t         fio_data_len(fio_data_s *d);
 size_t         fio_data_pos(fio_data_s *d);
 int            fio_data_fd(fio_data_s *d);
+char *         fio_data_bstr(fio_data_s *d);
 size_t         fio_data_seek(fio_data_s *d, ssize_t pos);
 fio_str_info_s fio_data_read(fio_data_s *d, size_t len);
 fio_str_info_s fio_data_read_until(fio_data_s *d, char token, size_t limit);
 ```
 
-- **Reads** start at the reading position and advance it. `fio_data_read` returns up to `len` bytes. `fio_data_read_until` stops after `token`, after `limit` bytes (ignored if zero), or at EOF. Both return an empty result at EOF.
-- **Read buffers** are borrowed. They stay valid until the next read, write, or destroy. While in RAM, reads point into the store's own buffer. Once spilled, reads go through `buf`, so read in bounded chunks to keep memory bounded.
-- **`fio_data_seek`** sets the position and returns it. Negative values count from the end, `SSIZE_MAX` keeps the current position, and the result is clamped to the data length.
+- **Reads** start at the reading position and advance it by the number of bytes returned. `fio_data_read` returns up to `len` bytes (`(size_t)-1` reads all the remaining data). `fio_data_read_until` stops after `token` (inclusive), after `limit` bytes (ignored if zero), or at EOF. Both return an empty result at EOF.
+- **Spilled data is memory mapped.** On the first read after the data moved to a temporary file, the whole file is mapped (read-only), and reads return pointers into the mapping, just like RAM reads return pointers into the RAM buffer. Nothing is copied, so reading everything at once is as cheap as reading in chunks.
+- **Without mapping** (`FIO_DATA_NO_MMAP`, Windows, or when `mmap` fails, i.e., a file too big for the address space), reads copy the data into a heap buffer that grows to fit the request (no size cap). `fio_data_read_until` reads the file in `FIO_DATA_READ_BLOCK` blocks and stops at the token, so it never reads past `limit`. Read in bounded chunks to keep memory bounded.
+- **Read failures fail the read, loudly.** If the heap buffer can't be allocated, or the file returns fewer bytes than requested (a short read: an I/O error, or a file truncated by someone else), an error is logged and the read returns an empty result (`buf == NULL`, `len == 0`) without moving the reading position, keeping `errno` (`EIO` for a short read that didn't report an error). Interrupted reads (`EINTR`) are retried by `fio_fd_read`. It never returns a truncated read and never aborts (the size may be controlled by a remote sender). Tell this apart from EOF by `fio_data_pos(d) < fio_data_len(d)`. The stored data is intact and the store is NOT put in an error state, so a later or smaller read may succeed. Whole-content users (FIOBJ `fiobj2cstr`, equality, HTTP body parsers) see such a failure as an empty / unequal / failed read, never as truncated data.
+- **Read buffers** are borrowed: any later `fio_data_*` call on the same store MAY invalidate them (don't rely on any call keeping them valid). In particular, a write to a spilled store unmaps the file (it's mapped again, at its new size, by the next read), and `fio_data_destroy` releases everything.
+- **`fio_data_seek`** sets the position and returns it. Negative values count back from the end: `-n` is `len - n`, so `-1` is the last byte (as with `lseek(fd, -1, SEEK_END)`), and values before the start clamp to `0`. Any position at or past the end is EOF: seek to `fio_data_len(d)` (or `SSIZE_MAX`, which is simply a large value) to reach the end. Writes never move the reading position.
 - **`fio_data_fd`** returns the temporary file descriptor (for example, for `sendfile`), or `-1` while the data is in RAM.
+- **`fio_data_bstr`** is the inverse of `fio_data_fd`: it returns the RAM data, a `fio_bstr` holding `fio_data_len(d)` bytes, or `NULL` once the data is in a temporary file (`fio_data_fd(d) != -1`) or before anything was stored. It's borrowed like a read buffer (any later `fio_data_*` call MAY invalidate it). To keep it, take a reference with `fio_bstr_copy` (no data copy) and release it with `fio_bstr_free`; the reference never changes, since later writes copy the buffer before changing it (copy on write). The HTTP/1.1 client sends RAM bodies this way (zero-copy).
+
+### Saving
+
+```c
+int fio_data_save(fio_data_s *d, const char *filename);
+```
+
+Saves all the data to `filename`, replacing an existing file atomically. Readers see either the old file or the complete new one. RAM data is saved with `fio_filename_overwrite` (from the RAM buffer); spilled data with `fio_fd_save` (from the temporary file: a kernel side copy on Linux, positional block copies elsewhere), so saving never maps or reads the file into memory. See the [File Helpers](./004 files.md): the data is written to a sibling name (`<filename>.fio-tmp-<random>`) in the target's folder, `fsync`ed and renamed over `filename`. A single `fsync` (of the new file, before the rename) guarantees the old or the complete new content after a crash, never a partial file; the folder isn't `fsync`ed, so a crash right after the save may still leave the previous version in place. New files get mode `0666`, minus the `umask`. A leading `"~/"` is the home folder, as with `fio_filename_open`.
+
+Returns `0` on success or `-1` on error (with `errno` set). On error, an existing `filename` is untouched and no sibling file is left behind. A short read of the temporary file fails the save (never saves truncated data). A store in an error state is refused (`-1`, `errno == EIO`), since its data is incomplete.
+
+Saving doesn't change the store: the data, reading position and buffers returned earlier stay the same, and the store stays usable.
 
 ### Example
 
@@ -9976,6 +10048,8 @@ fio_data_write(&d, "world", 5);
 fio_data_seek(&d, 0);
 for (fio_str_info_s s; (s = fio_data_read(&d, 4096)).len;)
   fwrite(s.buf, 1, s.len, stdout);
+if (fio_data_save(&d, "hello.txt"))
+  perror("couldn't save");
 fio_data_destroy(&d);
 ```
 # POSIX Portable Polling API
@@ -16699,11 +16773,12 @@ FIOBJ       fiobj_data_new(size_t ram_limit); /* 0 = FIO_DATA_RAM_LIMIT */
 fio_data_s *fiobj_data_ptr(FIOBJ o);          /* NULL if not a Data object */
 ```
 
-Read and write through the store's API, for example `fio_data_write(fiobj_data_ptr(o), buf, len)` or `fio_data_read(fiobj_data_ptr(o), 65536)`. Free with `fiobj_free`, which also closes any temporary file.
+Read and write through the store's API, for example `fio_data_write(fiobj_data_ptr(o), buf, len)` or `fio_data_read(fiobj_data_ptr(o), 65536)`. Save the content to a file with `fio_data_save(fiobj_data_ptr(o), filename)` (for example, to keep a file upload). Free with `fiobj_free`, which also closes any temporary file.
 
 Generic conversions:
 
-- `fiobj2cstr` (and JSON output) returns the whole content. This reads a spilled file into RAM, so prefer chunked `fio_data_read` for large data.
+- `fiobj2cstr` (and JSON output) returns the whole content. A spilled store is memory mapped (no copy); where mapping isn't available the content is read into a heap buffer, and if that buffer can't be allocated an error is logged and the result is empty.
+- `fiobj2cstr`, JSON output and equality tests use the store's read buffer: they MAY invalidate buffers previously returned by `fio_data_*` (and `fiobj2cstr` results of the same object). They preserve the reading position.
 - `fiobj2i` / `fiobj2f` return the length.
 - Two Data objects are equal when their content is equal.
 
@@ -21115,15 +21190,46 @@ fio_str_info_s fio_http_body_read_until(fio_http_s *h,
                                         char token,
                                         size_t limit);
 void           fio_http_body_expect(fio_http_s *h, size_t expected_length);
-void           fio_http_body_write(fio_http_s *h, const void *data, size_t len);
+int            fio_http_body_write(fio_http_s *h, const void *data, size_t len);
 int            fio_http_body_fd(fio_http_s *h);
 void           fio_http_body_close(fio_http_s *h);
+int            fio_http_body_save(fio_http_s *h, const char *filename);
 ```
 
 The handle stores body data in RAM until `FIO_HTTP_BODY_RAM_LIMIT` is crossed,
 then uses a temporary file. `fio_http_body_fd` returns that file descriptor or
 `-1`. Body storage is implemented by the [Data Store module](./013 data.md)
 (`fio_data_s`), which can be used independently.
+
+`fio_http_body_seek` sets the reading position and returns it. Negative values
+count back from the end: `-n` is `length - n`, so `-1` is the last byte (as
+with `lseek(fd, -1, SEEK_END)`), and values before the start clamp to `0`. Any
+position at or past the end is EOF, so `fio_http_body_seek(h,
+fio_http_body_length(h))` (or `SSIZE_MAX`) seeks to the end. Buffers returned
+by `fio_http_body_read` / `fio_http_body_read_until` are borrowed: any later
+`fio_http_body_*` call on the same handle MAY invalidate them. Once the body is
+in a temporary file, reads point into a memory mapping of the file (see the
+Data Store module), so `fio_http_body_read(h, fio_http_body_length(h))` returns
+the whole body without copying it. Without mapping, the body is copied to a
+heap buffer; if that buffer can't be allocated, an error is logged and the
+read returns an empty result without moving the position (`fio_http_body_pos(h)
+< fio_http_body_length(h)` tells it apart from EOF). JSON and URL encoded body
+parsing read the whole body this way, and fail if it can't be read whole.
+
+`fio_http_body_save` saves the whole body to a file, atomically replacing an
+existing file (see `fio_data_save` and `fio_fd_save`: a sibling file
+is written, `fsync`ed and renamed; on Linux a temporary-file body is copied by
+the kernel), for example to keep a large upload without copying it through RAM.
+It returns `0` on success or `-1` on error (including a body in a write error
+state or a short read of the body's temporary file). The body and its reading
+position are unchanged. A leading `"~/"` is the home folder. Never derive
+`filename` from client input without validating it.
+
+`fio_http_body_write` returns `0` on success or `-1` on error (for example,
+when no temporary file can be created). Errors are sticky: later writes fail
+until the body is closed, and the stored prefix stays readable. When an
+HTTP/1.1 server can't store a request body, it responds with `500` and closes
+the connection; a client closes the connection.
 
 `fio_http_body_close` releases the body's RAM buffer and temporary file (if
 any) and resets the body to empty. The body is also released automatically
@@ -21423,7 +21529,7 @@ Calls `fio_http_params_parse` (see [430 http.md](./430 http.md)) and returns the
 - Query pairs are added first, followed by the body fields. A JSON object body is merged into the Hash. Any other JSON body (array or primitive) is stored under `"_json"`.
 - Query and URL-encoded values are Strings (JSON bodies keep their JSON types). Missing values (`key` or `key=`) become empty Strings.
 - When a key repeats, the last value wins. The Hash is ordered, so the replaced key moves to the end.
-- A file upload is stored as a Hash with the keys `"filename"` and `"type"` (Strings) and `"data"`. `"data"` is a [`FIOBJ_T_DATA`](./250 fiobj.md) object holding the content. Uploads are streamed in chunks, and the content moves to a temporary file once it grows past `FIO_DATA_RAM_LIMIT`, so large files never sit fully in memory. Read it in chunks with `fio_data_read(fiobj_data_ptr(data), len)`.
+- A file upload is stored as a Hash with the keys `"filename"` and `"type"` (Strings) and `"data"`. `"data"` is a [`FIOBJ_T_DATA`](./250 fiobj.md) object holding the content. Uploads are streamed in chunks, and the content moves to a temporary file once it grows past `FIO_DATA_RAM_LIMIT`, so large files never sit fully in memory. Read it with `fio_data_read(fiobj_data_ptr(data), len)`, or keep it as a file with `fio_data_save(fiobj_data_ptr(data), filename)` (an atomic write; never use the client's `"filename"` as a path without validating it). If an upload can't be stored (for example, no temporary file can be created), parsing fails and `fio_http_params2FIOBJ` returns `FIOBJ_INVALID`.
 - A body with a missing or unknown Content-Type is ignored.
 - Returns `FIOBJ_INVALID` on error (malformed body, `NULL` handle).
 

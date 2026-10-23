@@ -937,21 +937,9 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
     }
   } else {
     unlink(addr.sun_path);
-    int btmp; // the bind result
-#if !defined(FIO_SOCK_AVOID_UMASK) && !defined(FIO_OS_WIN)
-    if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
-      int umask_org = umask(0x1FF);
-      btmp = fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-      int old_err = errno;
-      umask(umask_org);
-      errno = old_err;
-      FIO_LOG_DEBUG("umask was used temporarily for Unix Socket (was 0x%04X)",
-                    umask_org);
-    } else
-#endif /* FIO_SOCK_AVOID_UMASK */
-      /* else */ btmp =
-          fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-    if (btmp == -1) {
+    /* no `umask` games (process-global, races other threads): public sockets
+     * are opened up with `chmod` after `bind`. */
+    if (fio_sock_bind(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
       FIO_LOG_ERROR("couldn't bind unix socket to %s\n\terrno(%d): %s",
                     address,
                     errno,
@@ -960,7 +948,7 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
       // unlink(addr.sun_path);
       return FIO_SOCKET_INVALID;
     }
-#ifndef FIO_OS_WIN
+#if !FIO_OS_WIN /* FIO_OS_WIN is always defined (0 / 1) */
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
       chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
       fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);

@@ -19,14 +19,22 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_URL_ENCODED) && !defined(H___FIO_URL_ENCODED___H)
 #define H___FIO_URL_ENCODED___H
 
+/* Dependency: string decoding and temporary-buffer allocation helpers. */
+#ifndef H___FIO_STR___H
+#define FIO_STR
+#define FIO___RECURSIVE_INCLUDE 99 /* preserve FIO_EXTERN linkage */
+#include FIO_INCLUDE_FILE
+#undef FIO___RECURSIVE_INCLUDE
+#endif
+
 /* *****************************************************************************
 URL-Encoded Parser - Overview
 
-This is a non-allocating, callback-based URL-encoded (application/x-www-form-
-urlencoded) parser.
+This is a callback-based URL-encoded (application/x-www-form-urlencoded) parser.
 
-The parser finds boundaries between name=value pairs without decoding the data.
-Decoding is the caller's responsibility (use `fio_string_write_url_dec`).
+The parser splits name=value pairs and decodes each name and value before
+calling on_pair. Decoding uses temporary stack buffers with heap fallback for
+long fields. The input is not modified.
 
 URL-encoded format:
 - Pairs separated by `&`
@@ -37,7 +45,7 @@ Usage:
     static void *my_on_pair(void *udata, fio_buf_info_s name, fio_buf_info_s
 value) {
         // Process name=value pair
-        // name and value point directly into the original data
+        // name and value are decoded and valid only during this callback
         return udata;
     }
 
@@ -68,18 +76,19 @@ typedef struct {
   /**
    * Called for each name=value pair found.
    *
-   * `name` and `value` point directly into the original input data.
-   * The data is NOT decoded - caller must decode if needed.
+   * `name` and `value` are decoded (percent escapes and '+' to spaces).
+   * Buffers are borrowed, valid only during this callback, and may contain NUL
+   * bytes. Copy any data needed after the callback returns; do not free it.
    *
    * Returns the (possibly updated) udata, or NULL to stop parsing.
    */
   void *(*on_pair)(void *udata, fio_buf_info_s name, fio_buf_info_s value);
 
   /**
-   * Called on parsing error (optional).
+   * Called if decoding cannot allocate a temporary buffer (optional).
    *
-   * Currently not used since URL-encoded parsing is very permissive,
-   * but reserved for future use.
+   * Receives the current udata after temporary buffers are freed. The failed
+   * pair is not reported. Not called when on_pair returns NULL.
    */
   void (*on_error)(void *udata);
 
@@ -91,7 +100,7 @@ typedef struct {
   size_t consumed;
   /** Number of name=value pairs found. */
   size_t count;
-  /** Non-zero if an error occurred (callback returned NULL). */
+  /** Non-zero if decoding failed or a callback returned NULL. */
   int err;
 } fio_url_encoded_result_s;
 
@@ -110,7 +119,7 @@ URL-Encoded Parser API
  * Returns a result struct containing:
  * - `consumed`: Number of bytes consumed from the buffer
  * - `count`: Number of name=value pairs found
- * - `err`: Non-zero if parsing was stopped (callback returned NULL)
+ * - `err`: Non-zero if decoding failed or a callback returned NULL
  *
  * Parsing rules:
  * - Pairs are separated by `&`
@@ -120,8 +129,12 @@ URL-Encoded Parser API
  * - Empty name with value: `=value` → name.len = 0, value="value"
  * - Empty pairs (`&&`) are skipped
  *
- * Note: The parser does NOT decode percent-encoded characters.
- * Use `fio_string_write_url_dec` to decode if needed.
+ * Names and values are decoded once using `fio_string_write_url_dec`, including
+ * '+' to spaces. Invalid percent escapes remain literal. Callback buffers are
+ * borrowed and valid only until the callback returns. The input is not
+ * modified. Long fields may allocate temporary memory, which is freed after the
+ * callback. On allocation failure, on_error is called and consumed excludes the
+ * failed pair; count includes only pairs passed to on_pair.
  */
 SFUNC fio_url_encoded_result_s
 fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
@@ -218,14 +231,34 @@ fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
       value.len = 0;
     }
 
-    /* Call the callback */
-    udata = cb.on_pair(udata, name, value);
-    ++result.count;
+    /* Decode before the callback, retaining ownership of both buffers. */
+    FIO_STR_INFO_TMP_VAR(decoded_name, 1024);
+    FIO_STR_INFO_TMP_VAR(decoded_value, 4096);
+    int decode_err = fio_string_write_url_dec(&decoded_name,
+                                              FIO_STRING_ALLOC_COPY,
+                                              name.buf,
+                                              name.len) ||
+                     fio_string_write_url_dec(&decoded_value,
+                                              FIO_STRING_ALLOC_COPY,
+                                              value.buf,
+                                              value.len);
+    if (!decode_err) {
+      udata = cb.on_pair(udata,
+                         FIO_STR2BUF_INFO(decoded_name),
+                         FIO_STR2BUF_INFO(decoded_value));
+      ++result.count;
+    }
+    if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_name))
+      FIO_STRING_FREE2(decoded_name);
+    if (FIO_STR_INFO_TMP_IS_REALLOCATED(decoded_value))
+      FIO_STRING_FREE2(decoded_value);
 
-    /* Check if callback wants to stop parsing */
-    if (!udata) {
+    /* Clean up even when decoding fails or the callback stops parsing. */
+    if (decode_err || !udata) {
       result.err = 1;
-      result.consumed = (size_t)(pair_end - data);
+      result.consumed = (size_t)((decode_err ? pos : pair_end) - data);
+      if (decode_err)
+        cb.on_error(udata);
       return result;
     }
 

@@ -135,7 +135,7 @@ static unsigned post_rt_check_body(fio_http_s *h, const char *ctx, size_t len) {
     post_rt_expect_pos(ctx, "rewind to 0", h, 17);
     fio_http_body_seek(h, (ssize_t)mid);
     post_rt_expect(ctx, "seek to middle", fio_http_body_read(h, 33), mid, 33);
-    fio_http_body_seek(h, -25);
+    fio_http_body_seek(h, -25); /* -n == length - n */
     post_rt_expect(ctx,
                    "negative seek",
                    fio_http_body_read(h, 25),
@@ -147,7 +147,9 @@ static unsigned post_rt_check_body(fio_http_s *h, const char *ctx, size_t len) {
     if (fio_http_body_seek(h, (ssize_t)(len + 10)) != len)
       POST_RT_FAIL("%s: seek past end must clamp to length", ctx);
     if (fio_http_body_seek(h, SSIZE_MAX) != len)
-      POST_RT_FAIL("%s: seek(SSIZE_MAX) must report the position", ctx);
+      POST_RT_FAIL("%s: seek(SSIZE_MAX) must seek to EOF", ctx);
+    if (fio_http_body_seek(h, -1) != len - 1)
+      POST_RT_FAIL("%s: seek(-1) must seek to the last byte", ctx);
     /* rewind after a partial read, then re-read the same bytes */
     fio_http_body_seek(h, (ssize_t)mid);
     fio_http_body_read(h, 100);

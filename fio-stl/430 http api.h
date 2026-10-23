@@ -738,16 +738,24 @@ SFUNC size_t fio_http_request_header_each(fio_http_s *,
 SFUNC size_t fio_http_body_length(fio_http_s *);
 
 /**
- * Adjusts the body's reading position. Negative values start at the end.
+ * Adjusts the body's reading position and returns the new position.
  *
- * If `pos == SSIZE_MAX`, returns `fio_http_body_pos`.
+ * Negative values count back from the end: `-n` is `length - n`, so `-1` is
+ * the last byte (as with `lseek`); values before the start clamp to 0. Any
+ * position at or past the end is EOF (i.e., `fio_http_body_length(h)` or
+ * `SSIZE_MAX`).
  */
 SFUNC size_t fio_http_body_seek(fio_http_s *, ssize_t pos);
 
 /** Returns the body's reading position. */
 SFUNC size_t fio_http_body_pos(fio_http_s *h);
 
-/** Reads up to `length` of data from the body, returns nothing on EOF. */
+/**
+ * Reads up to `length` of data from the body, returns nothing on EOF.
+ *
+ * The returned buffer is borrowed: any later `fio_http_body_*` call on the
+ * same handle MAY invalidate it.
+ */
 SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
 
 /**
@@ -755,6 +763,9 @@ SFUNC fio_str_info_s fio_http_body_read(fio_http_s *, size_t length);
  *
  * Note: `limit` is ignored if zero or if the remaining data is lower than
  * limit.
+ *
+ * The returned buffer is borrowed: any later `fio_http_body_*` call on the
+ * same handle MAY invalidate it.
  */
 SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
                                               char token,
@@ -763,8 +774,14 @@ SFUNC fio_str_info_s fio_http_body_read_until(fio_http_s *,
 /** Allocates a body (payload) of (at least) the `expected_length`. */
 SFUNC void fio_http_body_expect(fio_http_s *, size_t expected_length);
 
-/** Writes `data` to the body (payload) associated with the HTTP handle. */
-SFUNC void fio_http_body_write(fio_http_s *, const void *data, size_t len);
+/**
+ * Writes `data` to the body (payload) associated with the HTTP handle.
+ *
+ * Returns 0 on success or -1 on error (i.e., the body couldn't be moved to a
+ * temporary file). After an error, the body is in a sticky error state: later
+ * writes fail until the body is closed (see `fio_data_write`).
+ */
+SFUNC int fio_http_body_write(fio_http_s *, const void *data, size_t len);
 
 /**
  * If the body is stored in a temporary file, returns the file's handle.
@@ -775,6 +792,14 @@ SFUNC int fio_http_body_fd(fio_http_s *);
 
 /** Releases body (payload) resources, closing any temporary files. */
 SFUNC void fio_http_body_close(fio_http_s *);
+
+/**
+ * Saves the whole body to `filename`, atomically replacing any existing file
+ * (see `fio_data_save`). The body and its reading position are unchanged.
+ *
+ * Returns 0 on success or -1 on error (i.e., after a body write error).
+ */
+SFUNC int fio_http_body_save(fio_http_s *, const char *filename);
 
 /* *****************************************************************************
 Path Section Looping

@@ -82,6 +82,12 @@ int main(void) {
               "application/x-www-form-urlencoded",
               "b=2&a=x",
               "{\"b\":\"2\",\"a\":\"x\"}");
+  fprintf(stderr, "  * query + urlencoded body decode exactly once\n");
+  test_expect("single decode",
+              "q%252B=%2526%2B+",
+              "application/x-www-form-urlencoded",
+              "b%2526=%252B%2B+",
+              "{\"q%2B\":\"%26+ \",\"b%26\":\"%2B+ \"}");
   fprintf(stderr, "  * query + multipart body with file upload\n");
   test_expect("multipart",
               "q=1",
@@ -127,6 +133,21 @@ int main(void) {
                  got);
     FIO_ASSERT(got == file_len, "large upload: read %zu bytes", got);
     fiobj_free(o);
+#if FIO_OS_POSIX
+    /* the upload can't be stored (no temporary folder) => parse error */
+    fprintf(stderr, "  * upload storage failure => FIOBJ_INVALID\n");
+    h = test_make(NULL, "multipart/form-data; boundary=XyZ", NULL, 0);
+    FIO_ASSERT(!fio_http_body_write(h, head, strlen(head)) &&
+                   !fio_http_body_write(h, file, file_len) &&
+                   !fio_http_body_write(h, tail, strlen(tail)),
+               "body writes should succeed");
+    char *old = test_tmpdir_set("tmp/test-http-fiobj-no-such-folder/nope");
+    o = fio_http_params2FIOBJ(h);
+    test_tmpdir_restore(old);
+    fio_http_free(h);
+    FIO_ASSERT(o == FIOBJ_INVALID,
+               "an upload that can't be stored should fail the parse");
+#endif
     free(file);
   }
   fprintf(stderr, "  * unknown Content-Type body is ignored\n");

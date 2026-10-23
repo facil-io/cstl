@@ -17,7 +17,7 @@ Calls `fio_http_params_parse` (see [430 http.md](./430 http.md)) and returns the
 - Query pairs are added first, followed by the body fields. A JSON object body is merged into the Hash. Any other JSON body (array or primitive) is stored under `"_json"`.
 - Query and URL-encoded values are Strings (JSON bodies keep their JSON types). Missing values (`key` or `key=`) become empty Strings.
 - When a key repeats, the last value wins. The Hash is ordered, so the replaced key moves to the end.
-- A file upload is stored as a Hash with the keys `"filename"` and `"type"` (Strings) and `"data"`. `"data"` is a [`FIOBJ_T_DATA`](./250 fiobj.md) object holding the content. Uploads are streamed in chunks, and the content moves to a temporary file once it grows past `FIO_DATA_RAM_LIMIT`, so large files never sit fully in memory. Read it in chunks with `fio_data_read(fiobj_data_ptr(data), len)`.
+- A file upload is stored as a Hash with the keys `"filename"` and `"type"` (Strings) and `"data"`. `"data"` is a [`FIOBJ_T_DATA`](./250 fiobj.md) object holding the content. Uploads are streamed in chunks, and the content moves to a temporary file once it grows past `FIO_DATA_RAM_LIMIT`, so large files never sit fully in memory. Read it with `fio_data_read(fiobj_data_ptr(data), len)`, or keep it as a file with `fio_data_save(fiobj_data_ptr(data), filename)` (an atomic write; never use the client's `"filename"` as a path without validating it). If an upload can't be stored (for example, no temporary file can be created), parsing fails and `fio_http_params2FIOBJ` returns `FIOBJ_INVALID`.
 - A body with a missing or unknown Content-Type is ignored.
 - Returns `FIOBJ_INVALID` on error (malformed body, `NULL` handle).
 

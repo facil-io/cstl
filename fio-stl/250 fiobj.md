@@ -213,11 +213,12 @@ FIOBJ       fiobj_data_new(size_t ram_limit); /* 0 = FIO_DATA_RAM_LIMIT */
 fio_data_s *fiobj_data_ptr(FIOBJ o);          /* NULL if not a Data object */
 ```
 
-Read and write through the store's API, for example `fio_data_write(fiobj_data_ptr(o), buf, len)` or `fio_data_read(fiobj_data_ptr(o), 65536)`. Free with `fiobj_free`, which also closes any temporary file.
+Read and write through the store's API, for example `fio_data_write(fiobj_data_ptr(o), buf, len)` or `fio_data_read(fiobj_data_ptr(o), 65536)`. Save the content to a file with `fio_data_save(fiobj_data_ptr(o), filename)` (for example, to keep a file upload). Free with `fiobj_free`, which also closes any temporary file.
 
 Generic conversions:
 
-- `fiobj2cstr` (and JSON output) returns the whole content. This reads a spilled file into RAM, so prefer chunked `fio_data_read` for large data.
+- `fiobj2cstr` (and JSON output) returns the whole content. A spilled store is memory mapped (no copy); where mapping isn't available the content is read into a heap buffer, and if that buffer can't be allocated an error is logged and the result is empty.
+- `fiobj2cstr`, JSON output and equality tests use the store's read buffer: they MAY invalidate buffers previously returned by `fio_data_*` (and `fiobj2cstr` results of the same object). They preserve the reading position.
 - `fiobj2i` / `fiobj2f` return the length.
 - Two Data objects are equal when their content is equal.
 

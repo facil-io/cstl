@@ -393,6 +393,10 @@ FIO_IFUNC FIOBJ fiobj_data_new(size_t ram_limit);
 /**
  * Returns the `fio_data_s` store of a Data object (use the `fio_data_*` API to
  * read / write), or NULL if `o` isn't a Data object.
+ *
+ * Note: `fiobj2cstr`, JSON output and equality tests read through the store
+ * and MAY invalidate buffers previously returned by `fio_data_*` calls (and by
+ * an earlier `fiobj2cstr` of the same object).
  */
 FIO_IFUNC fio_data_s *fiobj_data_ptr(FIOBJ o);
 
@@ -1775,7 +1779,10 @@ FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___FLOAT_CLASS_VTBL = {
 FIOBJ Data - vtable
 ***************************************************************************** */
 
-/** Returns the whole content (temporary; may read a spilled file to RAM). */
+/**
+ * Returns the whole content (borrowed; a spilled store is memory mapped, or
+ * read to a heap buffer where mapping isn't available - empty if that fails).
+ */
 FIO_SFUNC fio_str_info_s fiobj___data2cstr(FIOBJ o) {
   fio_data_s *d = (fio_data_s *)FIOBJ_PTR_UNTAG(o);
   size_t pos = fio_data_pos(d);
@@ -1787,7 +1794,7 @@ FIO_SFUNC fio_str_info_s fiobj___data2cstr(FIOBJ o) {
   return r;
 }
 
-/** Data objects compare by content (read in chunks). */
+/** Data objects compare by content (unequal if the content can't be read). */
 FIO_SFUNC unsigned char fiobj___data_eq(FIOBJ restrict a, FIOBJ restrict b) {
   fio_data_s *da = (fio_data_s *)FIOBJ_PTR_UNTAG(a);
   fio_data_s *db = (fio_data_s *)FIOBJ_PTR_UNTAG(b);
@@ -1796,13 +1803,13 @@ FIO_SFUNC unsigned char fiobj___data_eq(FIOBJ restrict a, FIOBJ restrict b) {
   if (fio_data_len(da) != fio_data_len(db))
     return 0;
   size_t pa = fio_data_pos(da), pb = fio_data_pos(db);
-  unsigned char r = 1;
+  unsigned char r;
   fio_data_seek(da, 0);
   fio_data_seek(db, 0);
-  for (fio_str_info_s x; r && (x = fio_data_read(da, 4096)).len;) {
-    fio_str_info_s y = fio_data_read(db, x.len);
-    r = (x.len == y.len && !FIO_MEMCMP(x.buf, y.buf, x.len));
-  }
+  fio_str_info_s x = fio_data_read(da, (size_t)-1);
+  fio_str_info_s y = fio_data_read(db, (size_t)-1);
+  r = (x.len == fio_data_len(da) && y.len == x.len &&
+       (!x.len || !FIO_MEMCMP(x.buf, y.buf, x.len)));
   fio_data_seek(da, (ssize_t)pa);
   fio_data_seek(db, (ssize_t)pb);
   return r;

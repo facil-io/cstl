@@ -41,6 +41,42 @@
 
 **Fix**: (`http`) multipart bodies are now parsed in chunks, so file uploads are never fully loaded into memory. Returning `NULL` from `on_file` now skips the file, as documented: `on_file_data` and `on_file_done` aren't called.
 
+**Fix**: (`files`) `fio_filename_tmp` no longer leaves temporary files behind. Named temporary files are unlinked right after they are opened (POSIX), or opened with delete-on-close (`O_TEMPORARY`, Windows).
+
+**API**: (`data`) write errors are now sticky. A failed spill to a temporary file, or a failed file write, is retried for as long as it makes progress; after two consecutive attempts that write nothing, `fio_data_write` returns `-1`, `fio_data_len` is the number of bytes actually stored (a readable prefix), and later writes fail until `fio_data_destroy`. Added `fio_data_is_error` (and the `err` field). Before, a failed spill kept growing RAM past the limit, and failed writes could still be counted in the length.
+
+**API**: (`data`) `fio_data_seek` negative positions now count back from the end like `lseek(fd, -n, SEEK_END)`: `-n` is `len - n`, so `-1` is the last byte; positions before the start clamp to `0` and any position at or past the end is EOF (`fio_data_len(d)`, or `SSIZE_MAX`). The `SSIZE_MAX` "keep position" value was removed (use `fio_data_pos`). The same applies to `fio_http_body_seek`.
+
+**Fix**: (`data`) the RAM buffer is released after moving to a temporary file. Write allocation failures are fatal (`FIO_ASSERT_ALLOC`). The RAM limit is clamped below the `fio_bstr` size limit. `fio_data_expect` no longer overflows on huge lengths.
+
+**Update**: (`data`) spilled data is now read through a cached, read-only memory mapping of the temporary file: `fio_data_read` / `fio_data_read_until` return pointers into the mapping (no copy, no size cap), so whole-content users (`fiobj2cstr`, JSON output, FIOBJ equality, HTTP JSON / URL encoded body parsing) no longer copy the file to RAM. A write unmaps the file; the next read maps it again. Without `mmap` (Windows, `FIO_DATA_NO_MMAP`, mapping failure) reads use a heap buffer; if it can't be allocated, the read logs an error and returns an empty result without moving the position (never a truncated read, never an abort). HTTP body parsers treat an incomplete read as an error.
+
+**Fix**: (`data`) `fio_data_read_until` on a temporary file (without mapping) now reads in `FIO_DATA_READ_BLOCK` blocks and stops at the token or `limit`. Before, it scanned to the token even past `limit` (or to EOF) and read the data twice.
+
+**API**: (`data`, `http`) added `fio_data_save` and `fio_http_body_save`: save the whole data to a file, atomically replacing an existing file, with mode `0666` minus the `umask`. They use `fio_filename_overwrite` (RAM data) and the new `fio_fd_save` (spilled data). The store (data, position and returned buffers) is unchanged; a store in an error state is refused.
+
+**API**: (`files`) `fio_filename_overwrite` now replaces the file atomically (it was `O_TRUNC` + write, leaving a partial file on error; it is now an `SFUNC`, new files get mode `0666` minus the `umask` instead of `0600`, and `len == 0` writes an empty file instead of failing). Added `fio_fd_save(fd, filename, len)`, which saves `[0, len)` of a file descriptor the same way. Both share one routine: The data is written to a sibling file in the target's folder (`O_CREAT | O_EXCL`, mode `0666` minus the `umask`), `fsync`ed and renamed over the target (`MoveFileExA` on Windows); on error the target is untouched, the sibling is removed and `errno` is kept. `"~/"` is expanded like `fio_filename_open` (shared code). On Linux, `fio_fd_save` copies in the kernel (`copy_file_range`, reflink on copy-on-write file systems) and continues with block copies where that isn't supported (`EXDEV`, `ENOSYS`, ...). The earlier `O_TMPFILE` + `linkat` save path was removed: the anonymous file shared storage with the live temporary file, failed with `EXDEV` when `TMPDIR` is a different file system (tmpfs), and can't be linked when opened with `O_EXCL`.
+
+**Fix**: (`data`) a short read of the temporary file (heap read fallback, without mapping) now fails the read: an error is logged, an empty result is returned, the reading position is unchanged and `errno` is kept (`EIO` for an early EOF). Before, `fio_data_read` / `fio_data_read_until` could return truncated data. This also covers saves and FIOBJ whole-content / equality users.
+
+**Fix**: (`files`) on Windows, a failed rename in `fio_filename_overwrite` / `fio_fd_save` (`MoveFileExA`) now maps `GetLastError()` to `errno` (`ENOENT`, `EACCES`, `EBUSY`, `EEXIST`, `ENOSPC`, `EXDEV`, otherwise `EIO`) instead of always reporting `EACCES`.
+
+**Fix**: (`files`) `fio_fd_read` now returns `0` (not `(size_t)-1`) when the `lseek` fallback fails, as documented. `EINTR` is still retried.
+
+**Fix**: (`sock`) public Unix sockets (`FIO_SOCK_UNIX`, not `FIO_SOCK_UNIX_PRIVATE`) are `0777` again, so other processes and users can connect. A `!defined(FIO_OS_WIN)` guard was always false (`FIO_OS_WIN` is always defined, as `0` or `1`), so the temporary `umask` and the `chmod` / `fchmod` were skipped on POSIX and the socket kept the process `umask` (usually `0755`: other users couldn't connect). Private sockets still keep the process `umask`.
+
+**Fix**: (`sock`) Unix socket creation no longer sets the process-global `umask` around `bind` (it raced other threads: files they created at that moment got no permissions). Public sockets rely on `chmod` after `bind`. `FIO_SOCK_AVOID_UMASK` is deprecated and has no effect.
+
+**Fix**: (`files`) on Windows, `fio_filename_make_path` sets `errno` (mapped from `GetLastError()`) when a folder can't be created.
+
+**API**: (`data`) added `fio_data_bstr`, the inverse of `fio_data_fd`: it returns the RAM data (a borrowed `fio_bstr`), or `NULL` once spilled to a temporary file. Keep a reference with `fio_bstr_copy` (copy on write: later writes don't change it). The HTTP/1.1 client uses it to send RAM bodies without a copy.
+
+**Fix**: (`http`) the HTTP/1.1 client sent a RAM request body as an offset from the handle's address, across separate allocations (undefined behavior, reported by UBSan). It now sends a reference to the body buffer itself (no copy).
+
+**API**: (`data`, `http`, `fiobj`) buffers returned by `fio_data_*`, `fio_http_body_*` and FIOBJ Data conversions (`fiobj2cstr`, JSON output, equality) are documented as valid only until the next call on the same store, handle or object.
+
+**API**: (`http`) `fio_http_body_write` now returns `int` (`0` on success, `-1` on error). When an HTTP/1.1 server can't store a request body, it responds with `500` and closes the connection; a client closes the connection.
+
 **Fix**: (`http`) `fio_http_body_read_until` on a RAM body no longer jumps to the end of the body when the token isn't found within `limit`. It now stops after `limit` bytes.
 
 
