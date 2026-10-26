@@ -68,13 +68,24 @@ jobs:
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
       # action-gh-release never moves an existing tag; do it explicitly.
+      # GITHUB_TOKEN can't force-update a ref across commits that change
+      # workflow files (no `workflows` permission), so delete, then recreate
+      # the tag on a commit that is already published.
       - name: Move latest tag to the selected release commit
         env:
           SHA: ${{ steps.latest.outputs.sha }}
         run: |
           set -euo pipefail
+          current="$(git ls-remote origin refs/tags/latest | cut -f1)"
+          if [ "$current" = "$SHA" ]; then
+            echo "latest already points at $SHA"
+            exit 0
+          fi
           git tag --force latest "$SHA"
-          git push --force origin "refs/tags/latest"
+          if [ -n "$current" ]; then
+            git push origin ":refs/tags/latest"
+          fi
+          git push origin "refs/tags/latest"
 
       - name: Update rolling latest release
         uses: softprops/action-gh-release@v3
