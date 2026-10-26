@@ -87,11 +87,12 @@ jobs:
             echo "::warning::latest tag not moved (workflow files changed since ${current:-none}). Run: git tag -f latest $SHA && git push -f origin refs/tags/latest"
           fi
 
+      # The tag exists by now; passing target_commitish makes GitHub check
+      # workflow permissions again and refuse the update.
       - name: Update rolling latest release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest
-          target_commitish: ${{ steps.latest.outputs.sha }}
           name: fio-stl (latest)
           body: Latest stable fio-stl release. This rolling release currently mirrors `${{ steps.candidate.outputs.tag }}`.
           prerelease: false
