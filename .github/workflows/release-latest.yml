@@ -67,6 +67,15 @@ jobs:
           sha="$(git rev-list -n 1 "$RELEASE_TAG")"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
+      # action-gh-release never moves an existing tag; do it explicitly.
+      - name: Move latest tag to the selected release commit
+        env:
+          SHA: ${{ steps.latest.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git tag --force latest "$SHA"
+          git push --force origin "refs/tags/latest"
+
       - name: Update rolling latest release
         uses: softprops/action-gh-release@v3
         with:
