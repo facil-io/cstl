@@ -87,8 +87,9 @@ jobs:
             echo "::warning::latest tag not moved (workflow files changed since ${current:-none}). Run: git tag -f latest $SHA && git push -f origin refs/tags/latest"
           fi
 
-      # The tag exists by now; passing target_commitish makes GitHub check
-      # workflow permissions again and refuse the update.
+      # The tag exists by now, so no target_commitish. GITHUB_TOKEN could not
+      # update a user-created `latest` release; if that recurs, delete the
+      # release (keep the tag) and rerun so the bot recreates it.
       - name: Update rolling latest release
         uses: softprops/action-gh-release@v3
         with:
