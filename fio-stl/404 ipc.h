@@ -29,6 +29,10 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_IPC_MAX_LENGTH (128ULL * 1024U * 1024U)
 #endif
 
+FIO_ASSERT_STATIC(
+    FIO_IPC_MAX_LENGTH < 0x7FFFFFFF,
+    "IPC length is 32 bit wide, max length must be less than 31 bit long");
+
 /* *****************************************************************************
 IPC (Inter Process Communication) Settings / Controls
 ***************************************************************************** */
@@ -1319,8 +1323,8 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
     for (;;) { /* consume from IO buffer */
       if (p->buf_len < 4 + consumed)
         break;
-      p->expected_len =
-          fio___ipc_wire_length(fio_buf2u32_le(p->buffer + consumed));
+      uint32_t published_len = fio_buf2u32_le(p->buffer + consumed);
+      p->expected_len = fio___ipc_wire_length(published_len);
       // FIO_LOG_DEBUG2("(%d) incoming IPC message: %u/%zu (len=%u, bytes: %02x
       // "
       //                "%02x %02x %02x)",
@@ -1332,11 +1336,14 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
       //                (uint8_t)p->buffer[consumed + 1],
       //                (uint8_t)p->buffer[consumed + 2],
       //                (uint8_t)p->buffer[consumed + 3]);
-      if (p->expected_len > FIO___IPC.max_length) { /* oversized? */
-        FIO_LOG_SECURITY("(%d) Invalid IPC message length: %u (buf: %zu)",
-                         fio_io_pid(),
-                         p->expected_len,
-                         p->buf_len);
+      if (p->expected_len > FIO___IPC.max_length ||
+          published_len > FIO___IPC.max_length) { /* oversized? */
+        FIO_LOG_SECURITY(
+            "(%d) Invalid IPC message length: %u (buf: %zu, published: %u)",
+            fio_io_pid(),
+            p->expected_len,
+            p->buf_len,
+            (unsigned)published_len);
         fio_io_close(io);
         return;
       }

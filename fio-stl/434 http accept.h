@@ -242,7 +242,7 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_io_s *io) {
   size_t r = fio_io_read(io, c->buf + c->len, c->capa - c->len);
   if (!r) /* nothing happened */
     return;
-  c->len = (uint32_t)r;
+  c->len += (uint32_t)r;
   if (prior_knowledge.buf[0] != c->buf[0] ||
       FIO_MEMCMP(
           prior_knowledge.buf,

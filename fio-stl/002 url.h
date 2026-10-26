@@ -209,6 +209,8 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   /*
   Intention:
   [schema://][[user][:password]@][host.com][:port][path][?quary][#target]
+  uses `*pos > 31` to avoid control characters and whitespace...
+  ... but allow single space and UTF-8 characters
   */
   const char *end = url + len;
   const char *pos = url;
@@ -220,11 +222,11 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   if (*pos == '/') /* start at path */
     goto start_path;
 
-  while (pos < end && *pos && *pos != ':' && *pos != '/' && *pos != '@' &&
-         *pos != '#' && *pos != '?')
+  while (pos < end && pos[0] > 31 && *pos != ':' && *pos != '/' &&
+         *pos != '@' && *pos != '#' && *pos != '?' && *pos != '[')
     ++pos;
 
-  if (pos == end) {
+  if (pos == end || pos[0] < 32) {
     /* was only host (path starts with '/') */
     r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
     goto finish;
@@ -234,8 +236,8 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   case '@':
     /* username@[host] */
     r.user = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
-    ++pos;
-    goto start_host;
+    ++pos; /* fall through */
+  case '[': /* [IPv6] */ goto start_host;
   case '/':
     /* host[/path] */
     r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
@@ -251,13 +253,12 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     ++pos;
     goto start_target;
   case ':':
-    if (pos + 2 <= end && pos[1] == '/' && pos[2] == '/') {
+    if (pos + 2 < end && pos[1] == '/' && pos[2] == '/') {
       /* scheme:// */
       r.scheme.len = (size_t)(pos - url);
       pos += 3;
     } else {
-      /* username:[password] OR */
-      /* host:[port] */
+      /* username:[password] OR host:[port] */
       r.user = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
       ++pos;
       goto start_password;
@@ -267,11 +268,11 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
   /* start_username: */
   url = pos;
-  while (pos < end && *pos && *pos != ':' && *pos != '/' && *pos != '@' &&
-         *pos != '#' && *pos != '?')
+  while (pos < end && pos[0] > 31 && *pos != ':' && *pos != '/' &&
+         *pos != '@' && *pos != '#' && *pos != '?' && *pos != '[')
     ++pos;
 
-  if (pos >= end) { /* scheme://host */
+  if (pos >= end || pos[0] < 32) { /* scheme://host */
     r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
     goto finish;
   }
@@ -284,8 +285,8 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   case '@':
     /* scheme://username@[host]... */
     r.user = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
-    ++pos;
-    goto start_host;
+    ++pos; /* fall through */
+  case '[': /* [IPv6] */ goto start_host;
   case '?':
     /* scheme://host[?query] (bad)*/
     r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
@@ -306,10 +307,10 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
 start_password:
   url = pos;
-  while (pos < end && *pos && *pos != '/' && *pos != '@' && *pos != '?')
+  while (pos < end && pos[0] > 31 && *pos != '/' && *pos != '@' && *pos != '?')
     ++pos;
 
-  if (pos >= end) {
+  if (pos >= end || pos[0] < 32) {
     /* was host:port */
     r.port = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
     r.host = r.user;
@@ -332,12 +333,18 @@ start_password:
 
 start_host:
   url = pos;
-  while (pos < end && *pos && *pos != '/' && *pos != ':' && *pos != '#' &&
-         *pos != '?')
+  if (pos < end && pos[0] == '[') {
+    ++pos;
+    while (pos < end && pos[0] > 31 && *pos != ']')
+      ++pos;
+    pos += (pos < end && pos[0] > 31); /* consume closing `]` */
+  }
+  while (pos < end && pos[0] > 31 && *pos != '/' && *pos != ':' &&
+         *pos != '#' && *pos != '?')
     ++pos;
 
   r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
-  if (pos >= end) {
+  if (pos >= end || pos[0] < 32) {
     goto finish;
   }
   switch (*pos) {
@@ -359,12 +366,12 @@ start_host:
 
   // start_port:
   url = pos;
-  while (pos < end && *pos && *pos != '/' && *pos != '#' && *pos != '?')
+  while (pos < end && pos[0] > 31 && *pos != '/' && *pos != '#' && *pos != '?')
     ++pos;
 
   r.port = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
 
-  if (pos >= end) {
+  if (pos >= end || pos[0] < 32) {
     /* scheme://[...@]host:port */
     goto finish;
   }
@@ -383,12 +390,12 @@ start_host:
 
 start_path:
   url = pos;
-  while (pos < end && *pos && *pos != '#' && *pos != '?')
+  while (pos < end && pos[0] > 31 && *pos != '#' && *pos != '?')
     ++pos;
 
   r.path = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
 
-  if (pos >= end) {
+  if (pos >= end || pos[0] < 32) {
     goto finish;
   }
   ++pos;
@@ -397,13 +404,13 @@ start_path:
 
 start_query:
   url = pos;
-  while (pos < end && *pos && *pos != '#')
+  while (pos < end && pos[0] > 31 && *pos != '#')
     ++pos;
 
   r.query = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
   ++pos;
 
-  if (pos >= end)
+  if (pos >= end || pos[0] < 32)
     goto finish;
 
 start_target:
@@ -411,7 +418,8 @@ start_target:
 
 finish:
 
-  if (r.scheme.len == 4 && r.host.buf) { /* recognize file paths */
+  /* recognize file paths */
+  if (r.scheme.len == 4 && r.host.buf) {
     uint32_t s, file_str, unix_str, priv_str;
     fio_memcpy4(&file_str, "file");
     fio_memcpy4(&unix_str, "unix");
@@ -431,6 +439,12 @@ finish:
     r.path.len = (size_t)(end - r.host.buf);
     r.path.buf = r.host.buf;
     r.query.len = r.target.len = r.host.len = 0;
+  }
+  /* strip '[' and ']' from '[IPv6] host */
+  if (r.host.len > 2 && r.host.buf[0] == '[' &&
+      r.host.buf[r.host.len - 1] == ']') {
+    ++r.host.buf;
+    r.host.len -= 2;
   }
 
   /* set any empty values to NULL */
