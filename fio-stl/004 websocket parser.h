@@ -39,10 +39,15 @@ typedef enum {
   FIO_WEBSOCKET_CLOSE_INTERNAL_ERROR = 1011,
 } fio_websocket_close_code_e;
 
-/** Default per-frame payload cap (1 GiB). Override before include if needed. */
+/** Default per-frame payload cap (1 GiB). Override before include if needed
+ *  (must not exceed UINT32_MAX; per-frame progress is tracked in 32 bits). */
 #ifndef FIO_WEBSOCKET_DEFAULT_MAX_FRAME
 #define FIO_WEBSOCKET_DEFAULT_MAX_FRAME (1ULL << 30)
 #endif
+FIO_ASSERT_STATIC((unsigned long long)FIO_WEBSOCKET_DEFAULT_MAX_FRAME <=
+                      0xFFFFFFFFULL,
+                  "FIO_WEBSOCKET_DEFAULT_MAX_FRAME must fit frame_consumed "
+                  "(uint32_t)");
 
 /** Parse error sentinel. */
 #define FIO_WEBSOCKET_PARSE_ERROR ((size_t)-1)
@@ -292,13 +297,22 @@ FIO_IFUNC uint64_t fio___websocket_write_srv(void *target,
   return h + payload.len;
 }
 
+/** Returns a fresh, full-width, non-zero client mask (RFC 6455, 5.3). */
+FIO_IFUNC uint32_t fio___websocket_mask_new(void) {
+  uint32_t mask;
+  do { /* zero means "unmasked" to fio___websocket_hdr */
+    mask = (uint32_t)fio_rand64();
+  } while (FIO_UNLIKELY(!mask));
+  return mask;
+}
+
 FIO_IFUNC uint64_t fio___websocket_write_cli(void *target,
                                              fio_buf_info_s payload,
                                              uint8_t opcode,
                                              uint32_t mask,
                                              uint8_t rsv) {
   if (!mask)
-    mask = (uint32_t)(fio_rand64() | 0x01020408U);
+    mask = fio___websocket_mask_new();
   uint64_t h =
       fio___websocket_hdr((uint8_t *)target, payload.len, mask, opcode, rsv);
   if (payload.len)
@@ -354,13 +368,13 @@ FIO_IFUNC uint64_t fio_websocket_write_pong_client(void *t,
 FIO_IFUNC size_t fio___websocket_close_body(uint8_t *scratch,
                                             uint16_t code,
                                             fio_buf_info_s reason) {
-  size_t n = 2 + reason.len;
-  if (n > 125)
-    n = 125;
+  size_t len = reason.buf ? reason.len : 0; /* NULL reason == no reason */
+  if (len > 123)
+    len = 123; /* 2-byte code + reason must fit the 125-byte control limit */
   fio_u2buf16_be(scratch, code);
-  if (n > 2 && reason.buf)
-    FIO_MEMCPY(scratch + 2, reason.buf, n - 2);
-  return n;
+  if (len)
+    FIO_MEMCPY(scratch + 2, reason.buf, len);
+  return len + 2;
 }
 FIO_IFUNC uint64_t fio_websocket_write_close_server(void *target,
                                                     uint16_t code,
@@ -512,12 +526,17 @@ FIO_SFUNC size_t fio_websocket_parse(fio_websocket_s *p,
         if (buf.len < (size_t)(4 + mask_len))
           return (size_t)(buf.buf - start);
         payload_len = fio_buf2u16_be(buf.buf + 2);
+        if (FIO_UNLIKELY(payload_len < 126)) /* RFC 6455 §5.2: minimal length */
+          return fio___websocket_fail(p,
+                                      ev,
+                                      FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR);
         header_len = 4;
       } else {
         if (buf.len < (size_t)(10 + mask_len))
           return (size_t)(buf.buf - start);
         payload_len = fio_buf2u64_be(buf.buf + 2);
-        if (FIO_UNLIKELY(payload_len >> 63))
+        /* MSB must be 0; length must need 64 bits (RFC 6455 §5.2). */
+        if (FIO_UNLIKELY((payload_len >> 63) | (payload_len < 0x10000ULL)))
           return fio___websocket_fail(p,
                                       ev,
                                       FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR);

@@ -20,7 +20,7 @@ ALPN Helpers
 ***************************************************************************** */
 
 FIO_SFUNC void fio___http_on_select_h1(fio_io_s *io) {
-  FIO_LOG_DDEBUG2("TLS ALPN HTTP/1.1 selected for %p", io);
+  FIO_LOG_DDEBUG2("TLS ALPN HTTP/1.1 selected for %p", (void *)io);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_io_udata(io);
   fio_io_protocol_set(
       io,
@@ -29,13 +29,27 @@ FIO_SFUNC void fio___http_on_select_h1(fio_io_s *io) {
             .protocol));
 }
 FIO_SFUNC void fio___http_on_select_h2(fio_io_s *io) {
-  FIO_LOG_ERROR("TLS ALPN HTTP/2 not supported for %p", io);
+  FIO_LOG_ERROR("TLS ALPN HTTP/2 not supported for %p", (void *)io);
   (void)io;
 }
 
 /* *****************************************************************************
 HTTP Listen
 ***************************************************************************** */
+
+/** Allocates and initializes a protocol container for validated settings. */
+FIO_IFUNC fio___http_protocol_s *fio___http_protocol_create(
+    const char *url,
+    fio_http_settings_s s,
+    bool is_client) {
+  /* the single sizing rule for the `public_folder_buf` suffix (+ NUL) */
+  if (FIO_UNLIKELY(s.public_folder.len == SIZE_MAX))
+    return NULL;
+  fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
+  if (FIO_UNLIKELY(!p))
+    return p;
+  return fio___http_protocol_init(p, url, s, is_client);
+}
 
 static void fio___http_listen_on_start(fio_io_protocol_s *protocol, void *u) {
   (void)u;
@@ -67,15 +81,26 @@ SFUNC fio_http_listener_s *fio_http_listen FIO_NOOP(const char *url,
           (int)u.path.len,
           u.path.buf);
   }
-  fio___http_protocol_s *p = fio___http_protocol_new(s.public_folder.len + 1);
-  fio___http_protocol_init(p, url, s, 0);
+  fio___http_protocol_s *p = fio___http_protocol_create(url, s, 0);
+  if (FIO_UNLIKELY(!p)) {
+    FIO_LOG_ERROR("(%d) fio_http_listen: no memory for the protocol.",
+                  fio_io_pid());
+    return NULL;
+  }
+  /* `fio_io_listen` may fail before or after it owns the protocol (on_stop
+   * frees the listener's reference): a guard reference tells them apart. */
+  fio___http_protocol_dup(p);
   fio_http_listener_s *listener = (fio_http_listener_s *)
       fio_io_listen(.url = url,
                     .protocol = &p->state[FIO___HTTP_PROTOCOL_ACCEPT].protocol,
-                    .tls = s.tls,
+                    .tls = fio_io_tls_dup(s.tls), /* fio_io_listen owns it */
                     .on_start = fio___http_listen_on_start,
                     .on_stop = fio___http_listen_on_stop,
                     .queue_for_accept = p->settings.queue);
+  /* no listener => no other owner; else on_stop may run on another thread */
+  if (FIO_UNLIKELY(!listener && fio___http_protocol_references(p) > 1))
+    fio___http_protocol_free(p); /* never consumed (early rejection) */
+  fio___http_protocol_free(p);
   return listener;
 }
 
@@ -105,65 +130,100 @@ void fio_http_connect___(void); /* IDE Marker */
 SFUNC fio_io_s *fio_http_connect FIO_NOOP(const char *url,
                                           fio_http_s *h,
                                           fio_http_settings_s s) {
-  FIO_STR_INFO_TMP_VAR(origin, 4096);
   fio___http_settings_validate(&s, 1);
   fio_url_s u = (fio_url_s){0};
   if (url)
     u = fio_url_parse(url, FIO_STRLEN(url));
-
-  if (!h)
-    h = fio_http_new();
-  if (!fio_http_path(h).len)
-    fio_http_path_set(h,
-                      u.path.len ? FIO_BUF2STR_INFO(u.path)
-                                 : FIO_STR_INFO2((char *)"/", 1));
-  if (!fio_http_query(h).len && u.query.len)
-    fio_http_query_set(h, FIO_BUF2STR_INFO(u.query));
-  if (!fio_http_method(h).len)
-    fio_http_method_set(h, FIO_STR_INFO2((char *)"GET", 3));
+  /* RFC 9110 §7.2: Host is the URL authority (host [":" port], no userinfo),
+   * a slice of `url`: restore the `[IPv6]` brackets the parser strips, then
+   * extend to the end of the port (which follows the host). */
+  fio_str_info_s authority = FIO_STR_INFO2(u.host.buf, u.host.len);
   if (u.host.len) {
+    const size_t v6 = (size_t)(u.host.buf > url && u.host.buf[-1] == '[' &&
+                               u.host.buf[u.host.len] == ']');
+    authority.buf -= v6;
+    authority.len += v6 << 1;
+    if (u.port.len)
+      authority.len = (size_t)((u.port.buf + u.port.len) - authority.buf);
+  }
+  /* ws:// or wss:// - WebSocket scheme */
+  const bool is_ws =
+      (u.scheme.len == 2 ||
+       (u.scheme.len == 3 && ((u.scheme.buf[2] | 0x20) == 's'))) &&
+      (fio_buf2u16u(u.scheme.buf) | 0x2020) == fio_buf2u16u("ws");
+  /* sse:// or sses:// - Server Sent Events scheme */
+  const bool is_sse =
+      !is_ws &&
+      (u.scheme.len == 3 ||
+       (u.scheme.len == 4 && ((u.scheme.buf[3] | 0x20) == 's'))) &&
+      (fio_buf2u32u(u.scheme.buf) | fio_buf2u32u("\x20\x20\x20\xFF")) ==
+          fio_buf2u32u("sse\xFF");
+
+  fio___http_protocol_s *p = NULL;
+  fio___http_connection_s *c = NULL;
+  if (!h && !(h = fio_http_new()))
+    goto no_memory;
+  /* request target / authority: the setters can fail (no memory) silently,
+   * so read the values back - never send a partial request target. */
+  if (!fio_http_path(h).len &&
+      !fio_http_path_set(h,
+                         u.path.len ? FIO_BUF2STR_INFO(u.path)
+                                    : FIO_STR_INFO2((char *)"/", 1))
+           .len)
+    goto no_memory;
+  if (!fio_http_query(h).len && u.query.len &&
+      !fio_http_query_set(h, FIO_BUF2STR_INFO(u.query)).len)
+    goto no_memory;
+  if (!fio_http_method(h).len &&
+      !fio_http_method_set(h, FIO_STR_INFO2((char *)"GET", 3)).len)
+    goto no_memory;
+  if (authority.len) {
     fio_http_request_header_set_if_missing(h,
                                            FIO_STR_INFO2((char *)"host", 4),
-                                           FIO_BUF2STR_INFO(u.host));
-    /* Origin header */
-    fio_string_write2(
-        &origin,
-        NULL,
-        FIO_STRING_WRITE_STR2("https", (size_t)(4 + fio_url_is_tls(u).tls)),
-        FIO_STRING_WRITE_STR2("://", 3U),
-        FIO_STRING_WRITE_STR_INFO(u.host),
-        FIO_STRING_WRITE_STR2(":", (size_t)(!!u.port.len)),
-        FIO_STRING_WRITE_STR_INFO(u.port));
+                                           authority);
+    if (!fio_http_request_header(h, FIO_STR_INFO2((char *)"host", 4), 0).len)
+      goto no_memory;
+    if ((is_ws | is_sse) &&
+        !fio_http_request_header(h, FIO_STR_INFO2((char *)"origin", 6), 0)
+             .len) {
+      /* Origin header: grows to the heap instead of truncating */
+      FIO_STR_INFO_TMP_VAR(origin, 1023);
+      char *const origin_stack = origin.buf;
+      const int err = fio_string_write2(
+          &origin,
+          FIO_STRING_ALLOC_COPY,
+          FIO_STRING_WRITE_STR2("https", (size_t)(4 + fio_url_is_tls(u).tls)),
+          FIO_STRING_WRITE_STR2("://", 3U),
+          FIO_STRING_WRITE_STR_INFO(authority));
+      if (!err) /* the header map copies the value */
+        fio_http_request_header_set(h,
+                                    FIO_STR_INFO2((char *)"origin", 6),
+                                    origin);
+      if (origin.buf != origin_stack)
+        FIO_STRING_FREE2(origin);
+      if (err ||
+          !fio_http_request_header(h, FIO_STR_INFO2((char *)"origin", 6), 0)
+               .len)
+        goto no_memory;
+    }
   }
-
-  /* test for ws:// or wss:// - WebSocket scheme */
-  if ((u.scheme.len == 2 ||
-       (u.scheme.len == 3 && ((u.scheme.buf[2] | 0x20) == 's'))) &&
-      (fio_buf2u16u(u.scheme.buf) | 0x2020) == fio_buf2u16u("ws")) {
-    fio_http_request_header_set_if_missing(h,
-                                           FIO_STR_INFO2((char *)"origin", 6),
-                                           origin);
+  if (is_ws) {
     fio_http_websocket_set_request(h);
-  }
-  /* test for sse:// or sses:// - Server Sent Events scheme */
-  else if ((u.scheme.len == 3 ||
-            (u.scheme.len == 4 && ((u.scheme.buf[3] | 0x20) == 's'))) &&
-           (fio_buf2u32u(u.scheme.buf) | fio_buf2u32u("\x20\x20\x20\xFF")) ==
-               fio_buf2u32u("sse\xFF")) {
-    fio_http_request_header_set_if_missing(h,
-                                           FIO_STR_INFO2((char *)"origin", 6),
-                                           origin);
+    if (!fio_http_websocket_requested(h))
+      goto no_memory;
+  } else if (is_sse) {
     fio_http_sse_set_request(h);
+    if (!fio_http_sse_requested(h))
+      goto no_memory;
   }
 
   /* TODO: test for and attempt to re-use connection */
   // if (fio_http_cdata(h)) { }
 
-  fio___http_protocol_s *p = fio___http_protocol_new(u.host.len);
-  fio___http_protocol_init(p, url, s, 1);
-  fio___http_connection_s *c =
-      fio___http_connection_new(p->settings.max_line_len);
-  FIO_ASSERT_ALLOC(c);
+  if (!(p = fio___http_protocol_create(url, s, 1)))
+    goto no_memory;
+  if (!(c = fio___http_connection_new(p->settings.max_line_len)))
+    goto no_memory;
   *c = (fio___http_connection_s){
       .io = NULL,
       .h = h,
@@ -191,8 +251,17 @@ SFUNC fio_io_s *fio_http_connect FIO_NOOP(const char *url,
                             &p->state[FIO___HTTP_PROTOCOL_HTTP1].protocol,
                         .on_failed = fio___http_connect_on_failed,
                         .udata = c,
-                        .tls = s.tls,
-                        .timeout = s.connect_timeout);
+                        .tls = fio_io_tls_dup(s.tls), /* the call owns it */
+                        .timeout = s.connect_timeout,
+                        .verify = s.verify);
+
+no_memory: /* nothing is attached yet: `h` has no controller / connection */
+  FIO_LOG_ERROR("(%d) fio_http_connect: no memory to prepare the request.",
+                fio_io_pid());
+  if (p)
+    fio___http_protocol_free(p);
+  fio_http_free(h); /* the call consumes `h` (as documented) */
+  return NULL;
 }
 
 /* *****************************************************************************
@@ -210,13 +279,18 @@ HTTP WebSocket Connect (client convenience wrapper)
  */
 FIO_IFUNC const char *fio___http_websocket_normalize_url(const char *url,
                                                          fio_str_info_s *tmp) {
+  /* `tmp` grows to the heap (FIO_STRING_ALLOC_COPY) rather than truncate the
+   * URL; the caller frees it when `tmp->buf` moved. NULL = no memory. */
   const char *sep = strstr(url, "://");
+  if (sep && strcspn(url, "/?#") < (size_t)(sep - url))
+    sep = NULL; /* a `://` in the path / query / fragment isn't a scheme */
   if (!sep) {
     /* no scheme present - prepend "ws://" */
-    fio_string_write2(tmp,
-                      NULL,
-                      FIO_STRING_WRITE_STR2("ws://", 5),
-                      FIO_STRING_WRITE_STR2(url, FIO_STRLEN(url)));
+    if (fio_string_write2(tmp,
+                          FIO_STRING_ALLOC_COPY,
+                          FIO_STRING_WRITE_STR2("ws://", 5),
+                          FIO_STRING_WRITE_STR2(url, FIO_STRLEN(url))))
+      return NULL;
     return tmp->buf;
   }
   const size_t scheme_len = (size_t)(sep - url);
@@ -225,11 +299,12 @@ FIO_IFUNC const char *fio___http_websocket_normalize_url(const char *url,
   if (scheme4 == fio_buf2u32u("http") &&
       (scheme_len == 4 || (scheme_len == 5 && ((url[4] | 0x20) == 's')))) {
     /* http(s):// -> ws(s):// */
-    fio_string_write2(tmp,
-                      NULL,
-                      FIO_STRING_WRITE_STR2("ws", 2),
-                      FIO_STRING_WRITE_STR2("s", (size_t)(scheme_len == 5)),
-                      FIO_STRING_WRITE_STR2(sep, FIO_STRLEN(sep)));
+    if (fio_string_write2(tmp,
+                          FIO_STRING_ALLOC_COPY,
+                          FIO_STRING_WRITE_STR2("ws", 2),
+                          FIO_STRING_WRITE_STR2("s", (size_t)(scheme_len == 5)),
+                          FIO_STRING_WRITE_STR2(sep, FIO_STRLEN(sep))))
+      return NULL;
     return tmp->buf;
   }
   /* ws://, wss:// and any other scheme pass through unchanged */
@@ -251,10 +326,24 @@ void fio_http_websocket_connect___(void); /* IDE Marker */
 SFUNC fio_io_s *fio_http_websocket_connect FIO_NOOP(const char *url,
                                                     fio_http_s *h,
                                                     fio_http_settings_s s) {
-  FIO_STR_INFO_TMP_VAR(nurl, 4096);
-  if (url)
-    url = fio___http_websocket_normalize_url(url, &nurl);
-  return fio_http_connect FIO_NOOP(url, h, s);
+  FIO_STR_INFO_TMP_VAR(nurl, 2047);
+  char *const nurl_stack = nurl.buf;
+  fio_io_s *io;
+  if (url && !(url = fio___http_websocket_normalize_url(url, &nurl))) {
+    /* `fio_string_write2` reserves once (a failure leaves `nurl` on the
+     * stack); free unconditionally so a partial growth can never leak. */
+    if (nurl.buf != nurl_stack)
+      FIO_STRING_FREE2(nurl);
+    FIO_LOG_ERROR("(%d) fio_http_websocket_connect: no memory for the URL.",
+                  fio_io_pid());
+    fio_http_free(h); /* the call consumes `h` (as documented) */
+    return NULL;
+  }
+  /* the URL is parsed / copied by the call (not retained) */
+  io = fio_http_connect FIO_NOOP(url, h, s);
+  if (nurl.buf != nurl_stack)
+    FIO_STRING_FREE2(nurl);
+  return io;
 }
 
 /* *****************************************************************************
@@ -308,12 +397,15 @@ FIO_SFUNC void fio___http_controller_http1_on_finish_client_task(void *c_,
 FIO_SFUNC void fio___http_controller_http1_on_finish_client(fio_http_s *h) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   /* on_finish should be called after the `on_close` or after on_http */
-  if (!fio_http_is_upgraded(h)) {
-    /* on_finish always manually called here */
-    fio_io_defer(fio___http_controller_http1_on_finish_client_task,
-                 (void *)fio___http_connection_dup(c),
-                 (void *)fio_http_dup(h));
-  }
+  if (fio_http_is_upgraded(h))
+    return;
+  /* on_finish always manually called here. The handle's destruction must not
+   * call `on_finish` again (the finish task holds `h`, so destruction follows
+   * the task). */
+  c->state.http.on_finish = fio___http_default_noop;
+  fio_io_defer(fio___http_controller_http1_on_finish_client_task,
+               (void *)fio___http_connection_dup(c),
+               (void *)fio_http_dup(h));
 }
 
 /** Called when an HTTP handle is freed. */
@@ -329,16 +421,16 @@ FIO_SFUNC void fio__http_controller_on_destroyed(fio_http_s *h) {
   if (c->state.http.buf.buf)
     FIO_STRING_FREE2(c->state.http.buf);
   c->state.http.buf = FIO_STR_INFO0;
-  fio_queue_push(fio_io_queue(),
-                 fio___http_controller_on_destroyed_task,
-                 fio_http_cdata(h));
+  fio_io_defer(fio___http_controller_on_destroyed_task,
+               fio_http_cdata(h),
+               NULL);
 }
 
 /** Called when an HTTP handle is freed (no auto-finish, post upgrade). */
 FIO_SFUNC void fio__http_controller_on_destroyed2(fio_http_s *h) {
-  fio_queue_push(fio_io_queue(),
-                 fio___http_controller_on_destroyed_task,
-                 fio_http_cdata(h));
+  fio_io_defer(fio___http_controller_on_destroyed_task,
+               fio_http_cdata(h),
+               NULL);
 }
 
 /** Called when an HTTP handle is freed. */
@@ -351,7 +443,7 @@ FIO_SFUNC void fio__http_controller_on_destroyed_client(fio_http_s *h) {
   c->h = NULL;
   if (c->io)
     fio_io_close(c->io);
-  fio_queue_push(fio_io_queue(), fio___http_controller_on_destroyed_task, c);
+  fio_io_defer(fio___http_controller_on_destroyed_task, c, NULL);
 }
 
 /* *****************************************************************************
@@ -493,7 +585,7 @@ FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
     fio_http_settings_s s,
     bool is_client) {
   int should_free_tls = !s.tls;
-  FIO_ASSERT_ALLOC(p);
+  /* `p` is allocated (and checked) by `fio___http_protocol_create` */
   /* zero everything out and build from there */
   *p = (fio___http_protocol_s){0};
   /* fill in protocol and controller callbacks */
@@ -544,8 +636,10 @@ FIO_IFUNC fio___http_protocol_s *fio___http_protocol_init(
   /* initialize initial router */
   p->router.s = p->settings;
 
+  /* suffix sized by `fio___http_protocol_create` (folder length + NUL) */
   if (s.public_folder.len)
     FIO_MEMCPY(p->public_folder_buf, s.public_folder.buf, s.public_folder.len);
+  p->public_folder_buf[s.public_folder.len] = 0;
   return p;
 }
 /* *****************************************************************************

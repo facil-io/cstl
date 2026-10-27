@@ -22,6 +22,7 @@ typedef struct {
   int skips_at_status;        /* skips_body() before on_status marking */
   int skips_at_header;        /* skips_body() at the first header callback */
   int skips_at_cl;            /* skips_body() in the content-length callback */
+  int reject_expect;          /* if set, on_expect rejects the message */
 } parser_state_s;
 
 static void fio_http1_on_complete(void *udata) {
@@ -89,7 +90,7 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
 static int fio_http1_on_expect(void *udata) {
   parser_state_s *s = (parser_state_s *)udata;
   ++s->expect;
-  return 0;
+  return s->reject_expect;
 }
 
 static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata) {
@@ -762,24 +763,27 @@ static void test_te_and_host_rules(void) {
     size_t body;
   } cases[] = {
       {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked, gzip\r\n\r\n",
-       0},
-      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n\r\n", 0},
-      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: identity\r\n\r\n", 0},
-      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunk\r\n\r\n", 0},
-      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding:\r\n\r\n", 0},
+       .ok = 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n\r\n",
+       .ok = 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: identity\r\n\r\n",
+       .ok = 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunk\r\n\r\n",
+       .ok = 0},
+      {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding:\r\n\r\n", .ok = 0},
       {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked, "
        "chunked\r\n\r\n0\r\n\r\n",
-       0},
+       .ok = 0},
       {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: CHUNKED ; a=1, gzip, "
        "chunked\r\n\r\n0\r\n\r\n",
-       0},
+       .ok = 0},
       {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n"
        "Transfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
-       0},
+       .ok = 0},
       {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n"
        "Transfer-Encoding: gzip\r\n\r\n0\r\n\r\n",
-       0},
-      {"GET / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n\r\n", 0},
+       .ok = 0},
+      {"GET / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip\r\n\r\n", .ok = 0},
       /* `gzip, chunked` is framed by chunked (gzip forwarded to the app) */
       {"POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip, "
        "chunked\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
@@ -790,18 +794,18 @@ static void test_te_and_host_rules(void) {
        1,
        2},
       /* Host: required once for HTTP/1.1, optional for HTTP/1.0 */
-      {"GET / HTTP/1.1\r\n\r\n", 0},
-      {"POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi", 0},
-      {"GET / HTTP/1.1\r\nHost: a\r\nHost: a\r\n\r\n", 0},
-      {"GET / HTTP/1.1\r\nHost:\r\n\r\n", 1},
-      {"GET / HTTP/2.0\r\n\r\n", 0},
-      {"GET / HTTP/1.0\r\n\r\n", 1},
-      {"GET / HTTP/0.9\r\n\r\n", 0}, /* not legacy: HTTP/1.1 semantics */
-      {"GET /\r\n\r\n", 0},          /* HTTP/0.9 request line */
-      {"GET / HTTP/1.0\r\nHost: a\r\nHost: b\r\n\r\n", 0},
+      {"GET / HTTP/1.1\r\n\r\n", .ok = 0},
+      {"POST / HTTP/1.1\r\nContent-Length: 2\r\n\r\nhi", .ok = 0},
+      {"GET / HTTP/1.1\r\nHost: a\r\nHost: a\r\n\r\n", .ok = 0},
+      {"GET / HTTP/1.1\r\nHost:\r\n\r\n", .ok = 1},
+      {"GET / HTTP/2.0\r\n\r\n", .ok = 0},
+      {"GET / HTTP/1.0\r\n\r\n", .ok = 1},
+      {"GET / HTTP/0.9\r\n\r\n", .ok = 0}, /* not legacy: HTTP/1.1 semantics */
+      {"GET /\r\n\r\n", .ok = 0},          /* HTTP/0.9 request line */
+      {"GET / HTTP/1.0\r\nHost: a\r\nHost: b\r\n\r\n", .ok = 0},
       /* responses never require a Host header */
       {"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 1, 2},
-      {"HTTP/1.1 200 OK\r\nHost: a\r\nHost: b\r\n\r\n", 1},
+      {"HTTP/1.1 200 OK\r\nHost: a\r\nHost: b\r\n\r\n", .ok = 1},
   };
   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
     char buf[256];
@@ -834,6 +838,223 @@ static void test_te_and_host_rules(void) {
                  !fio_http1_version_is_legacy(FIO_BUF_INFO1((char *)"http/1.0")),
              "fio_http1_version_is_legacy mismatch");
 }
+
+/* ===========================================================================
+   Rejected Expect: the declared body must never be parsed as a message
+
+   A non-zero `on_expect` return is a parse error (the connection closes),
+   even when the body arrives with, after, or split from the headers.
+   ===========================================================================
+ */
+
+static void test_expect_rejected(void) {
+  fprintf(stderr, "  * expect: rejection never parses the body as a message\n");
+  static const char msg[] = "POST / HTTP/1.1\r\nHost: x\r\n"
+                            "Expect: 100-continue\r\n"
+                            "Content-Length: 26\r\n\r\n"
+                            "GET /smuggled HTTP/1.1\r\n\r\n";
+  const size_t hlen = sizeof("POST / HTTP/1.1\r\nHost: x\r\n"
+                             "Expect: 100-continue\r\n"
+                             "Content-Length: 26\r\n\r\n") -
+                      1;
+  for (size_t cut = hlen; cut <= sizeof(msg) - 1; ++cut) {
+    char buf[sizeof(msg)];
+    FIO_MEMCPY(buf, msg, sizeof(msg));
+    parser_state_s st = {0};
+    st.reject_expect = 1;
+    size_t r = run_parse(&st, buf, cut);
+    FIO_ASSERT(r == FIO_HTTP1_PARSER_ERROR && st.expect == 1 && !st.complete,
+               "expect rejection (cut %zu): should be a parse error (%zu)",
+               cut,
+               r);
+  }
+  { /* chunked body, rejected */
+    char req[] = "POST / HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n"
+                 "Transfer-Encoding: chunked\r\n\r\n";
+    parser_state_s st = {0};
+    st.reject_expect = 1;
+    FIO_ASSERT(run_parse(&st, req, sizeof(req) - 1) == FIO_HTTP1_PARSER_ERROR &&
+                   !st.complete,
+               "expect rejection (chunked): should be a parse error");
+  }
+}
+
+/* ===========================================================================
+   Strict framing: status-code grammar, transfer-coding list elements, chunk
+   data delimiters and the terminating empty line.
+   ===========================================================================
+ */
+
+#define TEST_POST_TE(te)                                                       \
+  "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: " te "\r\n\r\n"
+#define TEST_POST_CHUNKED TEST_POST_TE("chunked")
+
+static void test_strict_framing(void) {
+  fprintf(stderr, "  * strict status / TE list / chunk delimiters\n");
+  static const struct {
+    const char *msg;
+    int ok;
+    size_t body;
+    size_t status;
+  } cases[] = {
+      /* status-code = 3DIGIT */
+      {"HTTP/1.1 204 No Content\r\n\r\n", 1, 0, 204},
+      {"HTTP/1.1 599 X\r\nContent-Length: 1\r\n\r\nx", 1, 1, 599},
+      {"HTTP/1.1 20_4 X\r\n\r\n", 0, 0, 0},
+      {"HTTP/1.1 2040 X\r\n\r\n", 0, 0, 0},
+      {"HTTP/1.1 20 X\r\n\r\n", 0, 0, 0},
+      {"HTTP/1.1 099 X\r\n\r\n", 0, 0, 0},
+      {"HTTP/1.1 4294967396 X\r\n\r\n", 0, 0, 0},
+      {"HTTP/1.1 20a X\r\n\r\n", 0, 0, 0},
+      /* the reason phrase may be empty, or omitted with its SP */
+      {"HTTP/1.1 200 \r\nContent-Length: 2\r\n\r\nok", 1, 2, 200},
+      {"HTTP/1.1 200\r\nContent-Length: 2\r\n\r\nok", 1, 2, 200},
+      {"HTTP/1.1 200\nContent-Length: 2\n\nok", 1, 2, 200},
+      {"HTTP/1.1 204\r\n\r\n", 1, 0, 204},
+      {"HTTP/1.1 2000\r\n\r\n", 0, 0, 0},
+      {"HTTP/1.1 OK\r\n\r\n", 0, 0, 0},
+      {"HTTP/1.1  200\r\n\r\n", 0, 0, 0},
+      /* requests still require all three parts */
+      {"GET / \r\nHost: x\r\n\r\n", 0, 0, 0},
+      {"GET /index.html\r\nHost: x\r\n\r\n", 0, 0, 0},
+      /* the final `chunked` must be a whole list element */
+      {TEST_POST_TE("gzip chunked") "0\r\n\r\n", 0, 0, 0},
+      {TEST_POST_TE("gzip\tchunked") "0\r\n\r\n", 0, 0, 0},
+      {TEST_POST_TE("xchunked") "0\r\n\r\n", 0, 0, 0},
+      {TEST_POST_TE("gzip;q=chunked") "0\r\n\r\n", 0, 0, 0},
+      {TEST_POST_TE("gzip,chunked") "0\r\n\r\n", 1, 0, 0},
+      {TEST_POST_TE("gzip , \tchunked") "0\r\n\r\n", 1, 0, 0},
+      {TEST_POST_TE(", chunked") "0\r\n\r\n", 1, 0, 0},
+      /* chunk data must end with CRLF (or a bare LF) */
+      {TEST_POST_CHUNKED "2\r\nhi\r\n0\r\n\r\n", 1, 2, 0},
+      {TEST_POST_CHUNKED "2\nhi\n0\n\n", 1, 2, 0},
+      {TEST_POST_CHUNKED "2\r\nhi0\r\n\r\n", 0, 0, 0},
+      {TEST_POST_CHUNKED "2\r\nhi\r0\r\n\r\n", 0, 0, 0},
+      {TEST_POST_CHUNKED "2\r\nhiX\r\n0\r\n\r\n", 0, 0, 0},
+      /* the empty line after the last chunk must be complete */
+      {TEST_POST_CHUNKED "0\r\n\rX\r\n\r\n", 0, 0, 0},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    char buf[256];
+    const size_t len = strlen(cases[i].msg);
+    FIO_ASSERT(len < sizeof(buf), "strict case %zu too long", i);
+    FIO_MEMCPY(buf, cases[i].msg, len);
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, buf, len);
+    if (!cases[i].ok) {
+      FIO_ASSERT(r == FIO_HTTP1_PARSER_ERROR && !st.complete,
+                 "strict case %zu should be rejected (r=%zu):\n%s",
+                 i,
+                 r,
+                 cases[i].msg);
+      continue;
+    }
+    FIO_ASSERT(r == len && st.complete && st.body_len == cases[i].body &&
+                   (!cases[i].status || st.status == cases[i].status),
+               "strict case %zu should complete (r=%zu body=%zu):\n%s",
+               i,
+               r,
+               st.body_len,
+               cases[i].msg);
+  }
+  { /* bytes after the terminating empty line are never consumed */
+    char req[] = TEST_POST_CHUNKED "0\r\n\r\nGET";
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, req, sizeof(req) - 1);
+    FIO_ASSERT(r == sizeof(req) - 4 && st.complete,
+               "chunked: consumed past the terminating empty line (%zu)",
+               r);
+  }
+  { /* empty reason phrase: an empty status text slice */
+    char resp[] = "HTTP/1.1 200\r\n\r\n";
+    parser_state_s st = {0};
+    st.status_str = FIO_BUF_INFO1((char *)"unset");
+    FIO_ASSERT(run_parse(&st, resp, sizeof(resp) - 1) == sizeof(resp) - 1 &&
+                   st.complete && !st.status_str.len &&
+                   FIO_BUF_INFO_IS_EQ(st.version,
+                                      FIO_BUF_INFO1((char *)"HTTP/1.1")),
+               "empty reason phrase: status text should be empty");
+  }
+  { /* `Expect` is a request header: responses forward it, never act on it */
+    char resp[] = "HTTP/1.1 200 OK\r\nExpect: 100-continue\r\n"
+                  "Content-Length: 2\r\n\r\nok";
+    char resp2[] = "HTTP/1.1 200 OK\r\nExpect: nonsense\r\n"
+                   "Content-Length: 2\r\n\r\nok";
+    parser_state_s st = {0};
+    st.reject_expect = 1;
+    FIO_ASSERT(run_parse(&st, resp, sizeof(resp) - 1) == sizeof(resp) - 1 &&
+                   st.complete && !st.expect && st.body_len == 2 &&
+                   st.header_count == 1,
+               "response Expect: should be forwarded as a regular header");
+    st = (parser_state_s){0};
+    FIO_ASSERT(run_parse(&st, resp2, sizeof(resp2) - 1) == sizeof(resp2) - 1 &&
+                   st.complete && st.header_count == 1,
+               "response Expect: unknown values are not rejected");
+  }
+  { /* `0\r\n\rX`: never completes (the old parser consumed `\rX`) */
+    char req[] = TEST_POST_CHUNKED "0\r\n\rX";
+    parser_state_s st = {0};
+    size_t r = run_parse(&st, req, sizeof(req) - 1);
+    FIO_ASSERT(r != sizeof(req) - 1 && !st.complete,
+               "chunked: incomplete empty line completed the message (%zu)",
+               r);
+  }
+}
+
+/* ===========================================================================
+   Exact allocations: inputs end exactly at an allocation boundary (ASan)
+   ===========================================================================
+ */
+
+static size_t run_parse_exact(parser_state_s *st, const char *msg) {
+  const size_t len = strlen(msg);
+  char *buf = (char *)malloc(len);
+  FIO_ASSERT_ALLOC(buf);
+  FIO_MEMCPY(buf, msg, len);
+  size_t r = run_parse(st, buf, len);
+  free(buf);
+  return r;
+}
+
+static void test_exact_allocations(void) {
+  fprintf(stderr, "  * exact allocation boundaries\n");
+  static const char empty_value[] = "GET / HTTP/1.1\r\nHost: x\r\nX:\r\n\r\n";
+  parser_state_s st = {0};
+  FIO_ASSERT(run_parse_exact(&st, "X\n") == FIO_HTTP1_PARSER_ERROR,
+             "exact: short first line should be rejected");
+  /* status tokens shorter than 3 digits at the very end of the input */
+  st = (parser_state_s){0};
+  FIO_ASSERT(run_parse_exact(&st, "HTTP/1.10 2\n") == FIO_HTTP1_PARSER_ERROR,
+             "exact: short status at the end should be rejected");
+  st = (parser_state_s){0};
+  FIO_ASSERT(run_parse_exact(&st, "HTTP/1.1 20\n") == FIO_HTTP1_PARSER_ERROR,
+             "exact: two-digit status at the end should be rejected");
+  st = (parser_state_s){0};
+  FIO_ASSERT(run_parse_exact(&st, TEST_POST_TE("")) == FIO_HTTP1_PARSER_ERROR,
+             "exact: empty transfer-encoding should be rejected");
+  st = (parser_state_s){0};
+  FIO_ASSERT(run_parse_exact(&st, empty_value) == sizeof(empty_value) - 1 &&
+                 st.complete && st.header_count == 2,
+             "exact: empty header value should be accepted");
+  /* zero chunk at the exact end: waits for the empty line */
+  st = (parser_state_s){0};
+  size_t r = run_parse_exact(&st, TEST_POST_CHUNKED "0\r\n");
+  FIO_ASSERT(r != FIO_HTTP1_PARSER_ERROR && !st.complete,
+             "exact: zero chunk without empty line should wait (%zu)",
+             r);
+  st = (parser_state_s){0};
+  r = run_parse_exact(&st, TEST_POST_CHUNKED "0\r\n\r");
+  FIO_ASSERT(r != FIO_HTTP1_PARSER_ERROR && !st.complete,
+             "exact: zero chunk with a lone CR should wait (%zu)",
+             r);
+  st = (parser_state_s){0};
+  r = run_parse_exact(&st, TEST_POST_CHUNKED "1\r\nx\r");
+  FIO_ASSERT(r != FIO_HTTP1_PARSER_ERROR && !st.complete && st.body_len == 1,
+             "exact: chunk data with a lone CR should wait (%zu)",
+             r);
+}
+#undef TEST_POST_CHUNKED
+#undef TEST_POST_TE
 
 /* ===========================================================================
    Main
@@ -869,6 +1090,9 @@ int main(void) {
   test_expect_100_continue();
   test_no_body_messages();
   test_te_and_host_rules();
+  test_expect_rejected();
+  test_strict_framing();
+  test_exact_allocations();
   fprintf(stderr, "All HTTP/1 parser tests passed!\n");
   return 0;
 }

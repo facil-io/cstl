@@ -96,6 +96,15 @@ ASN.1 Parser API - Core Functions
 /**
  * Parse one ASN.1 element from DER-encoded data.
  *
+ * Parses exactly one element and returns the position after it, so callers
+ * decide whether trailing data is an error (stop-at-boundary). Lenient where
+ * the decode is unambiguous: non-minimal definite lengths and long-form tag
+ * numbers are accepted (DER canonicality of signed data, if required, is the
+ * caller's check, e.g. via `fio_der_element_total_len` vs. the minimal
+ * header size). Rejected: indefinite lengths, truncated data, tag numbers
+ * above 255 (not representable in `tag_number`) and lengths overflowing
+ * `size_t`.
+ *
  * @param elem Output structure to fill with parsed element info
  * @param data Pointer to DER-encoded data
  * @param data_len Length of data buffer
@@ -122,9 +131,13 @@ ASN.1 Parser API - Type-Specific Parsers
 /**
  * Parse an ASN.1 INTEGER element.
  *
- * For small integers (<= 64-bit), sets *value.
- * For large integers (RSA modulus), use elem->data/len directly.
- * Leading zero bytes for positive numbers are handled correctly.
+ * Lenient: non-minimal encodings (redundant leading 0x00 / 0xFF bytes) are
+ * accepted; empty content is rejected. Callers that need DER canonicality
+ * (e.g. signed structures) must check `elem->data` themselves.
+ *
+ * If `value` is set, the INTEGER must be non-negative and fit in 64 bits
+ * (leading zero bytes are skipped). For large integers (RSA modulus), pass
+ * NULL and use elem->data/len directly (sign is not checked then).
  *
  * @param elem Parsed element (must be INTEGER type)
  * @param value Output for integer value (can be NULL for large integers)
@@ -162,6 +175,11 @@ SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
 
 /**
  * Parse an ASN.1 time (UTC Time or Generalized Time) to Unix timestamp.
+ *
+ * Lenient (BER / X.680 forms): minutes and seconds are optional, a fraction
+ * of a second ('.' or ',') is truncated, and the zone may be 'Z' or +hhmm /
+ * -hhmm. Rejected: local time (no zone), fractions of minutes/hours,
+ * impossible dates and trailing data (the time must fill the element).
  *
  * @param elem Parsed element (must be UTC_TIME or GENERALIZED_TIME type)
  * @param unix_time Output Unix timestamp (seconds since 1970-01-01 00:00:00
@@ -230,6 +248,12 @@ ASN.1 Parser API - Helper Functions
 /**
  * Check if an element is a specific tag type.
  *
+ * Compares the full identifier octet (class, constructed bit, tag number).
+ * Universal tag numbers (e.g., `FIO_DER_INTEGER`, `FIO_DER_SEQUENCE`) imply
+ * the DER form: SEQUENCE, SET, EXTERNAL and EMBEDDED PDV are constructed, all
+ * other universal types are primitive. Full identifier bytes (e.g., `0x30`,
+ * `FIO_DER_CONTEXT_0`) are compared as-is.
+ *
  * @param elem Parsed element
  * @param tag Expected tag (e.g., FIO_DER_INTEGER)
  * @return 1 if match, 0 otherwise
@@ -237,10 +261,17 @@ ASN.1 Parser API - Helper Functions
 FIO_IFUNC int fio_der_is_tag(const fio_der_element_s *elem, uint8_t tag);
 
 /**
- * Check if an element is a context-specific tag.
+ * Check if an element is a context-specific tag `[tag_num]`, in either form.
+ *
+ * Context tags may be EXPLICIT (constructed) or IMPLICIT (primitive, or
+ * constructed when the underlying type is), so the form isn't implied by the
+ * number and this check ignores the constructed bit. When the form matters
+ * (it usually does, for DER), compare the full identifier with
+ * `fio_der_is_tag` instead, e.g. `fio_der_is_tag(e, FIO_DER_CONTEXT_0)` for
+ * constructed `[0]` (0xA0) or `fio_der_is_tag(e, 0x82)` for primitive `[2]`.
  *
  * @param elem Parsed element
- * @param tag_num Context tag number (0-31)
+ * @param tag_num Context tag number (0-255, high-tag form supported)
  * @return 1 if match, 0 otherwise
  */
 FIO_IFUNC int fio_der_is_context_tag(const fio_der_element_s *elem,
@@ -274,11 +305,8 @@ FIO_IFUNC const char *fio_der_parse_string(const fio_der_element_s *elem,
                                            size_t *len) {
   if (!elem || !len)
     return NULL;
-  /* Accept various string types */
-  uint8_t tag_num = elem->tag & 0x1F;
-  if (elem->tag_class != FIO_DER_CLASS_UNIVERSAL)
-    return NULL;
-  switch (tag_num) {
+  /* Accept various string types (DER: universal, primitive only) */
+  switch (elem->tag) {
   case FIO_DER_UTF8_STRING:
   case FIO_DER_PRINTABLE_STRING:
   case FIO_DER_IA5_STRING:
@@ -298,8 +326,7 @@ FIO_IFUNC const char *fio_der_parse_string(const fio_der_element_s *elem,
 FIO_IFUNC int fio_der_parse_boolean(const fio_der_element_s *elem, int *value) {
   if (!elem || !value)
     return -1;
-  if ((elem->tag & 0x1F) != FIO_DER_BOOLEAN ||
-      elem->tag_class != FIO_DER_CLASS_UNIVERSAL)
+  if (elem->tag != FIO_DER_BOOLEAN) /* universal, primitive */
     return -1;
   if (elem->len != 1)
     return -1;
@@ -364,10 +391,10 @@ FIO_IFUNC int fio_der_iterator_has_next(const fio_der_iterator_s *it) {
 FIO_IFUNC int fio_der_is_tag(const fio_der_element_s *elem, uint8_t tag) {
   if (!elem)
     return 0;
-  /* For universal tags, compare the tag number */
-  if (elem->tag_class == FIO_DER_CLASS_UNIVERSAL)
-    return (elem->tag & 0x1F) == (tag & 0x1F);
-  /* For other classes, compare full tag byte */
+  /* Universal tag numbers (< 0x1F): add the constructed bit DER mandates for
+   * SEQUENCE (0x10), SET (0x11), EXTERNAL (0x08) and EMBEDDED PDV (0x0B). */
+  if (tag < 0x1F)
+    tag |= (uint8_t)(((0x30900UL >> tag) & 1U) << 5);
   return elem->tag == tag;
 }
 
@@ -377,14 +404,14 @@ FIO_IFUNC int fio_der_is_context_tag(const fio_der_element_s *elem,
   if (!elem)
     return 0;
   return (elem->tag_class == FIO_DER_CLASS_CONTEXT) &&
-         ((elem->tag & 0x1F) == (tag_num & 0x1F));
+         (elem->tag_number == tag_num);
 }
 
 /** Get tag number from element */
 FIO_IFUNC uint8_t fio_der_tag_number(const fio_der_element_s *elem) {
   if (!elem)
     return 0;
-  return elem->tag & 0x1F;
+  return elem->tag_number; /* decoded (high-tag form included) */
 }
 
 /* *****************************************************************************
@@ -461,17 +488,22 @@ SFUNC const uint8_t *fio_der_parse(fio_der_element_s *elem,
   /* Handle long-form tags (tag number >= 31) */
   if (elem->tag_number == 0x1F) {
     /* Multi-byte tag number - accumulate until high bit clear */
+    /* Lenient: leading zero septets and numbers < 31 in long form decode
+     * unambiguously and are normalized below. */
     uint32_t tag_num = 0;
-    while (p < end) {
+    for (;;) {
+      if (p >= end)
+        return NULL; /* unterminated tag */
       uint8_t b = *p++;
-      if (tag_num > (0xFFFFFFFF >> 7))
-        return NULL; /* Overflow */
       tag_num = (tag_num << 7) | (b & 0x7F);
+      if (tag_num > 0xFF)
+        return NULL; /* tag_number is uint8_t: never truncate (tag confusion) */
       if (!(b & 0x80))
         break;
     }
-    /* Store as much as fits in tag_number (used for context tags mainly) */
-    elem->tag_number = (uint8_t)(tag_num & 0xFF);
+    elem->tag_number = (uint8_t)tag_num;
+    if (tag_num < 0x1F) /* normalize to the identifier byte of the low form */
+      elem->tag = (uint8_t)((tag & 0xE0) | tag_num);
   }
 
   /* Parse length */
@@ -500,8 +532,7 @@ SFUNC int fio_der_parse_integer(const fio_der_element_s *elem,
     return -1;
 
   /* Verify it's an INTEGER */
-  if (elem->tag_class != FIO_DER_CLASS_UNIVERSAL ||
-      (elem->tag & 0x1F) != FIO_DER_INTEGER)
+  if (elem->tag != FIO_DER_INTEGER) /* universal, primitive */
     return -1;
 
   if (elem->len == 0)
@@ -510,14 +541,16 @@ SFUNC int fio_der_parse_integer(const fio_der_element_s *elem,
   const uint8_t *p = elem->data;
   size_t len = elem->len;
 
-  /* Skip leading zero byte used for positive numbers */
-  if (len > 1 && p[0] == 0x00 && (p[1] & 0x80)) {
-    p++;
-    len--;
-  }
-
-  /* If caller wants the value and it fits in uint64_t */
+  /* If caller wants the value: non-negative and fits in uint64_t.
+   * Lenient: redundant leading zero bytes decode unambiguously and are
+   * skipped (callers needing DER canonicality check `elem` themselves). */
   if (value) {
+    if (p[0] & 0x80)
+      return -1; /* negative */
+    while (len > 1 && !p[0]) {
+      p++;
+      len--;
+    }
     if (len > 8)
       return -1; /* Too large for uint64_t */
 
@@ -542,8 +575,7 @@ SFUNC int fio_der_parse_bit_string(const fio_der_element_s *elem,
     return -1;
 
   /* Verify it's a BIT STRING */
-  if (elem->tag_class != FIO_DER_CLASS_UNIVERSAL ||
-      (elem->tag & 0x1F) != FIO_DER_BIT_STRING)
+  if (elem->tag != FIO_DER_BIT_STRING) /* universal, primitive */
     return -1;
 
   if (elem->len < 1)
@@ -579,13 +611,14 @@ FIO_SFUNC const uint8_t *fio___der_parse_oid_component(const uint8_t *p,
                                                        const uint8_t *end,
                                                        uint64_t *value) {
   uint64_t v = 0;
-  size_t count = 0;
 
+  if (p < end && *p == 0x80)
+    return NULL; /* invalid in BER too (X.690 8.19.2); would also make the
+                  * dotted form disagree with raw-byte OID comparison */
   while (p < end) {
     uint8_t b = *p++;
-    /* Protect against overflow - OID components shouldn't be this large */
-    if (count++ > 9)
-      return NULL;
+    if (v >> 57)
+      return NULL; /* component exceeds 64 bits */
     v = (v << 7) | (b & 0x7F);
     if (!(b & 0x80)) {
       *value = v;
@@ -627,8 +660,7 @@ SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
     return -1;
 
   /* Verify it's an OID */
-  if (elem->tag_class != FIO_DER_CLASS_UNIVERSAL ||
-      (elem->tag & 0x1F) != FIO_DER_OID)
+  if (elem->tag != FIO_DER_OID) /* universal, primitive */
     return -1;
 
   if (elem->len == 0)
@@ -641,16 +673,13 @@ SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
   char *out_end = buf + buf_len - 1;
   int total = 0;
 
-  /* First byte encodes first two components: X.Y where byte = X*40 + Y */
-  uint8_t first = *p++;
-  uint64_t c1 = first / 40;
-  uint64_t c2 = first % 40;
-
-  /* First component can only be 0, 1, or 2 */
-  if (c1 > 2) {
-    c1 = 2;
-    c2 = first - 80;
-  }
+  /* First subidentifier (base-128) encodes X.Y where value = X*40 + Y */
+  uint64_t first;
+  p = fio___der_parse_oid_component(p, end, &first);
+  if (!p)
+    return -1;
+  uint64_t c1 = (first < 80) ? first / 40 : 2;
+  uint64_t c2 = first - c1 * 40;
 
   int len = fio___der_write_uint(out, (size_t)(out_end - out), c1);
   if (len < 0)
@@ -696,66 +725,92 @@ SFUNC int fio_der_parse_oid(const fio_der_element_s *elem,
 Implementation - Time Parser
 ***************************************************************************** */
 
+/** Reads 2 ASCII digits; returns -1 if either isn't a digit. */
+FIO_IFUNC int fio___der_2digits(const uint8_t *p) {
+  const unsigned a = (unsigned)p[0] - '0', b = (unsigned)p[1] - '0';
+  if (a > 9 || b > 9)
+    return -1;
+  return (int)(a * 10 + b);
+}
+
 SFUNC int fio_der_parse_time(const fio_der_element_s *elem,
                              int64_t *unix_time) {
-  if (!elem || !unix_time)
+  if (!elem || !unix_time || !elem->data)
     return -1;
 
-  char *p = (char *)elem->data;
-  uint64_t digits;
-  uint64_t divisor = 100000000ULL;
-  size_t consumed = 0;
-  int year, month, day, hour, min, sec = 0;
-  uint8_t tag = elem->tag & 0x1F;
-
-  if (elem->tag_class != FIO_DER_CLASS_UNIVERSAL ||
-      (tag != FIO_DER_UTC_TIME && tag != FIO_DER_GENERALIZED_TIME) ||
-      elem->len < 10 || fio_buf2u32u(p) == (0x01010101UL * '0'))
+  const uint8_t tag = elem->tag; /* universal, primitive */
+  if (tag != FIO_DER_UTC_TIME && tag != FIO_DER_GENERALIZED_TIME)
     return -1;
 
-  digits = fio_atol10u(&p);
-  consumed = (size_t)(p - (const char *)elem->data);
+  /* All reads are bounded by [elem->data, end). */
+  const uint8_t *p = elem->data;
+  const uint8_t *const end = p + elem->len;
+  const size_t year_digits = (tag == FIO_DER_UTC_TIME) ? 2 : 4;
+  int year, month, day, hour, min = 0, sec = 0;
+  int64_t offset = 0; /* seconds to add to the local time to get UTC */
 
-  /* Skip optional fractional seconds */
-  if (*p == '.') {
-    p++;
-    while (*p >= '0' && *p <= '9')
-      p++;
+  /* minimum: year + MMDDhh + 'Z' */
+  if (elem->len < year_digits + 7)
+    return -1;
+  year = fio___der_2digits(p);
+  if (year_digits == 4) {
+    const int lo = fio___der_2digits(p + 2);
+    year = (year < 0 || lo < 0) ? -1 : year * 100 + lo;
   }
-  if (*p != 'Z')
+  p += year_digits;
+  month = fio___der_2digits(p);
+  day = fio___der_2digits(p + 2);
+  hour = fio___der_2digits(p + 4);
+  p += 6;
+  if ((year | month | day | hour) < 0)
+    return -1;
+  /* optional minutes, then optional seconds (each 2 digits) */
+  if ((size_t)(end - p) >= 2 && (unsigned)(*p - '0') < 10) {
+    if ((min = fio___der_2digits(p)) < 0)
+      return -1;
+    p += 2;
+    if ((size_t)(end - p) >= 2 && (unsigned)(*p - '0') < 10) {
+      if ((sec = fio___der_2digits(p)) < 0)
+        return -1;
+      p += 2;
+      /* optional fraction of a second ('.' or ','), truncated */
+      if (p < end && (*p == '.' || *p == ',')) {
+        ++p;
+        while (p < end && (unsigned)(*p - '0') < 10)
+          ++p;
+      }
+    }
+  }
+  /* time zone: 'Z' or a +hhmm / -hhmm offset (local time is rejected) */
+  if (p < end && *p == 'Z') {
+    ++p;
+  } else if ((size_t)(end - p) >= 5 && (*p == '+' || *p == '-')) {
+    const int oh = fio___der_2digits(p + 1), om = fio___der_2digits(p + 3);
+    if (oh < 0 || om < 0 || oh > 23 || om > 59)
+      return -1;
+    offset = (int64_t)oh * 3600 + om * 60;
+    if (*p == '+')
+      offset = -offset;
+    p += 5;
+  } else
+    return -1;
+  /* the time must fill the element (no trailing data) */
+  if (p != end)
     return -1;
 
-  if (tag == FIO_DER_UTC_TIME) {
-    if (consumed == 12)
-      divisor = 10000000000ULL; /*   YYMMDDhhmmss */
-    else if (consumed != 10)
-      return -1;
-  } else { /* GENERALIZED_TIME */
-    if (consumed == 14)
-      divisor = 10000000000ULL; /* YYYYMMDDhhmmss */
-    else if (consumed != 12)
-      return -1;
-  }
-
-  year = (int)(digits / divisor);
-  digits -= year * divisor;
-  divisor /= 100;
-  month = (int)(digits / divisor);
-  digits -= month * divisor;
-  divisor /= 100;
-  day = (int)(digits / divisor);
-  digits -= day * divisor;
-  divisor /= 100;
-  hour = (int)(digits / divisor);
-  digits -= hour * divisor;
-  divisor /= 100;
-  min = (int)(digits / divisor);
-  digits -= min * divisor;
-  divisor /= 100;
-  sec = (int)(digits);
-
-  if (tag == FIO_DER_UTC_TIME) {
+  if (tag == FIO_DER_UTC_TIME)
     year += (year < 50 ? 2000 : 1900);
+
+  /* calendar validation */
+  {
+    static const uint8_t mdays[12] =
+        {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month < 1 || month > 12 || day < 1 || day > mdays[month - 1] ||
+        hour > 23 || min > 59 || sec > 60)
+      return -1;
+    if (month == 2 && day == 29 &&
+        ((year & 3) || (!(year % 100) && (year % 400))))
+      return -1;
   }
 
   {
@@ -768,7 +823,17 @@ SFUNC int fio_der_parse_time(const fio_der_element_s *elem,
         .tm_sec = sec,
         .tm_isdst = 0,
     };
-    *unix_time = (int64_t)fio_gm2time(tm);
+    /* Compute in int64_t: time_t may be 32-bit even when certificate dates
+     * (and the X.509 validity fields) are 64-bit. Never wrap a future date
+     * into a currently valid certificate interval. */
+    const int64_t y = (int64_t)tm.tm_year + 1900 - (tm.tm_mon < 2);
+    const int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const int64_t yoe = y - era * 400;
+    const int64_t mp = tm.tm_mon + (tm.tm_mon > 1 ? -2 : 10);
+    const int64_t doy = (153 * mp + 2) / 5 + tm.tm_mday - 1;
+    const int64_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    *unix_time = ((era * 146097 + doe - 719468) * 24 + tm.tm_hour) * 3600 +
+                 tm.tm_min * 60 + tm.tm_sec + offset;
   }
   return 0;
 }
@@ -946,7 +1011,8 @@ SFUNC size_t fio_der_encode_boolean(uint8_t *buf, int value);
  *
  * @param buf Output buffer (can be NULL to calculate length only)
  * @param unix_time Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
- * @return Number of bytes written/needed
+ * @return Number of bytes written/needed, or 0 if the year is outside
+ *         1950-2049 (use GeneralizedTime instead, per RFC 5280).
  */
 SFUNC size_t fio_der_encode_utc_time(uint8_t *buf, int64_t unix_time);
 
@@ -955,7 +1021,7 @@ SFUNC size_t fio_der_encode_utc_time(uint8_t *buf, int64_t unix_time);
  *
  * @param buf Output buffer (can be NULL to calculate length only)
  * @param unix_time Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
- * @return Number of bytes written/needed
+ * @return Number of bytes written/needed, or 0 if outside years 0000-9999.
  */
 SFUNC size_t fio_der_encode_generalized_time(uint8_t *buf, int64_t unix_time);
 
@@ -1199,23 +1265,41 @@ SFUNC size_t fio_der_encode_boolean(uint8_t *buf, int value) {
   return 3;
 }
 
-/** Helper: convert Unix timestamp to broken-down time */
-FIO_SFUNC void fio___der_gmtime(int64_t unix_time,
-                                int *year,
-                                int *month,
-                                int *day,
-                                int *hour,
-                                int *min,
-                                int *sec) {
-  const time_t t = (time_t)unix_time;
-  const struct tm tm = fio_time2gm(t);
-
-  *year = tm.tm_year + 1900;
-  *month = tm.tm_mon + 1;
-  *day = tm.tm_mday;
-  *hour = tm.tm_hour;
-  *min = tm.tm_min;
-  *sec = tm.tm_sec;
+/**
+ * Helper: convert Unix timestamp to broken-down UTC time using 64-bit civil
+ * arithmetic (no `time_t` narrowing). Returns -1 if outside years 0000-9999.
+ */
+FIO_SFUNC int fio___der_gmtime(int64_t unix_time,
+                               int *year,
+                               int *month,
+                               int *day,
+                               int *hour,
+                               int *min,
+                               int *sec) {
+  /* 0000-01-01T00:00:00Z .. 9999-12-31T23:59:59Z */
+  if (unix_time < -62167219200LL || unix_time > 253402300799LL)
+    return -1;
+  int64_t days = unix_time / 86400;
+  int64_t rem = unix_time % 86400;
+  if (rem < 0) {
+    rem += 86400;
+    --days;
+  }
+  *hour = (int)(rem / 3600);
+  *min = (int)((rem % 3600) / 60);
+  *sec = (int)(rem % 60);
+  /* civil_from_days (H. Hinnant) */
+  days += 719468;
+  const int64_t era = (days >= 0 ? days : days - 146096) / 146097;
+  const int64_t doe = days - era * 146097;
+  const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+  const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+  const int64_t mp = (5 * doy + 2) / 153;
+  const int64_t m = mp < 10 ? mp + 3 : mp - 9;
+  *day = (int)(doy - (153 * mp + 2) / 5 + 1);
+  *month = (int)m;
+  *year = (int)(yoe + era * 400 + (m <= 2));
+  return 0;
 }
 
 /** Encode ASN.1 UTCTime */
@@ -1224,10 +1308,13 @@ SFUNC size_t fio_der_encode_utc_time(uint8_t *buf, int64_t unix_time) {
   size_t content_len = 13;
   size_t total = 1 + 1 + content_len; /* tag + length + content */
 
-  if (buf) {
-    int year, month, day, hour, min, sec;
-    fio___der_gmtime(unix_time, &year, &month, &day, &hour, &min, &sec);
+  int year, month, day, hour, min, sec;
+  /* UTCTime only represents 1950-2049 (RFC 5280); 0 = unrepresentable */
+  if (fio___der_gmtime(unix_time, &year, &month, &day, &hour, &min, &sec) ||
+      year < 1950 || year > 2049)
+    return 0;
 
+  if (buf) {
     buf[0] = FIO_DER_UTC_TIME;
     buf[1] = (uint8_t)content_len;
 
@@ -1263,10 +1350,11 @@ SFUNC size_t fio_der_encode_generalized_time(uint8_t *buf, int64_t unix_time) {
   size_t content_len = 15;
   size_t total = 1 + 1 + content_len; /* tag + length + content */
 
-  if (buf) {
-    int year, month, day, hour, min, sec;
-    fio___der_gmtime(unix_time, &year, &month, &day, &hour, &min, &sec);
+  int year, month, day, hour, min, sec;
+  if (fio___der_gmtime(unix_time, &year, &month, &day, &hour, &min, &sec))
+    return 0; /* unrepresentable (outside years 0000-9999) */
 
+  if (buf) {
     buf[0] = FIO_DER_GENERALIZED_TIME;
     buf[1] = (uint8_t)content_len;
 

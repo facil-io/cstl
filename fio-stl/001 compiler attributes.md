@@ -58,7 +58,7 @@ Defined in [`./000 core.h`](./000%20core.h) and used throughout the library.
 
 Defined in [`./000 core.h`](./000%20core.h).
 
-- **`FIO_ALIGN(bytes)`** — alignment hint. Uses `__attribute__((aligned(bytes)))` on GCC/Clang; currently empty on other compilers.
+- **`FIO_ALIGN(bytes)`** — alignment hint. Uses `__attribute__((aligned(bytes)))` on GCC/Clang, `__declspec(align(bytes))` on MSVC/Intel, empty elsewhere. Placement: types `typedef struct FIO_ALIGN(n) tag {...} name;` (between `struct`/`union` and the tag; elsewhere GCC/Clang align only the typedef, not padding `sizeof`); variables `FIO_ALIGN(n) type name[...];` (prefix; MSVC rejects trailing). Never rely on it for correctness (may be a no-op).
 - **`FIO_WEAK_VAR`** — weak global variable. Uses `__declspec(selectany)` on Windows when selectany support is detected (MSVC or otherwise); `__attribute__((weak))` elsewhere.
 
 ## Macro stringifier
@@ -128,8 +128,9 @@ facil.io headers are designed to be included more than once to generate code. [`
 
 - **`FIO_COMPILER_GUARD`** — clobber memory and prevent the compiler from reordering instructions around it.
 - **`FIO_COMPILER_GUARD_INSTRUCTION`** — prevent instruction reordering without the full memory clobber.
+- **`FIO_COMPILER_GUARD_PTR(ptr)`** — like `FIO_COMPILER_GUARD`, but also makes the memory at `ptr` visible to the barrier (as if read). Use it after wiping a private (non-escaping) buffer: a plain memory clobber only covers memory the compiler already considers reachable, so stores to a local key buffer may still be removed as dead stores.
 
-On GCC/Clang these are inline `asm volatile` barriers; on MSVC they map to `_ReadWriteBarrier` and `_WriteBarrier`.
+On GCC/Clang these are inline `asm volatile` barriers (`FIO_COMPILER_GUARD_PTR` passes `ptr` as an `asm` input); on MSVC they map to `_ReadWriteBarrier` and `_WriteBarrier` (`FIO_COMPILER_GUARD_PTR` first stores `ptr` to a `volatile` sink).
 
 ## Thread scheduling
 

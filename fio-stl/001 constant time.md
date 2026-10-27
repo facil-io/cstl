@@ -36,7 +36,7 @@ intmax_t  fio_ct_min(intmax_t a, intmax_t b);
 uintmax_t fio_ct_abs(intmax_t i);
 ```
 
-* `fio_ct_max` / `fio_ct_min` perform signed comparisons without branches.
+* `fio_ct_max` / `fio_ct_min` perform signed comparisons without branches, correctly across the full `intmax_t` range (including `INTMAX_MIN` / `INTMAX_MAX`).
 * `fio_ct_abs` returns the absolute value of `i`.
 
 ## ASCII case conversion
@@ -82,10 +82,10 @@ Compares two memory regions and returns `1` if they are byte-for-byte identical,
 void fio_secure_zero(void *a_, size_t bytes);
 ```
 
-Zeros `bytes` starting at `a_`. The write is performed through a `volatile` pointer so the compiler cannot optimize it away. Use this for passwords, keys, and other sensitive material that must be erased from memory.
+Zeros `bytes` starting at `a_` in a way the compiler cannot optimize away. It uses unaligned-safe word stores (`fio_u2buf64u` and friends), followed by a compiler barrier that publishes the buffer's address, so the stores can't be removed as dead. Use this for passwords, keys, and other sensitive material that must be erased from memory.
 
 ```c
 #define FIO_MEM_STACK_WIPE(pages)
 ```
 
-Allocates a volatile stack array of `(pages) * 4096` bytes and initializes it to zero. Useful for clearing sensitive stack scratch space; the `(void)stack_mem` use keeps the array alive through the scope.
+Allocates a volatile stack array of `(pages) * 4096` bytes and initializes it to zero. `pages` must be a small compile-time constant (a runtime value does not compile). Useful for clearing sensitive stack scratch space; the `(void)stack_mem` use keeps the array alive through the scope.

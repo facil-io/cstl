@@ -59,7 +59,7 @@ Swaps two elements. Override if your type needs a custom swap.
 #endif
 ```
 
-Partition size below which quicksort switches to insert-sort.
+Partition size below which quicksort switches to insert-sort. Must be 3 or more (smaller values fail to compile).
 
 ### API Functions
 
@@ -78,7 +78,7 @@ Sorts `array[0..count-1]` in ascending order. Currently dispatches to quicksort.
 SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count);
 ```
 
-Non-recursive quicksort with median-of-three pivot selection. Falls back to insert-sort for small partitions.
+Non-recursive introsort: quicksort with median-of-three pivot selection, insert-sort for small partitions, and heap sort for partitions that exceed a `2*log2(count)` depth limit. Worst case is O(n log n) comparisons, even for crafted input. Not stable.
 
 #### `FIO_SORT_NAME_isort`
 

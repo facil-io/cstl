@@ -1,0 +1,17 @@
+/* Regression: the shadowed SHA-NI path must match SHA-256 test vectors. */
+#include "test-helpers.h"
+#define FIO_FAKE_X86_SHADOW
+#define FIO_SHA2
+#include FIO_INCLUDE_FILE
+
+int main(void) {
+  static const uint8_t expected[32] = {
+      0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea,
+      0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22, 0x23,
+      0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c,
+      0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00, 0x15, 0xad};
+  fio_u256 digest = fio_sha256("abc", 3);
+  FIO_ASSERT(!FIO_MEMCMP(digest.u8, expected, sizeof expected),
+             "shadow SHA-256 digest mismatch");
+  return 0;
+}

@@ -40,7 +40,7 @@ FIO_SFUNC size_t fio___http_ws_deflate_negotiate(fio_str_info_s offer,
                              "; client_no_context_takeover";
   int bits = 15;
   const char *pos = offer.buf;
-  const char *end = offer.buf + offer.len;
+  const char *end = offer.len ? offer.buf + offer.len : offer.buf; /* NULL */
   while (pos < end) {
     while (pos < end && (*pos == ' ' || *pos == '\t' || *pos == ';'))
       ++pos;
@@ -54,10 +54,14 @@ FIO_SFUNC size_t fio___http_ws_deflate_negotiate(fio_str_info_s offer,
         !FIO_MEMCMP(name, "server_max_window_bits", 22) && pos < end &&
         *pos == '=') {
       ++pos;
+      while (pos < end && (*pos == ' ' || *pos == '\t'))
+        ++pos;
+      pos += (pos < end && *pos == '"'); /* quoted-string form (RFC 7692) */
       int v = 0;
       int digits = 0;
       while (pos < end && *pos >= '0' && *pos <= '9') {
-        v = v * 10 + (*pos - '0');
+        if (v < 100) /* saturate: no signed overflow on hostile input */
+          v = v * 10 + (*pos - '0');
         ++pos;
         ++digits;
       }
@@ -88,8 +92,14 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
     goto refuse_upgrade;
   if (c->h) /* request after WebSocket Upgrade? an attack vector? */
     goto refuse_upgrade;
-  /* RFC 7692: permessage-deflate extension negotiation (no-takeover only) */
-  if (FIO_LIKELY(fio___http_cflags_is_set(h, FIO___HTTP_CFLAG_COMPRESS_WS))) {
+  /* `1`: a valid handshake that `fio_http_upgrade_websocket` will accept,
+   * adopting `h` as the WebSocket handle. Otherwise (`-1`, unsupported
+   * version) it answers 400 on a connection that may stay persistent: never
+   * negotiate (allocate) for it and release our `h` reference afterwards. */
+  const int handshake_ok = (fio_http_websocket_requested(h) == 1);
+  /* RFC 7692: permessage-deflate extension negotiation (no-takeover only). */
+  if (FIO_LIKELY(fio___http_cflags_is_set(h, FIO___HTTP_CFLAG_COMPRESS_WS)) &&
+      handshake_ok) {
     FIO_HTTP_HEADER_EACH_VALUE(
         h,
         1,
@@ -107,24 +117,35 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
       char ext_resp[80];
       int server_bits = 15;
       size_t ext_len = fio___http_ws_deflate_negotiate(
-          FIO_STR_INFO2(val.value.buf, val.value.len),
+          /* parameters follow the `;` (HTTP header-value properties) */
+          FIO_STR_INFO2(val.properties.buf, val.properties.len),
           ext_resp,
           sizeof(ext_resp),
           &server_bits);
       if (!ext_len)
         continue;
-      fio_http_response_header_set(
-          h,
-          FIO_STR_INFO2((char *)"sec-websocket-extensions", 24),
-          FIO_STR_INFO2(ext_resp, ext_len));
       /* Create deflate streaming contexts (stored at connection level,
        * outside the state union, so they survive the HTTP→WS transition).
        * Compressor = our writes (server side), Decompressor = client's data.
        * Both are always reset per message (no-takeover), which keeps
-       * persistent per-connection state ≈ 0. */
-      c->deflate_wr = fio_deflate_new(1, 1);
-      c->deflate_rd = fio_deflate_new(1, 0);
-      fio_deflate_window_bits_set(c->deflate_wr, server_bits);
+       * persistent per-connection state ≈ 0. Commit (and advertise) only
+       * when both exist; otherwise continue uncompressed. */
+      fio_deflate_s *wr = fio_deflate_new(1, 1);
+      fio_deflate_s *rd = wr ? fio_deflate_new(1, 0) : NULL;
+      if (FIO_UNLIKELY(!rd)) {
+        fio_deflate_free(wr);
+        FIO_LOG_ERROR("WebSocket permessage-deflate: no memory, declined");
+        break;
+      }
+      fio_deflate_window_bits_set(wr, server_bits);
+      fio_deflate_free(c->deflate_wr); /* NULL unless a prior attempt failed */
+      fio_deflate_free(c->deflate_rd);
+      c->deflate_wr = wr;
+      c->deflate_rd = rd;
+      fio_http_response_header_set(
+          h,
+          FIO_STR_INFO2((char *)"sec-websocket-extensions", 24),
+          FIO_STR_INFO2(ext_resp, ext_len));
       c->deflate_wr_reset = 1; /* server_no_context_takeover (always) */
       c->deflate_rd_reset = 1; /* client_no_context_takeover (always) */
       FIO_LOG_DDEBUG2("WebSocket permessage-deflate negotiated "
@@ -134,6 +155,8 @@ FIO_SFUNC void fio___http_perform_user_upgrade_callback_websocket(void *cb_,
     }
   }
   fio_http_upgrade_websocket(h);
+  if (FIO_UNLIKELY(!handshake_ok))
+    fio_http_free(h); /* error response sent; `h` was not adopted */
   return;
 
 refuse_upgrade:
@@ -230,6 +253,8 @@ FIO_SFUNC uint16_t fio___websocket_deflate_transform(fio___http_connection_s *c,
   if (out_cap > ws_max)
     out_cap = ws_max;
   char *out = fio_bstr_reserve(NULL, out_cap);
+  if (FIO_UNLIKELY(!out))
+    return FIO_WEBSOCKET_CLOSE_INTERNAL_ERROR; /* OOM is not corrupt data */
   size_t r =
       fio_deflate_push(c->deflate_rd, out, out_cap, msg->buf, msg->len, 1);
   if (!r) {
@@ -247,6 +272,8 @@ FIO_SFUNC uint16_t fio___websocket_deflate_transform(fio___http_connection_s *c,
       return FIO_WEBSOCKET_CLOSE_MESSAGE_TOO_BIG;
     }
     out = fio_bstr_reserve(NULL, out_cap);
+    if (FIO_UNLIKELY(!out))
+      return FIO_WEBSOCKET_CLOSE_INTERNAL_ERROR;
     r = fio_deflate_push(c->deflate_rd, out, out_cap, NULL, 0, 1);
     if (!r) {
       FIO_LOG_ERROR("WebSocket permessage-deflate: corrupt compressed data");
@@ -277,18 +304,24 @@ FIO_SFUNC void fio___websocket_on_pong(fio___http_connection_s *c,
                                        fio_buf_info_s msg) {
 #if (defined(DEBUG) && DEBUG) ||                                               \
     (defined(FIO_WEBSOCKET_STATS) && FIO_WEBSOCKET_STATS)
-  {
-    char *pos = msg.buf;
+  /* Our timeout pings carry exactly "0x" + 16 hex digits (see on_timeout).
+   * `msg` is a length-bound view into the read buffer: parse only that. */
+  if (msg.len == 18 && msg.buf[0] == '0' && (msg.buf[1] | 32) == 'x') {
     static uint64_t longest = 0;
-    uint64_t ping_time = fio_io_last_tick() - fio_atol16u(&pos);
-    if (ping_time < (1 << 16) && longest < ping_time) {
+    uint64_t sent = 0;
+    size_t i = 2;
+    for (uint8_t d; i < 18 && (d = fio_c2i((unsigned char)msg.buf[i])) < 16;
+         ++i)
+      sent = (sent << 4) | d;
+    const uint64_t ping_time = fio_io_last_tick() - sent;
+    if (i == 18 && ping_time < (1 << 16) && longest < ping_time) {
       longest = ping_time;
       FIO_LOG_INFO("WebSocket longest ping round-trip detected as: %zums",
                    (size_t)ping_time);
     }
   }
 #endif
-  FIO_LOG_DDEBUG2("Pong (%zu): %s", msg.len, msg.buf);
+  FIO_LOG_DDEBUG2("Pong (%zu): %.*s", msg.len, (int)msg.len, msg.buf);
   (void)c;
   (void)msg;
 }
@@ -298,16 +331,33 @@ FIO_SFUNC void fio___websocket_on_close_message(fio___http_connection_s *c,
                                                 uint16_t code,
                                                 fio_buf_info_s reason) {
   char buf[32];
-  size_t len =
-      c->is_client
-          ? fio_websocket_write_close_client(buf, code, (fio_buf_info_s){0}, 0)
-          : fio_websocket_write_close_server(buf, code, (fio_buf_info_s){0});
+  size_t len;
+  /* RFC 6455 §8.1: an invalid UTF-8 close reason fails the connection. */
+  if (FIO_UNLIKELY(reason.len && !fio_string_utf8_valid(
+                                     FIO_STR_INFO2(reason.buf, reason.len))))
+    code = FIO_WEBSOCKET_CLOSE_INVALID_PAYLOAD;
+  if (code == FIO_WEBSOCKET_CLOSE_NO_STATUS) {
+    /* 1005 (empty Close) MUST NOT be sent on the wire: reply empty. */
+    len = c->is_client ? fio___websocket_write_cli(buf,
+                                                   FIO_BUF_INFO0,
+                                                   FIO_WEBSOCKET_OP_CLOSE,
+                                                   0,
+                                                   0)
+                       : fio___websocket_write_srv(buf,
+                                                   FIO_BUF_INFO0,
+                                                   FIO_WEBSOCKET_OP_CLOSE,
+                                                   0);
+  } else {
+    len = c->is_client
+              ? fio_websocket_write_close_client(buf, code, FIO_BUF_INFO0, 0)
+              : fio_websocket_write_close_server(buf, code, FIO_BUF_INFO0);
+  }
   fio_io_write(c->io, buf, len);
   c->state.ws.code = code;
   fio_io_close(c->io);
   if (reason.len)
     FIO_LOG_DDEBUG2("WebSocket %p closed with reason: %.*s",
-                    c->io,
+                    (void *)c->io,
                     (int)reason.len,
                     reason.buf);
 }
@@ -331,12 +381,14 @@ FIO_SFUNC int fio___websocket_process_data(fio_io_s *io,
           c,
           ev.close_code ? ev.close_code : c->state.ws.parser.close_code,
           "parser error");
-    if (!c->is_client && state_before == FIO_WEBSOCKET_STATE_HEADER &&
-        consumed && !FIO_WEBSOCKET_GET_MASKED(&c->state.ws.parser))
+    /* RFC 6455 §5.1: client frames MUST be masked, server frames MUST NOT. */
+    if (state_before == FIO_WEBSOCKET_STATE_HEADER && consumed &&
+        FIO_WEBSOCKET_GET_MASKED(&c->state.ws.parser) == !!c->is_client)
       return fio___websocket_protocol_error(
           c,
           FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR,
-          "client-to-server frame must be masked");
+          c->is_client ? "server-to-client frame must not be masked"
+                       : "client-to-server frame must be masked");
     switch (ev.type) {
     case FIO_WEBSOCKET_EV_NONE:
       if (!consumed)
@@ -373,18 +425,32 @@ FIO_SFUNC int fio___websocket_process_data(fio_io_s *io,
         fio_bstr_free(c->state.ws.msg);
         c->state.ws.msg = NULL;
       }
-      if (ws_max) {
-        const size_t existing = fio_bstr_len(c->state.ws.msg);
-        if (existing > ws_max || ev.payload.len > (ws_max - existing))
-          return fio___websocket_protocol_error(
-              c,
-              FIO_WEBSOCKET_CLOSE_MESSAGE_TOO_BIG,
-              "message exceeds ws_max_msg_size");
-      }
-      if (ev.payload.len || c->state.ws.msg) {
+      const size_t existing = fio_bstr_len(c->state.ws.msg);
+      if (ws_max && (existing > ws_max || ev.payload.len > (ws_max - existing)))
+        return fio___websocket_protocol_error(
+            c,
+            FIO_WEBSOCKET_CLOSE_MESSAGE_TOO_BIG,
+            "message exceeds ws_max_msg_size");
+      /* `fio_bstr` lengths are capped below 2^31 (also when ws_max == 0):
+       * subtraction guard, so `existing + len` below never wraps (32-bit). */
+      if (FIO_UNLIKELY(existing >= (size_t)0x7FFFFFFFUL ||
+                       ev.payload.len > (size_t)0x7FFFFFFFUL - existing))
+        return fio___websocket_protocol_error(
+            c,
+            FIO_WEBSOCKET_CLOSE_MESSAGE_TOO_BIG,
+            "message exceeds the string length limit");
+      if (ev.payload.len) {
+        /* `fio_bstr_write` keeps the old string on failure: never deliver a
+         * silently truncated message (OOM or allocator limits). */
         c->state.ws.msg =
             fio_bstr_write(c->state.ws.msg, ev.payload.buf, ev.payload.len);
-      } else if (ev.is_last) {
+        if (FIO_UNLIKELY(fio_bstr_len(c->state.ws.msg) !=
+                         existing + ev.payload.len))
+          return fio___websocket_protocol_error(
+              c,
+              FIO_WEBSOCKET_CLOSE_INTERNAL_ERROR,
+              "message aggregation failed");
+      } else if (ev.is_last && !c->state.ws.msg) {
         c->state.ws.msg = fio_bstr_reserve(c->state.ws.msg, 0);
       }
       if (!ev.is_last) {
@@ -416,6 +482,14 @@ FIO_SFUNC int fio___websocket_process_data(fio_io_s *io,
             c,
             FIO_WEBSOCKET_CLOSE_MESSAGE_TOO_BIG,
             "message exceeds ws_max_msg_size");
+      /* RFC 6455 §8.1: text MUST be valid UTF-8 (whole message, after any
+       * permessage-deflate transform; fragments may split code points). */
+      if (ev.is_text &&
+          FIO_UNLIKELY(!fio_string_utf8_valid(FIO_STR_INFO2(msg.buf, msg.len))))
+        return fio___websocket_protocol_error(
+            c,
+            FIO_WEBSOCKET_CLOSE_INVALID_PAYLOAD,
+            "invalid UTF-8 text message");
       c->len -= consumed;
       if (c->len)
         FIO_MEMMOVE(c->buf, c->buf + consumed, c->len);
@@ -423,11 +497,23 @@ FIO_SFUNC int fio___websocket_process_data(fio_io_s *io,
       fio___http_connection_dup(c);
       fio_io_suspend(c->io);
       c->suspend = 1;
-      fio_queue_push(c->queue,
-                     ev.is_text ? fio___websocket_on_text_task
-                                : fio___websocket_on_binary_task,
-                     c,
-                     NULL);
+      if (FIO_UNLIKELY(fio_queue_push(c->queue,
+                                      ev.is_text
+                                          ? fio___websocket_on_text_task
+                                          : fio___websocket_on_binary_task,
+                                      c,
+                                      NULL))) {
+        /* No task owns the new references: roll back exactly once. */
+        c->suspend = 0;
+        fio_io_unsuspend(c->io);
+        fio___websocket_protocol_error(c,
+                                       FIO_WEBSOCKET_CLOSE_INTERNAL_ERROR,
+                                       "message queue full");
+        fio_io_s *const dup_io = c->io; /* `c` stays owned by the IO */
+        fio___http_connection_free(c);
+        fio_io_free(dup_io);
+        return -1;
+      }
       return -1;
     }
     case FIO_WEBSOCKET_EV_MESSAGE_END:
@@ -470,10 +556,15 @@ FIO_SFUNC void fio___websocket_on_ready(fio_io_s *io) {
 }
 
 FIO_SFUNC void fio___websocket_on_timeout(fio_io_s *io) {
+  fio___http_connection_s *c = (fio___http_connection_s *)fio_io_udata(io);
   char buf[32];
   char tm[20] = "0x00000000000000000";
   fio_ltoa16u(tm + 2, fio_io_last_tick(), 16);
-  size_t len = fio_websocket_write_ping_server(buf, FIO_BUF_INFO2(tm, 18));
+  /* RFC 6455 §5.3: client frames are masked (fresh mask per frame). */
+  size_t len =
+      c->is_client
+          ? fio_websocket_write_ping_client(buf, FIO_BUF_INFO2(tm, 18), 0)
+          : fio_websocket_write_ping_server(buf, FIO_BUF_INFO2(tm, 18));
   fio_io_write(io, buf, len);
 }
 
@@ -570,7 +661,9 @@ FIO_IFUNC void fio___http_websocket_subscribe_imp(fio_pubsub_msg_s *msg,
 
 /** Optional WebSocket subscription callback - all messages are UTF-8 valid. */
 SFUNC void FIO_HTTP_WEBSOCKET_SUBSCRIBE_DIRECT_TEXT(fio_pubsub_msg_s *msg) {
-  FIO_LOG_DEBUG2("forwarding pubsub text message to Websocket: %s (%zu bytes)",
+  FIO_LOG_DEBUG2("forwarding pubsub text message to Websocket: %.*s (%zu "
+                 "bytes)",
+                 (int)(msg->message.len > 64 ? 64 : msg->message.len),
                  (char *)msg->message.buf,
                  msg->message.len);
   fio___http_websocket_subscribe_imp(msg, 1);
@@ -677,6 +770,14 @@ SFUNC int fio_http_websocket_write(fio_http_s *h,
 
   char *payload =
       fio_bstr_reserve(NULL, fio_websocket_write_len(send_len, c->is_client));
+  if (FIO_UNLIKELY(!payload)) {
+    FIO_LOG_ERROR("WebSocket write: no memory to frame %zu bytes", send_len);
+    if (comp_buf) {
+      FIO_LEAK_COUNTER_ON_FREE(fio___websocket_deflate_buf);
+      FIO_MEM_FREE(comp_buf, comp_alloc);
+    }
+    return -1;
+  }
   payload = fio_bstr_len_set(
       payload,
       c->is_client
@@ -702,9 +803,24 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
                                                    fio_http_write_args_s args) {
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
   if (args.buf && args.len < FIO_HTTP_WEBSOCKET_WRITE_VALIDITY_TEST_LIMIT) {
+    /* The payload starts at `buf + offset` (public write contract). Reject
+     * "negative" (wrapped) offsets and address-space overflow; the caller
+     * owns the allocation bounds, which can't be known here. */
+    const uintptr_t start = (uintptr_t)args.buf;
+    if (FIO_UNLIKELY(args.offset > (size_t)PTRDIFF_MAX ||
+                     args.offset > UINTPTR_MAX - start ||
+                     args.len > UINTPTR_MAX - start - args.offset)) {
+      FIO_LOG_ERROR("WebSocket write: invalid offset %zu (+%zu bytes)",
+                    args.offset,
+                    args.len);
+      if (args.dealloc)
+        args.dealloc((void *)args.buf);
+      return;
+    }
+    char *const data = (char *)args.buf + args.offset;
     unsigned char is_text =
-        !!fio_string_utf8_valid(FIO_STR_INFO2((char *)args.buf, args.len));
-    fio_http_websocket_write(h, (void *)args.buf, args.len, is_text);
+        !!fio_string_utf8_valid(FIO_STR_INFO2(data, args.len));
+    fio_http_websocket_write(h, data, args.len, is_text);
     if (args.dealloc)
       args.dealloc((void *)args.buf);
     return;
@@ -732,7 +848,7 @@ FIO_SFUNC void fio___http_controller_ws_write_body(fio_http_s *h,
           0,
           0);
     } else {
-      uint32_t mask = (uint32_t)(fio_rand64() | 0x01020408U);
+      uint32_t mask = fio___websocket_mask_new();
       size_t head = fio___websocket_hdr((uint8_t *)frame,
                                         args.len,
                                         mask,

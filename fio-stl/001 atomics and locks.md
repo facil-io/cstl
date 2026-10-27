@@ -29,7 +29,7 @@ All atomic macros use sequentially consistent ordering. They work on a pointer t
 | `fio_atomic_or_fetch(p_obj, value)` | `*p_obj \|= value` | new value |
 | `fio_atomic_xor_fetch(p_obj, value)` | `*p_obj ^= value` | new value |
 
-The implementation prefers GCC/Clang `__atomic` builtins, falls back to legacy `__sync` builtins, then C11 `stdatomic.h`, then MSVC intrinsics.
+The implementation prefers GCC/Clang `__atomic` builtins, falls back to legacy `__sync` builtins, then MSVC `Interlocked` intrinsics. These macros operate on plain (non-`_Atomic`) objects, so C11 `stdatomic.h` is not a valid backend: a C11 compiler with none of these primitives stops with an `#error`.
 
 ## Spinlocks
 

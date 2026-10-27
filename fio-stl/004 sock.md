@@ -28,7 +28,7 @@ Default target used by `fio_sock_maximize_limits(0)`.
 #define FIO_SOCK_AVOID_UMASK
 ```
 
-Deprecated, has no effect. Unix socket creation never changes the process-global `umask`: public Unix sockets are opened up (`0777`) with `chmod` after `bind`.
+Deprecated, has no effect. Unix socket creation never changes the process-global `umask`: public Unix sockets are opened up (`0777`) after `bind` using a no-follow, inode-pinned pathname on Linux or no-follow `fchmodat` where available. If a platform cannot safely change the mode, opening a public socket fails; private sockets retain the process umask.
 
 ### Types and Flags
 
@@ -172,7 +172,7 @@ Creates a network socket from an `addrinfo` list and connects it remotely. Non-b
 SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags);
 ```
 
-Creates a Unix domain socket where supported. Server sockets unlink an existing path before binding. Non-UDP server sockets call `listen`.
+Creates a Unix domain socket where supported. Server sockets unlink an existing path before binding. Use a server-owned directory: a process that can replace the pathname can disrupt availability or redirect new clients. Non-UDP server sockets call `listen`; failed setup after binding does not unlink a possibly replaced pathname.
 
 If Unix sockets are unsupported, the function asserts and returns `FIO_SOCKET_INVALID`.
 
@@ -318,6 +318,14 @@ SFUNC int fio_sock_set_non_block(fio_socket_i fd);
 
 Sets a socket to non-blocking mode.
 
+#### `fio_sock_error`
+
+```c
+SFUNC int fio_sock_error(fio_socket_i fd);
+```
+
+Returns the socket's pending error (`SO_ERROR`, which is then cleared), `0` if there is none, or `-1` if the query failed. Use it to detect a failed non-blocking `connect`.
+
 **Returns:** `0` on success, `-1` on error.
 
 #### `fio_sock_maximize_limits`
@@ -380,15 +388,21 @@ Waits for write readiness.
 
 Best-effort test for whether a socket still appears open.
 
+#### `fio_sock_addr`
+
+```c
+SFUNC fio_buf_info_s fio_sock_addr(fio_socket_i s, bool with_port);
+```
+
+Returns the local socket address as a numeric host. Set `with_port` to `true` for `host:port` (IPv4) or `[host]:port` (IPv6); `false` returns only the host, without brackets. For a named Unix socket, returns its pathname with either setting; unnamed and abstract Unix sockets return `{NULL, 0}`. A failed lookup or invalid socket also returns `{NULL, 0}`. The caller retains ownership of `s`. The returned NUL-terminated buffer is borrowed and shares a ring of 128 static 128-byte slots with `fio_sock_peer_addr`; copy it if it must survive 128 subsequent address formatting calls.
+
 #### `fio_sock_peer_addr`
 
 ```c
-SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s);
+SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s, bool with_port);
 ```
 
-Returns a numeric, human-readable peer address.
-
-On error, returns `{NULL, 0}`. The result points into a shared ring of 128 static 64-byte slots (63 bytes plus a NUL). Each call takes the next slot, so the 129th call reuses the first. Copy the result if you need to keep it.
+Returns the peer's numeric host when `with_port` is `false`, or its `host:port` endpoint when `true` (IPv6 uses `[host]:port`). Named Unix sockets return their pathname without a port. Unnamed/abstract Unix sockets, unconnected sockets, invalid sockets, and failed lookups return `{NULL, 0}`. The caller retains ownership of `s`; the NUL-terminated result is borrowed from the same 128-slot static ring as `fio_sock_addr`. Copy it before that slot is reused.
 
 ### Windows Notes
 
@@ -400,7 +414,7 @@ The `fio___sock_wsa*` helpers are internal implementation details, not regular a
 
 Socket handles are owned by the caller and should be closed with `fio_sock_close`. `fio_sock_address_new` results are owned by the caller and should be freed with `fio_sock_address_free`.
 
-Socket operations are as thread-safe as the operating system calls they wrap. `fio_sock_peer_addr` uses shared static buffers and has the 128-call/thread caveat described above. Unix socket creation never touches the process-global `umask`.
+Socket operations are as thread-safe as the operating system calls they wrap. `fio_sock_addr` and `fio_sock_peer_addr` share static buffers across callers; synchronize concurrent accesses and copy a result before its slot is reused after 128 successful address lookups. Unix socket creation never touches the process-global `umask`.
 
 ### Example
 

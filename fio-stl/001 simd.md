@@ -109,12 +109,12 @@ Defined in fake mode when native x86 types are not present, so `fio_fx86_prefetc
 #### `fio_u128`
 
 ```c
-typedef union fio_u128 {
+typedef union FIO_ALIGN(16) fio_u128 {
   FIO___UXXX_UGRP_DEF(128);
 #if defined(__SIZEOF_INT128__)
   __uint128_t alignment_for_u128_[1];
 #endif
-} fio_u128 FIO_ALIGN(16);
+} fio_u128;
 ```
 
 The 128-bit storage union used by the fallback implementation. It exposes unsigned, signed, floating-point, and vector views (`u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `x8`, `x16`, `x32`, `x64`, etc.).
@@ -122,13 +122,13 @@ The 128-bit storage union used by the fallback implementation. It exposes unsign
 #### `fio_u256`
 
 ```c
-typedef union fio_u256 {
+typedef union FIO_ALIGN(32) fio_u256 {
   fio_u128 u128[2];
   FIO___UXXX_UGRP_DEF(256);
 #if defined(__SIZEOF_INT256__)
   __uint256_t alignment_for_u256_[1];
 #endif
-} fio_u256 FIO_ALIGN(32);
+} fio_u256;
 ```
 
 The 256-bit storage union used by AVX2 and SHA-512 fallbacks. It includes all `fio_u128`-style views plus `u128[2]`.
@@ -509,16 +509,16 @@ Extract 128-bit halves from a 256-bit value. `extracti128` uses `imm8 & 1`.
 #### `fio_fx86_256_sha512rnds2_epi64`, `fio_fx86_256_sha512msg1_epi64`, `fio_fx86_256_sha512msg2_epi64`
 
 ```c
-FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i state1,
-                                                        fio_fx86_m256i state0,
-                                                        fio_fx86_m256i wk);
+FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i dst,
+                                                        fio_fx86_m256i src,
+                                                        fio_fx86_m128i wk);
 FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512msg1_epi64(fio_fx86_m256i w0,
-                                                       fio_fx86_m256i w1);
+                                                       fio_fx86_m128i w1);
 FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512msg2_epi64(fio_fx86_m256i w0,
                                                        fio_fx86_m256i w1);
 ```
 
-Intel SHA-512 extension helpers using four 64-bit lanes.
+Intel SHA-512 extension helpers. `rnds2` takes {C,D,G,H} in `dst` and {A,B,E,F} in `src` (high to low lanes), with two W+K words in `wk`. `msg1` takes only the low qword of its 128-bit second operand.
 
 ### Shadowed Intrinsic Families
 

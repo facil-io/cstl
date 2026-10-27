@@ -177,7 +177,7 @@ Reads an unsigned binary number, with optional `0b` prefix.
 SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
 ```
 
-Reads an unsigned number in any base up to 36.
+Reads an unsigned number in base 2-36. Other bases return 0 without consuming input. On overflow, sets `errno = E2BIG` and stops before the overflowing digit.
 
 #### `fio_ltoa8u`
 
@@ -220,7 +220,7 @@ FIO_IFUNC void fio_ltoa_xbase(char *dest,
                               size_t base);
 ```
 
-Writes an unsigned number in `base` (up to 36) using `digits` bytes plus NUL.
+Writes an unsigned number in `base` (2-36) using `digits` bytes plus NUL. Other bases write an empty string.
 
 ### Helpers
 
@@ -286,7 +286,7 @@ Returns the number of base-2 digits needed for an unsigned number, rounded up to
 FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base);
 ```
 
-Returns the number of digits needed for an unsigned number in `base` (must be < 65).
+Returns the number of digits needed for an unsigned number in `base` (2-36). Other bases return 0.
 
 #### `fio_u2i_limit`
 
@@ -324,7 +324,7 @@ SFUNC fio_u256 fio_u256_hex_read(char **pstr);
 SFUNC fio_u512 fio_u512_hex_read(char **pstr);
 ```
 
-Reads a hex string and initializes the corresponding wide integer. Updates `*pstr` past the consumed input.
+Reads a hex string (optional `0x` prefix) and initializes the corresponding wide integer. Updates `*pstr` to the first non-hex character. Digits beyond the integer's width keep only the least significant bits.
 
 #### `fio_u1024_hex_read` / `fio_u2048_hex_read` / `fio_u4096_hex_read`
 
@@ -344,7 +344,7 @@ SFUNC size_t fio_u256_hex_write(char *dest, const fio_u256 *u);
 SFUNC size_t fio_u512_hex_write(char *dest, const fio_u512 *u);
 ```
 
-Writes a wide integer as a hex string to `dest`. Returns bytes written excluding NUL.
+Writes a wide integer as a NUL-terminated hex string to `dest`. Returns bytes written excluding NUL.
 
 #### `fio_u1024_hex_write` / `fio_u2048_hex_write` / `fio_u4096_hex_write`
 

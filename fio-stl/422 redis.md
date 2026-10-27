@@ -72,7 +72,8 @@ int main(void) {
 
   fio_io_start(4);                   /* master connects; workers use IPC */
 
-  fio_pubsub_engine_detach(redis);   /* system releases its ref: 2 → 1 */
+  fio_pubsub_engine_detach(redis);   /* system releases its ref: 2 → 1 (only
+                                        if a channel was subscribed) */
   fio_redis_free(redis);             /* caller releases dup:  1 → 0 → destroy */
 }
 ```
@@ -143,7 +144,9 @@ The engine uses reference counting (`FIO_REF`). Three things independently hold 
 
 1. **Caller**: `fio_redis_new()` returns `ref = 1`. The caller owns this ref and must release it with `fio_redis_free()`.
 
-2. **Pub/Sub system**: `fio_pubsub_engine_attach()` prepares the engine for Pub/Sub use. The Redis engine keeps its Pub/Sub reference on first `SUBSCRIBE` / `PSUBSCRIBE` and releases it from `on_detached`; call `fio_redis_dup()` before attach if you need to keep using the pointer after attaching.
+2. **Pub/Sub system**: `fio_pubsub_engine_attach()` hands one caller reference to the Pub/Sub system. The Redis engine marks itself attached on the first `SUBSCRIBE` / `PSUBSCRIBE` and releases that reference from `on_detached` **only if it was marked attached**. Call `fio_redis_dup()` before attach if you need to keep using the pointer after attaching.
+
+   **Known limitation:** an engine that is attached and then detached without ever receiving a subscription never releases the handed-over reference. That reference leaks and the engine is never destroyed.
 
 3. **Internal deferred tasks**: The engine dups before scheduling an IO-deferred task and frees at the end. These are invisible to the caller.
 
@@ -155,7 +158,8 @@ fio_pubsub_engine_s *redis = fio_redis_new(...); /* ref = 1 */
 fio_redis_dup(redis);                            /* ref = 2 (keep a copy) */
 fio_pubsub_engine_attach(redis);                 /* system takes original ref */
 /* ...use pub/sub... */
-fio_pubsub_engine_detach(redis);                 /* system releases → ref = 1 */
+fio_pubsub_engine_detach(redis);                 /* system releases → ref = 1
+                                                    (only after a subscription) */
 fio_redis_free(redis);                           /* caller releases → ref = 0 → destroy */
 
 /* Pattern B — command client only, no pub/sub */
@@ -179,7 +183,7 @@ fio_pubsub_engine_s *fio_redis_new(fio_redis_args_s args);
 
 Creates a Redis engine with `ref = 1`. The macro overload enables named arguments.
 
-Returns a pointer to `fio_pubsub_engine_s` on success, `NULL` on allocation failure.
+Returns a pointer to `fio_pubsub_engine_s` on success, `NULL` on allocation failure or invalid arguments (`auth_len` set with a `NULL` `auth`, or host / port / handshake lengths that do not fit the engine's 32-bit string storage).
 
 The engine is typed as `fio_pubsub_engine_s *` so it can be passed directly to `fio_pubsub_engine_attach()`. Pass the same pointer to `fio_redis_dup()`, `fio_redis_free()`, and `fio_redis_send()`.
 
@@ -209,7 +213,9 @@ Each `fio_redis_dup()` must be balanced with a `fio_redis_free()`.
 void fio_redis_free(fio_pubsub_engine_s *engine);
 ```
 
-Releases the caller's reference. When the count reaches zero, destroys the engine immediately: sets `running = 0`, closes the connection, drains the command queue (invoking any pending callbacks with `FIOBJ_INVALID`), and frees memory.
+Releases the caller's reference. While the reactor is running, transfers that reference to a release task on the main IO queue, without adding a reference. When the reactor is not running, releases directly; call from the main thread in that case, including during shutdown.
+
+When the release drops the count to zero, destroys the engine: marks it stopped, closes the connection, drains the command queue (invoking pending callbacks with `FIOBJ_INVALID`), and frees memory. Destruction and those callbacks run on the main thread.
 
 Safe to call with `NULL` (no-op).
 
@@ -220,20 +226,22 @@ typedef enum {
   FIO_REDIS_STATE_ERROR,
   FIO_REDIS_STATE_CONNECTING,
   FIO_REDIS_STATE_CONNECTED,
+  FIO_REDIS_STATE_STOPPED,
 } fio_redis_state_e;
 
 fio_redis_state_e fio_redis_state(const fio_pubsub_engine_s *engine);
 ```
 
-Returns a Redis connection-state snapshot when called from the IO thread:
+Returns an engine-state snapshot from any thread. Keep an engine reference alive while querying it. The value may become stale immediately; the query does not traverse the connection or command queue.
 
 | State | Meaning |
 |---|---|
-| `FIO_REDIS_STATE_ERROR` | `engine` is `NULL`, or `HELLO 3` failed and disabled the engine. |
+| `FIO_REDIS_STATE_ERROR` | `HELLO 3` failed and disabled the engine. |
 | `FIO_REDIS_STATE_CONNECTING` | No TCP socket is attached, or the socket is awaiting its `HELLO 3` reply. |
 | `FIO_REDIS_STATE_CONNECTED` | The TCP socket is attached and its RESP3 `HELLO 3` handshake completed. |
+| `FIO_REDIS_STATE_STOPPED` | `engine` is `NULL`, or the engine is being destroyed. |
 
-This is an observability API; callers may send commands in every state. Commands queue until the handshake completes.
+This query is observational, not a readiness reservation. Pending commands wait until the handshake completes. Stopped and failed engines do not execute commands.
 
 ### `fio_redis_send`
 
@@ -248,11 +256,13 @@ int fio_redis_send(fio_pubsub_engine_s *engine,
 
 Sends a Redis command. `command` must be a `FIOBJ_T_ARRAY` whose elements are the command verb and arguments as `FIOBJ_T_STRING` (or numbers). `callback` is optional (pass `NULL` to fire-and-forget).
 
-Returns `0` on success, `-1` if `engine` is `NULL` or `command` is not a FIOBJ array.
+Returns `0` after serialization and submission, or `-1` if `engine` is `NULL`, `command` is not a FIOBJ array, RESP sizing fails, or a command buffer cannot be allocated. A `0` result does not guarantee that deferred work or IPC delivery succeeds.
 
 **On the master**: the command is serialized to RESP and queued on the connection. Commands are sent one at a time (lock-step); the next command is sent after the reply for the previous one arrives.
 
 **On a worker**: the RESP bytes are forwarded to the master via IPC. The master executes the command, serializes the reply to RESP, and sends it back. The worker deserializes and calls the callback on its IO thread. This is transparent to the caller.
+
+Worker-side limits: errors returned by the master (for example, a stopped engine, connection loss, allocation failure or an oversized reply) are encoded as null (`fiobj_null()`). This does not protect against freeing an engine while IPC is in flight. A forwarded reply that is not exactly one complete, well-formed RESP value decodes to `FIOBJ_INVALID`. The worker callback runs only if the IPC reply reaches the worker; it is **not** guaranteed to run if the IPC message is lost (for example, when a worker forks or the master stops before replying).
 
 **Never** pass `SUBSCRIBE`, `PSUBSCRIBE`, `UNSUBSCRIBE`, or `PUNSUBSCRIBE` to `fio_redis_send()`. Subscriptions must go through `fio_pubsub_subscribe()` so the Pub/Sub system tracks them (local delivery, resubscription on reconnect). Direct sends bypass that bookkeeping and their confirmations (RESP3 push frames) are ignored.
 
@@ -262,7 +272,7 @@ Returns `0` on success, `-1` if `engine` is `NULL` or `command` is not a FIOBJ a
 void my_callback(fio_pubsub_engine_s *e, FIOBJ reply, void *udata);
 ```
 
-`reply` is `FIOBJ_INVALID` if the engine was destroyed or the connection was lost before the reply arrived. Otherwise it is a FIOBJ object:
+On the master, `reply` is `FIOBJ_INVALID` when the engine is destroyed or a written command loses its connection before receiving a reply. Written commands are never retransmitted; unsent commands remain queued for reconnection. On workers, missing master results are encoded as null, while malformed forwarded replies decode to `FIOBJ_INVALID` (see the limits above). Otherwise `reply` is a FIOBJ object:
 
 | Redis response | FIOBJ type |
 |---|---|
@@ -423,29 +433,33 @@ See [./404 ipc.md](./404 ipc.md) for IPC internals.
 
 ## Reconnect and Failure Behavior
 
-- **Connection loss**: The `on_close` callback logs a warning, silently purges any stale queued `HELLO` commands (a fresh one is queued on reconnect), and schedules a reconnect via a 1s single-shot timer. The delay prevents hot reconnect loops against peers that accept and instantly drop.
+- **Connection loss**: The `on_close` callback (and the connect-failure callback) logs a warning, silently purges any stale queued `HELLO` commands (a fresh one is queued on reconnect), and schedules a reconnect via a 1s single-shot timer. The delay prevents hot reconnect loops against peers that accept and instantly drop.
+- **No replay**: A command that was already written and awaits its reply when the connection is lost has an unknown outcome. It is removed from the queue and, on the master, its callback runs with `reply = FIOBJ_INVALID`. It is never retransmitted.
 - **Connection attempt failure**: A connect that fails before attach (e.g., connection refused) is reported through the IO layer's `on_failed` callback (the redis protocol's `on_close` only fires for established connections). The dangling `conn.io` handle is cleared and the same 1s retry timer is scheduled. A synchronous `fio_io_connect` failure takes the same path. The failed io is reactor-owned and freed by the IO layer's connecting-protocol cleanup - the engine never frees it.
-- **Handshake**: Every (re)connection starts with `HELLO 3` (auth folded in) as the first queued command; its map reply is consumed by the normal reply FIFO. Handshake failure is a hard engine error (the engine stops; there is no RESP2 fallback).
-- **Queued commands**: Commands in the queue on the master stay queued and are flushed once the connection is re-established (after `HELLO`).
+- **Handshake**: Every (re)connection starts with `HELLO 3` (auth folded in) as the first queued command. Its reply is consumed synchronously, before any command queued behind it is written. Handshake failure is a hard engine error: the engine stops before anything else reaches the connection (there is no RESP2 fallback).
+- **Queued commands**: Commands that were not yet written stay queued on the master and are flushed once the connection is re-established (after `HELLO`).
+- **Malformed replies**: A parser error, a payload budget breach or a reply allocation failure closes the connection. A partial reply is never matched to a command. A reply that arrives with no command awaiting it is logged and dropped.
+- **Fork**: A worker frees its inherited copy of the command queue without invoking callbacks (they belong to the master).
 - **Resubscription**: On every (re)connection, the engine iterates the current Pub/Sub channel maps and queues all active `SUBSCRIBE` / `PSUBSCRIBE` commands at the queue head (batched into a static buffer, one no-wait queue node per flushed batch), right after `HELLO`. This restores subscription state without touching ref counts or re-attaching the engine.
 - **Keepalive**: A `PING` is queued on the connection after `ping_interval` seconds idle. If the connection has unacknowledged commands when the timeout fires, the connection is forcibly closed and reconnected.
 - **Engine destroyed while commands are pending**: All queued commands have their callbacks invoked immediately with `reply = FIOBJ_INVALID`.
-- **Retry suppression**: Reconnect timers are never scheduled after engine destroy (`running == 0`) or during reactor shutdown, so a close caused by destroy or shutdown does not resurrect the connection.
+- **Retry suppression**: Reconnect timers are never scheduled for a stopped or failed engine, or during reactor shutdown, so a close caused by destroy or shutdown does not resurrect the connection.
 
 ---
 
 ## Thread Safety
 
-All public API functions are thread-safe:
+Reference-count updates are atomic. While the reactor runs, public releases use the main IO queue to serialize destruction with IO callbacks. Otherwise releases must originate on the main thread.
 
-| Function | Mechanism |
+| Function | Requirement / mechanism |
 |---|---|
-| `fio_redis_new()` | Defers connection to IO thread |
-| `fio_redis_dup()` | Atomic reference count increment |
-| `fio_redis_free()` | Atomic reference count decrement; destroy runs on caller thread |
-| `fio_redis_send()` | Defers queue insertion to IO thread (master); IPC on workers |
+| `fio_redis_new()` | Defers connection to the IO thread. |
+| `fio_redis_dup()` | Atomically increments a live engine's reference count. |
+| `fio_redis_free()` | Any thread while IO runs: transfers the reference to a main IO release task. Otherwise main thread only: releases directly. |
+| `fio_redis_send()` | Serializes before returning; defers master queue insertion or sends worker IPC. Keep the engine alive through pending operations. |
+| `fio_redis_state()` | Any thread with a live engine reference; reads only the state byte. |
 
-Internal state (command queue, connection pointers) is only accessed from the IO thread. No locks are needed internally.
+The command queue and connection state have no internal locks. Worker IPC carries engine pointers without retaining their lifetime; do not free an engine while forwarded commands or replies are pending.
 
 FIOBJ objects passed to callbacks are **not** thread-safe. Copy any data you need to keep or use outside the callback.
 

@@ -45,30 +45,33 @@ static uint64_t fio___secret_masker;
 
 FIO_DEFINE_RANDOM128_FN(static, fio___secret_rand, 1, 0)
 
+/* Returns the process-lifetime mask (initialized once, never rotated). */
+FIO_SFUNC uint64_t fio___secret_mask(void) {
+  /* initialized by the constructor (single threaded) or the first setter. */
+  while (!fio___secret_masker)
+    fio___secret_masker = fio___secret_rand64();
+  return fio___secret_masker;
+}
+
 /** Returns true if the secret was randomly generated. */
 SFUNC bool fio_secret_is_random(void) { return fio___secret_is_random; }
 
 /** Gets the SHA512 of a (possibly shared) secret. */
 SFUNC fio_u512 fio_secret(void) {
   fio_u512 r;
-  fio_u512_cxor64(&r, &fio___secret, fio___secret_masker);
+  fio_u512_cxor64(&r, &fio___secret, fio___secret_mask());
   return r;
 }
 
-/** Sets a (possibly shared) secret and stores its SHA512 hash. */
-SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
-  if (!str || !len)
-    is_random = 1;
-  fio_secret_set_at(&fio___secret, str, len);
-  fio___secret_is_random = is_random;
+FIO_SFUNC bool fio___secret_is_ws(char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }
 
-/** Sets a (possibly shared) secret and stores its SHA512 hash. */
-SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len) {
-  if (!secret)
-    return;
-  fio_u512 random_buffer = {0};
+/* Sets a masked hash, returns true if a random secret was generated. */
+FIO_SFUNC bool fio___secret_set_at(fio_u512 *secret, char *str, size_t len) {
+  fio_u512 random_buffer;
   fio_u512 zero = {0};
+  bool is_random = 0;
   size_t i = 0;
   FIO_STR_INFO_TMP_VAR(from_hex, 4096);
   if (!str)
@@ -78,7 +81,7 @@ SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len) {
   /* convert any Hex data to bytes */
   for (i = 0; i + 1 < len; i += 2) {
     /* skip white space */
-    if (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r') {
+    if (fio___secret_is_ws(str[i])) {
       --i;
       continue;
     }
@@ -88,9 +91,7 @@ SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len) {
       goto done;
     from_hex.buf[from_hex.len++] = (hi << 4) | lo;
   }
-  from_hex.buf[from_hex.len] = 0;
-  while (i < len &&
-         (str[i] == ' ' || str[i] == '\t' || str[i] == '\n' || str[i] == '\r'))
+  while (i < len && fio___secret_is_ws(str[i]))
     ++i;
   if (i == len) { /* test if the secret was all Hex encoded */
     FIO_LOG_DDEBUG2("(secret) Decoded HEX encoded secret (%zu bytes).",
@@ -98,7 +99,8 @@ SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len) {
     str = from_hex.buf;
     len = from_hex.len;
   }
-  if (!len) {
+  if (!len) { /* no secret (or whitespace only): use a random secret */
+    is_random = 1;
     str = (char *)random_buffer.u8;
     len = sizeof(random_buffer);
     fio___secret_rand_bytes(random_buffer.u8, sizeof(random_buffer));
@@ -111,26 +113,54 @@ done:
     secret->u64[0] = len;
     secret[0] = fio_sha512(secret->u8, sizeof(*secret));
   }
-  while (!(fio___secret_masker = fio___secret_rand64()))
-    ;
-  fio_u512_cxor64(secret, secret, fio___secret_masker);
+  fio_u512_cxor64(secret, secret, fio___secret_mask());
+  /* wipe raw secret material from the stack */
+  if (from_hex.len)
+    fio_secure_zero(from_hex.buf, from_hex.len);
+  if (is_random)
+    fio_secure_zero(random_buffer.u8, sizeof(random_buffer));
+  return is_random;
+}
+
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set(char *str, size_t len, bool is_random) {
+  is_random |= fio___secret_set_at(&fio___secret, str, len);
+  fio___secret_is_random = is_random;
+}
+
+/** Sets a (possibly shared) secret and stores its SHA512 hash. */
+SFUNC void fio_secret_set_at(fio_u512 *secret, char *str, size_t len) {
+  if (!secret)
+    return;
+  fio___secret_set_at(secret, str, len);
 }
 
 /** Gets the SHA512 of a (possibly shared) secret. */
 SFUNC fio_u512 fio_secret_at(fio_u512 *secret) {
-  fio_u512 r;
-  fio_u512_cxor64(&r, secret, fio___secret_masker);
+  fio_u512 r = {0};
+  if (!secret)
+    return r;
+  fio_u512_cxor64(&r, secret, fio___secret_mask());
   return r;
 }
 
 FIO_CONSTRUCTOR(fio___secret_constructor) {
   char *str = NULL;
   size_t len = 0;
+  fio___secret_mask(); /* initialize mask before any threads exist */
   if ((str = fio_sys_env("SECRET"))) {
-    const char *secret_length = fio_sys_env("SECRET_LENGTH");
-    len = secret_length ? fio_atol((char **)&secret_length) : 0;
-    if (!len)
-      len = FIO_STRLEN(str);
+    char *secret_length = (char *)fio_sys_env("SECRET_LENGTH");
+    len = FIO_STRLEN(str);
+    if (secret_length && *secret_length) {
+      /* SECRET_LENGTH may only truncate the (NUL terminated) SECRET */
+      char *pos = secret_length;
+      int64_t l = fio_atol(&pos);
+      if (*pos || l < 1 || (uint64_t)l > (uint64_t)len)
+        FIO_LOG_WARNING("(secret) invalid SECRET_LENGTH ignored "
+                        "(must be 1..strlen(SECRET)).");
+      else
+        len = (size_t)l;
+    }
     if (!len)
       str = NULL;
   }

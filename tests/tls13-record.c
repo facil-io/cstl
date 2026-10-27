@@ -440,6 +440,179 @@ FIO_SFUNC void test_tls13_record_alert(void) {
 }
 
 /* *****************************************************************************
+Hostile limits: output capacity (exact plaintext) and sequence exhaustion
+***************************************************************************** */
+/* Keys inconsistent with the cipher must never be used (H9). */
+FIO_SFUNC void test_tls13_record_key_cipher_mismatch(void) {
+  uint8_t key[32] = {1}, iv[12] = {2}, pt[4] = {3}, out[64];
+  fio_tls13_record_keys_s k;
+  static const struct {
+    uint8_t len;
+    fio_tls13_cipher_type_e cipher;
+    int ok;
+  } cases[] = {{16, FIO_TLS13_CIPHER_AES_128_GCM, 1},
+               {32, FIO_TLS13_CIPHER_AES_128_GCM, 0},
+               {32, FIO_TLS13_CIPHER_AES_256_GCM, 1},
+               {16, FIO_TLS13_CIPHER_AES_256_GCM, 0},
+               {32, FIO_TLS13_CIPHER_CHACHA20_POLY1305, 1},
+               {16, FIO_TLS13_CIPHER_CHACHA20_POLY1305, 0},
+               {32, (fio_tls13_cipher_type_e)7, 0}};
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    fio_tls13_record_keys_init(&k, key, cases[i].len, iv, cases[i].cipher);
+    int r = fio_tls13_record_encrypt(out,
+                                     sizeof(out),
+                                     pt,
+                                     sizeof(pt),
+                                     FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                     &k);
+    FIO_ASSERT((r > 0) == cases[i].ok, "key/cipher case %zu: r=%d", i, r);
+    if (r > 0) {
+      fio_tls13_content_type_e ct;
+      fio_tls13_record_keys_s d;
+      fio_tls13_record_keys_init(&d, key, cases[i].len, iv, cases[i].cipher);
+      d.key_len = (uint8_t)(cases[i].len ^ 48); /* 16 <-> 32 */
+      FIO_ASSERT(fio_tls13_record_decrypt(out, sizeof(out), &ct, out, r, &d) ==
+                     -1,
+                 "decrypt with a mismatched key length must fail");
+    }
+  }
+  fio_tls13_record_keys_init(&k, NULL, 16, iv, FIO_TLS13_CIPHER_AES_128_GCM);
+  FIO_ASSERT(fio_tls13_record_encrypt(out,
+                                      sizeof(out),
+                                      pt,
+                                      sizeof(pt),
+                                      FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                      &k) == -1,
+             "NULL key must not be usable");
+}
+
+/* Post-handshake message rules (RFC 8446 Sections 4.6 and 5.1) */
+FIO_SFUNC void test_tls13_record_post_handshake(void) {
+  static const struct {
+    const char *msg;
+    size_t len;
+    int is_client;
+    int result;
+  } cases[] = {
+      {"\x18\x00\x00\x01\x00", 5, 1, 0},      /* KeyUpdate */
+      {"\x18\x00\x00\x01\x01", 5, 0, 0},      /* KeyUpdate, requested */
+      {"\x18\x00\x00\x02\x00\x00", 6, 1, -1}, /* bad KeyUpdate length */
+      {"\x18\x00\x00\x00", 4, 1, -1},         /* empty KeyUpdate */
+      {"\x18\x00\x00\x01\x00\x04\x00\x00\x00", 9, 1, -1}, /* data after KU */
+      {"\x04\x00\x00\x01\x00\x18\x00\x00\x01\x00", 10, 1, 0}, /* NST + KU */
+      {"\x04\x00\x00\x01\x00", 5, 0, -1}, /* NST to a server */
+      {"\x0D\x00\x00\x00", 4, 1, -1},     /* CertificateRequest */
+      {"\x04\x00\x00\x05\x00", 5, 1, -1}, /* truncated */
+      {"\x04\x00\x00", 3, 1, -1},         /* partial header */
+      {"", 0, 1, 0},                      /* empty: ignored */
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    uint8_t secret[48] = {5}, key[16] = {1}, iv[12] = {2};
+    uint8_t pending = 0;
+    fio_tls13_record_keys_s k;
+    fio_tls13_record_keys_init(&k, key, 16, iv, FIO_TLS13_CIPHER_AES_128_GCM);
+    int r = fio___tls13_post_handshake((const uint8_t *)cases[i].msg,
+                                       cases[i].len,
+                                       cases[i].is_client,
+                                       secret,
+                                       &k,
+                                       &pending,
+                                       0,
+                                       16,
+                                       FIO_TLS13_CIPHER_AES_128_GCM);
+    FIO_ASSERT(r == cases[i].result, "post-handshake case %zu: got %d", i, r);
+    if (i == 1)
+      FIO_ASSERT(pending == 1, "requested KeyUpdate must set pending");
+  }
+}
+
+FIO_SFUNC void test_tls13_record_hostile_limits(void) {
+  uint8_t key[16] = {1};
+  uint8_t iv[12] = {2};
+  uint8_t plaintext[100];
+  uint8_t ciphertext[256];
+  uint8_t out[128];
+  fio_tls13_content_type_e ct;
+  fio_tls13_record_keys_s enc_keys, dec_keys;
+  FIO_MEMSET(plaintext, 0xA5, sizeof(plaintext));
+
+  /* Capacities below the plaintext length must fail without overflow. */
+  static const size_t caps[] = {0, 1, 84, 85, 99, 100};
+  for (size_t i = 0; i < sizeof(caps) / sizeof(caps[0]); ++i) {
+    fio_tls13_record_keys_init(&enc_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+    fio_tls13_record_keys_init(&dec_keys,
+                               key,
+                               16,
+                               iv,
+                               FIO_TLS13_CIPHER_AES_128_GCM);
+    int ct_len = fio_tls13_record_encrypt(ciphertext,
+                                          sizeof(ciphertext),
+                                          plaintext,
+                                          sizeof(plaintext),
+                                          FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                          &enc_keys);
+    FIO_ASSERT(ct_len > 0, "encrypt failed");
+    FIO_MEMSET(out, 0xCC, sizeof(out));
+    int r = fio_tls13_record_decrypt(out,
+                                     caps[i],
+                                     &ct,
+                                     ciphertext,
+                                     (size_t)ct_len,
+                                     &dec_keys);
+    if (caps[i] < sizeof(plaintext)) {
+      FIO_ASSERT(r == -1, "decrypt must fail for capacity %zu", caps[i]);
+    } else {
+      FIO_ASSERT(r == (int)sizeof(plaintext), "exact capacity must succeed");
+    }
+    for (size_t j = caps[i]; j < sizeof(out); ++j)
+      FIO_ASSERT(out[j] == 0xCC, "decrypt wrote past capacity %zu", caps[i]);
+  }
+
+  /* NULL plaintext with a non-zero length is rejected. */
+  FIO_ASSERT(fio_tls13_record_encrypt(ciphertext,
+                                      sizeof(ciphertext),
+                                      NULL,
+                                      10,
+                                      FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                      &enc_keys) == -1,
+             "NULL plaintext with length must fail");
+
+  /* The sequence number never wraps (nonce reuse): a KeyUpdate is required. */
+  enc_keys.sequence_number = UINT64_MAX - 1;
+  int ct_len = fio_tls13_record_encrypt(ciphertext,
+                                        sizeof(ciphertext),
+                                        plaintext,
+                                        16,
+                                        FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                        &enc_keys);
+  FIO_ASSERT(ct_len > 0 && enc_keys.sequence_number == UINT64_MAX,
+             "last sequence number must be usable");
+  FIO_ASSERT(fio_tls13_record_encrypt(ciphertext,
+                                      sizeof(ciphertext),
+                                      plaintext,
+                                      16,
+                                      FIO_TLS13_CONTENT_APPLICATION_DATA,
+                                      &enc_keys) == -1 &&
+                 enc_keys.sequence_number == UINT64_MAX,
+             "encrypt must refuse to wrap the sequence number");
+  dec_keys.sequence_number = UINT64_MAX;
+  FIO_ASSERT(fio_tls13_record_decrypt(out,
+                                      sizeof(out),
+                                      &ct,
+                                      ciphertext,
+                                      (size_t)ct_len,
+                                      &dec_keys) == -1 &&
+                 dec_keys.sequence_number == UINT64_MAX,
+             "decrypt must refuse to wrap the sequence number");
+  fio_tls13_record_keys_clear(&enc_keys);
+  fio_tls13_record_keys_clear(&dec_keys);
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 int main(void) {
@@ -451,5 +624,8 @@ int main(void) {
   test_tls13_record_content_types();
   test_tls13_record_size_limits();
   test_tls13_record_alert();
+  test_tls13_record_hostile_limits();
+  test_tls13_record_key_cipher_mismatch();
+  test_tls13_record_post_handshake();
   return 0;
 }

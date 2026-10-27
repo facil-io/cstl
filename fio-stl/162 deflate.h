@@ -49,7 +49,7 @@ SFUNC size_t fio_deflate_decompress(void *out,
                                     size_t in_len);
 
 /** Conservative upper bound on decompressed size. */
-FIO_IFUNC size_t fio_deflate_decompress_bound(size_t in_len);
+IFUNC size_t fio_deflate_decompress_bound(size_t in_len);
 
 /**
  * Compresses data using raw DEFLATE (no zlib/gzip headers).
@@ -64,7 +64,7 @@ SFUNC size_t fio_deflate_compress(void *out,
                                   int level);
 
 /** Upper bound on compressed output size. */
-FIO_IFUNC size_t fio_deflate_compress_bound(size_t in_len);
+IFUNC size_t fio_deflate_compress_bound(size_t in_len);
 
 /**
  * Compresses data with gzip wrapper (for HTTP Content-Encoding).
@@ -329,7 +329,7 @@ FIO_IFUNC void fio___deflate_bitwriter_flush_bits(
     fio___deflate_bitwriter_s *w) {
   if (w->count < 8)
     return;
-  if (FIO_LIKELY(w->out + 8 <= w->out_end)) {
+  if (FIO_LIKELY((size_t)(w->out_end - w->out) >= 8)) {
     fio_u2buf64_le(w->out, w->bits);
     uint32_t bytes = w->count >> 3;
     w->out += bytes;
@@ -578,13 +578,15 @@ FIO_SFUNC uint32_t fio___deflate_build_decode_table(uint32_t *table,
                                           fio___deflate_len_extra[idx],
                                           len);
         } else {
-          entry = FIO___DEFLATE_ENTRY_LIT(sym, len);
+          entry = 0; /* reserved litlen symbol */
         }
       } else if (table_type == 2 && sym < 30) {
         /* Distance table */
         entry = FIO___DEFLATE_ENTRY_DIST(fio___deflate_dist_base[sym],
                                          fio___deflate_dist_extra[sym],
                                          len);
+      } else if (table_type == 2) {
+        entry = 0; /* reserved distance symbol */
       } else {
         /* Simple / precode table: just symbol + length */
         entry = FIO___DEFLATE_ENTRY_LIT(sym, len);
@@ -656,7 +658,7 @@ Decode table storage (stack buffers + on-demand heap growth)
 typedef struct {
   uint32_t litlen_stack[FIO___DEFLATE_LITLEN_MAX];
   uint32_t dist_stack[FIO___DEFLATE_DIST_MAX];
-  uint32_t *litlen_heap;  /* grown on demand (valid streams never need it) */
+  uint32_t *litlen_heap; /* grown on demand (valid streams never need it) */
   uint32_t *dist_heap;
   size_t litlen_heap_cap; /* in entries */
   size_t dist_heap_cap;   /* in entries */
@@ -667,15 +669,14 @@ typedef struct {
  * (stack or heap) or NULL on invalid code / allocation failure. The heap
  * buffer persists across calls (multi-block streams reuse it) and belongs
  * to the caller. */
-FIO_SFUNC uint32_t *fio___deflate_decode_table_build(
-    uint32_t *stack_buf,
-    uint32_t stack_cap,
-    uint32_t **heap_buf,
-    size_t *heap_cap,
-    const uint8_t *lens,
-    uint32_t num_syms,
-    uint32_t root_bits,
-    int table_type) {
+FIO_SFUNC uint32_t *fio___deflate_decode_table_build(uint32_t *stack_buf,
+                                                     uint32_t stack_cap,
+                                                     uint32_t **heap_buf,
+                                                     size_t *heap_cap,
+                                                     const uint8_t *lens,
+                                                     uint32_t num_syms,
+                                                     uint32_t root_bits,
+                                                     int table_type) {
   uint32_t need = fio___deflate_build_decode_table(NULL,
                                                    0,
                                                    lens,
@@ -752,7 +753,7 @@ Inflate (decompression) - fast inner loop
 
 /**
  * Fast inflate inner loop. Processes data when sufficient input and output
- * space is available (at least 8 bytes input margin, 258+8 bytes output
+ * space is available (at least 15 bytes input margin, 258+8 bytes output
  * margin).
  *
  * Returns 0 on success, -1 on error.
@@ -894,6 +895,8 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
   uint8_t *out = *out_p;
 
   for (;;) {
+    const uint8_t *symbol_in = in;
+    fio___deflate_bitbuf_s symbol_bb = *bb;
     /* Careful refill - byte at a time */
     while (bb->count < 15 && in < in_end) {
       bb->bits |= (uint64_t)(*in++) << bb->count;
@@ -934,8 +937,9 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
 
     if (FIO___DEFLATE_ENTRY_IS_LIT(entry)) {
       if (out >= out_end) {
-        /* Output buffer full — return -2 (overflow, not corrupt) */
-        *in_p = in;
+        /* Restore root/subtable bits before counting this literal. */
+        *bb = symbol_bb;
+        *in_p = symbol_in;
         *out_p = out;
         return -2;
       }
@@ -1016,9 +1020,10 @@ FIO_SFUNC int fio___inflate_slow(const uint8_t *restrict *in_p,
 
     if (distance == 0 || distance > (size_t)(out - out_start))
       return -1;
-    if (out + length > out_end) {
-      /* Output buffer overflow — return -2 (not corrupt) */
-      *in_p = in;
+    if (length > (size_t)(out_end - out)) {
+      /* Counting must resume before the match, not after its consumed bits. */
+      *bb = symbol_bb;
+      *in_p = symbol_in;
       *out_p = out;
       return -2;
     }
@@ -1189,24 +1194,24 @@ Inflate - main entry point
 ***************************************************************************** */
 
 /** Upper bound on decompressed size (conservative: 1032x expansion). */
-FIO_IFUNC size_t fio_deflate_decompress_bound(size_t in_len) {
+IFUNC size_t fio_deflate_decompress_bound(size_t in_len) {
   /* DEFLATE theoretical max is 1032:1 but practical is much less.
    * Use a generous bound. If input is very small, use a minimum. */
+  if (in_len > (size_t)-1 / 1032)
+    return (size_t)-1;
   size_t bound = in_len * 1032;
   if (bound < 4096)
     bound = 4096;
-  if (bound / 1032 != in_len) /* overflow check */
-    bound = (size_t)-1;
   return bound;
 }
 
 void fio_deflate_decompress___(void); /* IDE Marker */
-FIO_SFUNC size_t fio___deflate_decompress_impl(
-    void *out,
-    size_t out_len,
-    const void *in,
-    size_t in_len,
-    fio___deflate_decode_tables_s *tb) {
+FIO_SFUNC size_t
+fio___deflate_decompress_impl(void *out,
+                              size_t out_len,
+                              const void *in,
+                              size_t in_len,
+                              fio___deflate_decode_tables_s *tb) {
   if (!in || !in_len)
     return 0;
 
@@ -1269,14 +1274,14 @@ FIO_SFUNC size_t fio___deflate_decompress_impl(
       bb.bits = 0;
       bb.count = 0;
 
-      if (inp + len > in_end)
+      if (len > (size_t)(in_end - inp))
         return 0; /* truncated input — corrupt */
 
       if (counting) {
         /* Just count bytes, skip input */
         out_pos += len;
         inp += len;
-      } else if (outp + len > out_end) {
+      } else if (len > (size_t)(out_end - outp)) {
         /* Buffer overflow — switch to counting mode */
         out_pos = (size_t)(outp - out_start) + len;
         counting = 1;
@@ -1420,26 +1425,24 @@ FIO_SFUNC size_t fio___deflate_decompress_impl(
       }
 
       /* Build litlen and distance tables */
-      litlen_table = fio___deflate_decode_table_build(
-          tb->litlen_stack,
-          FIO___DEFLATE_LITLEN_MAX,
-          &tb->litlen_heap,
-          &tb->litlen_heap_cap,
-          all_lens,
-          hlit,
-          FIO___DEFLATE_LITLEN_BITS,
-          1);
+      litlen_table = fio___deflate_decode_table_build(tb->litlen_stack,
+                                                      FIO___DEFLATE_LITLEN_MAX,
+                                                      &tb->litlen_heap,
+                                                      &tb->litlen_heap_cap,
+                                                      all_lens,
+                                                      hlit,
+                                                      FIO___DEFLATE_LITLEN_BITS,
+                                                      1);
       if (!litlen_table)
         return 0;
-      dist_table = fio___deflate_decode_table_build(
-          tb->dist_stack,
-          FIO___DEFLATE_DIST_MAX,
-          &tb->dist_heap,
-          &tb->dist_heap_cap,
-          all_lens + hlit,
-          hdist,
-          FIO___DEFLATE_DIST_BITS,
-          2);
+      dist_table = fio___deflate_decode_table_build(tb->dist_stack,
+                                                    FIO___DEFLATE_DIST_MAX,
+                                                    &tb->dist_heap,
+                                                    &tb->dist_heap_cap,
+                                                    all_lens + hlit,
+                                                    hdist,
+                                                    FIO___DEFLATE_DIST_BITS,
+                                                    2);
       if (!dist_table)
         return 0;
     }
@@ -1465,8 +1468,12 @@ FIO_SFUNC size_t fio___deflate_decompress_impl(
       /* Normal mode: fast path when possible, slow path at boundaries */
       int overflow = 0;
       for (;;) {
-        const uint8_t *in_safe = in_end - 8;
-        uint8_t *out_safe = out_end - (FIO___DEFLATE_MAX_MATCH + 8);
+        const uint8_t *in_safe =
+            (size_t)(in_end - inp) >= 15 ? in_end - 15 : inp;
+        uint8_t *out_safe =
+            (size_t)(out_end - outp) >= FIO___DEFLATE_MAX_MATCH + 8
+                ? out_end - (FIO___DEFLATE_MAX_MATCH + 8)
+                : outp;
 
         int rc;
         if (inp < in_safe && outp < out_safe) {
@@ -1772,8 +1779,7 @@ FIO_SFUNC int fio___deflate_build_code_lengths(uint8_t *lens,
       uint32_t grow = num_syms;   /* least-frequent leaf at `bits` */
       uint32_t shrink = num_syms; /* most-frequent leaf at max_bits */
       for (uint32_t s = 0; s < num_syms; ++s) {
-        if (lens[s] == bits &&
-            (grow == num_syms || freqs[s] < freqs[grow]))
+        if (lens[s] == bits && (grow == num_syms || freqs[s] < freqs[grow]))
           grow = s;
         if (lens[s] == max_bits &&
             (shrink == num_syms || freqs[s] > freqs[shrink]))
@@ -2085,22 +2091,24 @@ FIO_IFUNC uint32_t fio___deflate_dist_to_sym(uint32_t distance) {
 }
 
 /** Upper bound on compressed output size. */
-FIO_IFUNC size_t fio_deflate_compress_bound(size_t in_len) {
+IFUNC size_t fio_deflate_compress_bound(size_t in_len) {
   /* Worst case: stored blocks (5 bytes header per 65535 bytes + data).
    * The compressor falls back to stored blocks whenever Huffman coding would
    * expand (negative gain), so this bound is sufficient at every level.
    * Add extra margin for dynamic Huffman header overhead (~320 bytes max)
    * and bitwriter flush margin (8 bytes). */
-  size_t num_blocks = (in_len + 65534) / 65535;
+  size_t num_blocks = in_len / 65535 + (in_len % 65535 != 0);
+  if (in_len > (size_t)-1 - 336 || num_blocks > ((size_t)-1 - 336 - in_len) / 5)
+    return (size_t)-1;
   return in_len + num_blocks * 5 + 336;
 }
 
 void fio_deflate_compress___(void); /* IDE Marker */
 SFUNC size_t fio_deflate_compress
 FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
-  if (!out || !out_len)
+  if (!out || !out_len || in_len > 0xFFFFFF00U || (!in && in_len))
     return 0;
-  if (!in || !in_len) {
+  if (!in_len) {
     /* Empty input: emit empty stored block */
     if (out_len < 5)
       return 0;
@@ -2119,7 +2127,7 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
     level = 9;
 
   const uint8_t *src = (const uint8_t *)in;
-  uint32_t src_len = (uint32_t)(in_len > 0xFFFFFFFFU ? 0xFFFFFFFFU : in_len);
+  uint32_t src_len = (uint32_t)in_len;
 
   /* Level 0: stored blocks */
   if (level == 0) {
@@ -2144,11 +2152,12 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
    * on each call. head_gen[h] tracks which generation wrote head[h]; stale
    * entries are treated as empty. prev[] chain links are cut at insertion time
    * when the head entry is stale, so prev[] never needs zeroing either. */
-  size_t max_tokens = src_len + 1;
+  size_t max_tokens = (size_t)src_len + 1;
   const size_t hash_alloc = sizeof(uint32_t) * FIO___DEFLATE_HASH_SIZE * 2 +
                             sizeof(uint32_t) * FIO___DEFLATE_WINDOW_SIZE;
-  const size_t token_alloc =
-      sizeof(fio___deflate_token_s) * max_tokens;
+  if (max_tokens > ((size_t)-1 - hash_alloc) / sizeof(fio___deflate_token_s))
+    return 0;
+  const size_t token_alloc = sizeof(fio___deflate_token_s) * max_tokens;
   const size_t alloc_size = hash_alloc + token_alloc;
   uint32_t *hash_mem = (uint32_t *)FIO_MEM_REALLOC(NULL, 0, alloc_size, 0);
   if (!hash_mem)
@@ -2599,7 +2608,7 @@ FIO_NOOP(void *out, size_t out_len, const void *in, size_t in_len, int level) {
   /* Compress the data */
   size_t compressed_len =
       fio_deflate_compress(o + 10, out_len - 18, in, in_len, level);
-  if (!compressed_len && in_len > 0)
+  if (!compressed_len)
     return 0;
 
   /* CRC32 + ISIZE trailer (8 bytes) */
@@ -2630,6 +2639,8 @@ SFUNC size_t fio_gzip_decompress FIO_NOOP(void *out,
     return 0; /* not deflate method */
 
   uint8_t flags = p[3];
+  if (flags & 0xE0)
+    return 0; /* reserved flags */
   size_t hdr_len = 10;
 
   /* Skip optional header fields */
@@ -2653,7 +2664,10 @@ SFUNC size_t fio_gzip_decompress FIO_NOOP(void *out,
     hdr_len++;
   }
   if (flags & 0x02) {
-    /* FHCRC: 2-byte header CRC */
+    /* FHCRC is the low 16 bits of the header CRC32. */
+    if (hdr_len > in_len - 2 ||
+        fio_buf2u16_le(p + hdr_len) != (uint16_t)fio_crc32(p, hdr_len, 0))
+      return 0;
     hdr_len += 2;
   }
 
@@ -2747,24 +2761,31 @@ struct fio_deflate_s {
  * `window` comes first so decompressors can allocate the short prefix only. */
 typedef struct {
   uint8_t window[FIO___DEFLATE_WINDOW_SIZE]; /* 32KB cross-message history */
-  uint32_t window_pos;                        /* valid bytes in window */
-  uint32_t gen;                               /* hash generation (compress) */
+  uint32_t window_pos;                       /* valid bytes in window */
+  uint32_t gen;                              /* hash generation (compress) */
   uint32_t head[FIO___DEFLATE_SCRATCH_HASH_SIZE]; /* direct-mapped heads */
   uint32_t hgen[FIO___DEFLATE_SCRATCH_HASH_SIZE]; /* generation stamps */
 } fio___deflate_takeover_s;
 
 /** Takeover block size for a decompressor (window + window_pos only). */
-#define FIO___DEFLATE_TAKEOVER_RD_SIZE                                       \
+#define FIO___DEFLATE_TAKEOVER_RD_SIZE                                         \
   (FIO___DEFLATE_WINDOW_SIZE + sizeof(uint32_t))
 
 /** Ensure the input buffer has room for `need` more bytes. */
 FIO_SFUNC int fio___deflate_stream_buf_grow(fio_deflate_s *s, size_t need) {
+  if (need > (size_t)-1 - s->buf_len)
+    return -1;
   size_t required = s->buf_len + need;
   if (required <= s->buf_cap)
     return 0;
   size_t new_cap = s->buf_cap ? s->buf_cap : 4096;
-  while (new_cap < required)
+  while (new_cap < required) {
+    if (new_cap > (size_t)-1 / 2) {
+      new_cap = required;
+      break;
+    }
     new_cap <<= 1;
+  }
   uint8_t *nb =
       (uint8_t *)FIO_MEM_REALLOC(s->buf, s->buf_cap, new_cap, s->buf_len);
   if (!nb)
@@ -2889,14 +2910,13 @@ FIO_SFUNC uint64_t fio___deflate_dyn_header_cost(const uint8_t *ll_lens,
 
 /** Tokenize one chunk (greedy, direct-mapped hash) into sc->tokens while
  * counting litlen/distance symbol frequencies. Returns the token count. */
-FIO_SFUNC uint32_t
-fio___deflate_stream_tokenize(fio___deflate_scratch_s *sc,
-                              const uint8_t *data,
-                              uint32_t pos,
-                              uint32_t end,
-                              uint32_t max_dist,
-                              uint32_t *ll_freqs,
-                              uint32_t *d_freqs) {
+FIO_SFUNC uint32_t fio___deflate_stream_tokenize(fio___deflate_scratch_s *sc,
+                                                 const uint8_t *data,
+                                                 uint32_t pos,
+                                                 uint32_t end,
+                                                 uint32_t max_dist,
+                                                 uint32_t *ll_freqs,
+                                                 uint32_t *d_freqs) {
   uint16_t *tokens = sc->tokens;
   uint32_t token_count = 0;
   const uint32_t gen = sc->gen_ctr;
@@ -3168,6 +3188,8 @@ FIO_SFUNC size_t fio___deflate_stream_compress(fio_deflate_s *s,
                                                size_t out_len,
                                                const uint8_t *data,
                                                size_t len) {
+  if (len > 0xFFFF0000U)
+    return 0; /* absolute offsets include up to 32KB history */
   fio___deflate_scratch_s *sc = fio___deflate_scratch_try();
   if (!sc)
     return 0; /* every slot busy — callers fall back to uncompressed */
@@ -3175,8 +3197,6 @@ FIO_SFUNC size_t fio___deflate_stream_compress(fio_deflate_s *s,
     FIO_MEMSET(sc->gen, 0, sizeof(sc->gen));
     sc->gen_ctr = 1;
   }
-  if (len > 0xFFFFFF00U)
-    len = 0xFFFFFF00U; /* absolute match offsets are 32-bit */
 
   fio___deflate_bitwriter_s w;
   fio___deflate_bitwriter_init(&w, out, out_len);
@@ -3232,6 +3252,61 @@ FIO_SFUNC size_t fio___deflate_stream_compress(fio_deflate_s *s,
         return 0;
       }
     }
+
+  } else
+    for (uint32_t off = 0; off < (uint32_t)len;
+         off += FIO___DEFLATE_WINDOW_SIZE) {
+      uint32_t chunk_len = (uint32_t)len - off;
+      if (chunk_len > FIO___DEFLATE_WINDOW_SIZE)
+        chunk_len = FIO___DEFLATE_WINDOW_SIZE;
+      FIO_MEMSET(ll_freqs, 0, sizeof(ll_freqs));
+      FIO_MEMSET(d_freqs, 0, sizeof(d_freqs));
+      uint32_t token_count = fio___deflate_stream_tokenize(sc,
+                                                           data,
+                                                           off,
+                                                           off + chunk_len,
+                                                           max_dist,
+                                                           ll_freqs,
+                                                           d_freqs);
+      ++ll_freqs[256]; /* end-of-block symbol for this chunk block */
+      if (fio___deflate_stream_emit_block(sc,
+                                          &w,
+                                          data,
+                                          off,
+                                          ll_freqs,
+                                          d_freqs,
+                                          token_count,
+                                          chunk_len)) {
+        fio___deflate_scratch_free(sc);
+        return 0;
+      }
+    }
+
+  /* Sync flush (RFC 7692 / zlib interoperability): empty stored block header,
+   * pad, then the 4-byte LEN/NLEN trailer — once per message, not per chunk.
+   */
+  fio___deflate_bitwriter_put(&w, 0, 3); /* BFINAL=0, BTYPE=00 */
+  size_t result = fio___deflate_bitwriter_finish(&w, out);
+  if (FIO_UNLIKELY(w.overflow)) {
+    fio___deflate_scratch_free(sc);
+    return 0;
+  }
+  w.out = (uint8_t *)out + result;
+  if ((size_t)(w.out_end - w.out) < 4) {
+    fio___deflate_scratch_free(sc);
+    return 0;
+  }
+  w.out[0] = 0x00; /* LEN low */
+  w.out[1] = 0x00; /* LEN high */
+  w.out[2] = 0xFF; /* NLEN low */
+  w.out[3] = 0xFF; /* NLEN high */
+  w.out += 4;
+  result = (size_t)(w.out - (uint8_t *)out);
+  /* Commit history only after the complete sync trailer fits. Hashes are
+   * generation-stamped and rebuilt from the committed window next call. */
+  if (s->takeover) {
+    fio___deflate_takeover_s *tk = (fio___deflate_takeover_s *)s->tk;
+    const uint32_t hist_len = tk->window_pos;
     /* Slide the cross-message window with the region's tail. */
     if (len >= FIO___DEFLATE_WINDOW_SIZE) {
       FIO_MEMCPY(tk->window,
@@ -3247,55 +3322,7 @@ FIO_SFUNC size_t fio___deflate_stream_compress(fio_deflate_s *s,
       FIO_MEMCPY(tk->window + keep, data, len);
       tk->window_pos = keep + (uint32_t)len;
     }
-  } else
-  for (uint32_t off = 0; off < (uint32_t)len;
-       off += FIO___DEFLATE_WINDOW_SIZE) {
-    uint32_t chunk_len = (uint32_t)len - off;
-    if (chunk_len > FIO___DEFLATE_WINDOW_SIZE)
-      chunk_len = FIO___DEFLATE_WINDOW_SIZE;
-    FIO_MEMSET(ll_freqs, 0, sizeof(ll_freqs));
-    FIO_MEMSET(d_freqs, 0, sizeof(d_freqs));
-    uint32_t token_count = fio___deflate_stream_tokenize(sc,
-                                                         data,
-                                                         off,
-                                                         off + chunk_len,
-                                                         max_dist,
-                                                         ll_freqs,
-                                                         d_freqs);
-    ++ll_freqs[256]; /* end-of-block symbol for this chunk block */
-    if (fio___deflate_stream_emit_block(sc,
-                                        &w,
-                                        data,
-                                        off,
-                                        ll_freqs,
-                                        d_freqs,
-                                        token_count,
-                                        chunk_len)) {
-      fio___deflate_scratch_free(sc);
-      return 0;
-    }
   }
-
-  /* Sync flush (RFC 7692 / zlib interoperability): empty stored block header,
-   * pad, then the 4-byte LEN/NLEN trailer — once per message, not per chunk.
-   */
-  fio___deflate_bitwriter_put(&w, 0, 3); /* BFINAL=0, BTYPE=00 */
-  size_t result = fio___deflate_bitwriter_finish(&w, out);
-  if (FIO_UNLIKELY(w.overflow)) {
-    fio___deflate_scratch_free(sc);
-    return 0;
-  }
-  w.out = (uint8_t *)out + result;
-  if (w.out + 4 > w.out_end) {
-    fio___deflate_scratch_free(sc);
-    return 0;
-  }
-  w.out[0] = 0x00; /* LEN low */
-  w.out[1] = 0x00; /* LEN high */
-  w.out[2] = 0xFF; /* NLEN low */
-  w.out[3] = 0xFF; /* NLEN high */
-  w.out += 4;
-  result = (size_t)(w.out - (uint8_t *)out);
   fio___deflate_scratch_free(sc);
   return result;
 }
@@ -3324,13 +3351,13 @@ never patched, never copied.
  *  - On buffer too small: the REQUIRED total size (> out_len).
  *  - On corrupt/invalid data: 0.
  */
-FIO_SFUNC size_t fio___deflate_decompress_prefixed_impl(
-    void *out,
-    size_t out_len,
-    size_t prefix_len,
-    const void *in,
-    size_t in_len,
-    fio___deflate_decode_tables_s *tb) {
+FIO_SFUNC size_t
+fio___deflate_decompress_prefixed_impl(void *out,
+                                       size_t out_len,
+                                       size_t prefix_len,
+                                       const void *in,
+                                       size_t in_len,
+                                       fio___deflate_decode_tables_s *tb) {
   if (!out || !out_len || !in || !in_len)
     return 0;
   if (prefix_len >= out_len)
@@ -3388,13 +3415,13 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed_impl(
       bb.bits = 0;
       bb.count = 0;
 
-      if (inp + len > in_end)
+      if (len > (size_t)(in_end - inp))
         return 0; /* truncated input */
 
       if (counting) {
         out_pos += len;
         inp += len;
-      } else if (outp + len > out_end) {
+      } else if (len > (size_t)(out_end - outp)) {
         out_pos = (size_t)(outp - out_start) + len;
         counting = 1;
         inp += len;
@@ -3527,26 +3554,24 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed_impl(
         }
       }
 
-      litlen_table = fio___deflate_decode_table_build(
-          tb->litlen_stack,
-          FIO___DEFLATE_LITLEN_MAX,
-          &tb->litlen_heap,
-          &tb->litlen_heap_cap,
-          all_lens,
-          hlit,
-          FIO___DEFLATE_LITLEN_BITS,
-          1);
+      litlen_table = fio___deflate_decode_table_build(tb->litlen_stack,
+                                                      FIO___DEFLATE_LITLEN_MAX,
+                                                      &tb->litlen_heap,
+                                                      &tb->litlen_heap_cap,
+                                                      all_lens,
+                                                      hlit,
+                                                      FIO___DEFLATE_LITLEN_BITS,
+                                                      1);
       if (!litlen_table)
         return 0;
-      dist_table = fio___deflate_decode_table_build(
-          tb->dist_stack,
-          FIO___DEFLATE_DIST_MAX,
-          &tb->dist_heap,
-          &tb->dist_heap_cap,
-          all_lens + hlit,
-          hdist,
-          FIO___DEFLATE_DIST_BITS,
-          2);
+      dist_table = fio___deflate_decode_table_build(tb->dist_stack,
+                                                    FIO___DEFLATE_DIST_MAX,
+                                                    &tb->dist_heap,
+                                                    &tb->dist_heap_cap,
+                                                    all_lens + hlit,
+                                                    hdist,
+                                                    FIO___DEFLATE_DIST_BITS,
+                                                    2);
       if (!dist_table)
         return 0;
     }
@@ -3571,8 +3596,12 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed_impl(
     } else {
       int overflow = 0;
       for (;;) {
-        const uint8_t *in_safe = in_end - 8;
-        uint8_t *out_safe = out_end - (FIO___DEFLATE_MAX_MATCH + 8);
+        const uint8_t *in_safe =
+            (size_t)(in_end - inp) >= 15 ? in_end - 15 : inp;
+        uint8_t *out_safe =
+            (size_t)(out_end - outp) >= FIO___DEFLATE_MAX_MATCH + 8
+                ? out_end - (FIO___DEFLATE_MAX_MATCH + 8)
+                : outp;
 
         int rc;
         if (inp < in_safe && outp < out_safe) {
@@ -3664,13 +3693,12 @@ FIO_SFUNC size_t fio___deflate_decompress_prefixed(void *out,
   tb.dist_heap = NULL;
   tb.litlen_heap_cap = 0;
   tb.dist_heap_cap = 0;
-  size_t r =
-      fio___deflate_decompress_prefixed_impl(out,
-                                             out_len,
-                                             prefix_len,
-                                             in,
-                                             in_len,
-                                             &tb);
+  size_t r = fio___deflate_decompress_prefixed_impl(out,
+                                                    out_len,
+                                                    prefix_len,
+                                                    in,
+                                                    in_len,
+                                                    &tb);
   fio___deflate_decode_tables_cleanup(&tb);
   return r;
 }
@@ -3687,6 +3715,8 @@ FIO_SFUNC size_t fio___deflate_stream_decompress(fio_deflate_s *s,
      * back-references into previous messages resolve, then slide it. */
     fio___deflate_takeover_s *tk = (fio___deflate_takeover_s *)s->tk;
     uint32_t prefix_len = tk->window_pos;
+    if (out_len > (size_t)-1 - prefix_len)
+      return 0;
     size_t temp_len = prefix_len + out_len;
     uint8_t *temp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, temp_len, 0);
     if (!temp)
@@ -3838,6 +3868,106 @@ SFUNC void fio_deflate_window_bits_set FIO_NOOP(fio_deflate_s *s, int bits) {
   s->window_bits = (uint8_t)bits;
 }
 
+/* Buffered pushes can emit multiple segments. Preserve their entry state
+ * on failure, without copying anything on the common direct-flush path. */
+FIO_SFUNC size_t fio___deflate_push_compress(fio_deflate_s *s,
+                                             void *out,
+                                             size_t out_len,
+                                             const void *in,
+                                             size_t in_len,
+                                             int flush) {
+  const uint8_t *src = (const uint8_t *)in;
+  size_t written = 0;
+  if (!flush && src && in_len) {
+    /* Buffered mode: accumulate fragments up to the cap, auto-compressing
+     * full buffers (each emitted piece is a complete sync-flushed
+     * segment, so call boundaries stay byte-aligned and self-contained). */
+    while (in_len) {
+      size_t room = FIO___DEFLATE_STREAM_BUF_MAX - s->buf_len;
+      size_t take = in_len < room ? in_len : room;
+      if (fio___deflate_stream_buf_grow(s, take))
+        return 0;
+      FIO_MEMCPY(s->buf + s->buf_len, src, take);
+      s->buf_len += take;
+      src += take;
+      in_len -= take;
+      if (s->buf_len < FIO___DEFLATE_STREAM_BUF_MAX)
+        return written ? written : 0; /* still buffering */
+      size_t r = fio___deflate_stream_compress(s,
+                                               (uint8_t *)out + written,
+                                               out_len - written,
+                                               s->buf,
+                                               s->buf_len);
+      if (!r)
+        return 0; /* output overflow / scratch contention */
+      written += r;
+      s->buf_len = 0;
+    }
+    return written;
+  }
+
+  /* flush requested: compress any buffered prefix first (its own complete
+   * segment), then the caller's data directly (no copy). */
+  if (s->buf_len) {
+    size_t r = fio___deflate_stream_compress(s,
+                                             (uint8_t *)out + written,
+                                             out_len - written,
+                                             s->buf,
+                                             s->buf_len);
+    if (!r)
+      return 0;
+    written += r;
+    s->buf_len = 0;
+  }
+  if (src && in_len) {
+    size_t r = fio___deflate_stream_compress(s,
+                                             (uint8_t *)out + written,
+                                             out_len - written,
+                                             src,
+                                             in_len);
+    if (!r)
+      return 0;
+    written += r;
+    return written;
+  }
+  if (written)
+    return written;
+  /* Empty flush: emit just the sync flush segment. */
+  return fio___deflate_stream_compress(s, out, out_len, NULL, 0);
+}
+
+FIO_SFUNC size_t fio___deflate_push_compress_transaction(fio_deflate_s *s,
+                                                         void *out,
+                                                         size_t out_len,
+                                                         const void *in,
+                                                         size_t in_len,
+                                                         int flush) {
+  size_t saved_len = s->buf_len;
+  uint8_t saved_buf[FIO___DEFLATE_STREAM_BUF_MAX];
+  uint8_t saved_window[FIO___DEFLATE_WINDOW_SIZE];
+  uint32_t saved_pos = 0;
+  if (!flush && saved_len)
+    FIO_MEMCPY(saved_buf, s->buf, saved_len);
+  if (s->takeover) {
+    fio___deflate_takeover_s *tk = (fio___deflate_takeover_s *)s->tk;
+    saved_pos = tk->window_pos;
+    FIO_MEMCPY(saved_window, tk->window, saved_pos);
+  }
+  size_t result =
+      fio___deflate_push_compress(s, out, out_len, in, in_len, flush);
+  if (!result) {
+    s->buf_len = saved_len;
+    if (!flush && saved_len)
+      FIO_MEMCPY(s->buf, saved_buf, saved_len);
+    if (s->takeover) {
+      fio___deflate_takeover_s *tk = (fio___deflate_takeover_s *)s->tk;
+      tk->window_pos = saved_pos;
+      FIO_MEMCPY(tk->window, saved_window, saved_pos);
+    }
+  }
+  return result;
+}
+
 void fio_deflate_push___(void); /* IDE Marker */
 SFUNC size_t fio_deflate_push FIO_NOOP(fio_deflate_s *s,
                                        void *out,
@@ -3849,64 +3979,17 @@ SFUNC size_t fio_deflate_push FIO_NOOP(fio_deflate_s *s,
     return 0;
 
   if (s->is_compress) {
-    const uint8_t *src = (const uint8_t *)in;
-    size_t written = 0;
-    if (!flush && src && in_len) {
-      /* Buffered mode: accumulate fragments up to the cap, auto-compressing
-       * full buffers (each emitted piece is a complete sync-flushed
-       * segment, so call boundaries stay byte-aligned and self-contained). */
-      while (in_len) {
-        size_t room = FIO___DEFLATE_STREAM_BUF_MAX - s->buf_len;
-        size_t take = in_len < room ? in_len : room;
-        if (fio___deflate_stream_buf_grow(s, take))
-          return 0;
-        FIO_MEMCPY(s->buf + s->buf_len, src, take);
-        s->buf_len += take;
-        src += take;
-        in_len -= take;
-        if (s->buf_len < FIO___DEFLATE_STREAM_BUF_MAX)
-          return written ? written : 0; /* still buffering */
-        size_t r = fio___deflate_stream_compress(s,
-                                                 (uint8_t *)out + written,
-                                                 out_len - written,
-                                                 s->buf,
-                                                 s->buf_len);
-        if (!r)
-          return 0; /* output overflow / scratch contention */
-        written += r;
-        s->buf_len = 0;
-      }
-      return written;
-    }
-
-    /* flush requested: compress any buffered prefix first (its own complete
-     * segment), then the caller's data directly (no copy). */
-    if (s->buf_len) {
-      size_t r = fio___deflate_stream_compress(s,
-                                               (uint8_t *)out + written,
-                                               out_len - written,
-                                               s->buf,
-                                               s->buf_len);
-      if (!r)
-        return 0;
-      written += r;
-      s->buf_len = 0;
-    }
-    if (src && in_len) {
-      size_t r = fio___deflate_stream_compress(s,
-                                               (uint8_t *)out + written,
-                                               out_len - written,
-                                               src,
-                                               in_len);
-      if (!r)
-        return 0;
-      written += r;
-      return written;
-    }
-    if (written)
-      return written;
-    /* Empty flush: emit just the sync flush segment. */
-    return fio___deflate_stream_compress(s, out, out_len, NULL, 0);
+    if ((!in && in_len) || in_len > 0xFFFF0000U)
+      return 0;
+    if ((!s->buf_len && flush) ||
+        (!flush && in_len < FIO___DEFLATE_STREAM_BUF_MAX - s->buf_len))
+      return fio___deflate_push_compress(s, out, out_len, in, in_len, flush);
+    return fio___deflate_push_compress_transaction(s,
+                                                   out,
+                                                   out_len,
+                                                   in,
+                                                   in_len,
+                                                   flush);
   }
 
   /* Streaming decompression: accumulate compressed input */
@@ -3928,8 +4011,8 @@ SFUNC size_t fio_deflate_push FIO_NOOP(fio_deflate_s *s,
    * truncated multi-block streams) and no input copy. */
   if (fio___deflate_stream_buf_grow(s, 9))
     return 0;
-  static const uint8_t completion[9] = {0x00, 0x00, 0xFF, 0xFF, 0x01,
-                                        0x00, 0x00, 0xFF, 0xFF};
+  static const uint8_t completion[9] =
+      {0x00, 0x00, 0xFF, 0xFF, 0x01, 0x00, 0x00, 0xFF, 0xFF};
   FIO_MEMCPY(s->buf + s->buf_len, completion, 9);
   size_t comp_len = s->buf_len + 9;
 

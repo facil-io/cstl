@@ -137,10 +137,6 @@ FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 #define S_IRWXU  (_S_IREAD | _S_IWRITE)
 #endif /* S_IWUSR */
 
-#ifndef O_TMPFILE
-#define O_TMPFILE O_TEMPORARY
-#endif
-
 #if defined(CLOCK_REALTIME) && defined(CLOCK_MONOTONIC) &&                     \
     CLOCK_REALTIME == CLOCK_MONOTONIC
 #undef CLOCK_MONOTONIC
@@ -168,10 +164,10 @@ FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset);
 #endif
 
 #if !defined(fstat)
-#define fstat _fstat
+#define fstat _fstati64
 #endif /* fstat */
 #if !defined(stat)
-#define stat _stat
+#define stat _stati64
 #endif /* stat */
 #if !defined(lseek)
 #define lseek _lseeki64
@@ -192,11 +188,10 @@ Patched function Implementation
 FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   if (!tv)
     return -1;
-  static union {
+  union {
     uint64_t u;
     LARGE_INTEGER li;
   } freq = {.u = 0};
-  static double tick2n = 0;
   union {
     uint64_t u;
     FILETIME ft;
@@ -222,39 +217,72 @@ FIO_SFUNC int clock_gettime(const uint32_t clk_type, struct timespec *tv) {
   case CLOCK_MONOTONIC:
     if (!QueryPerformanceCounter(&tu.li))
       goto realtime_clock;
-    if (!freq.u)
-      QueryPerformanceFrequency(&freq.li);
-    if (!freq.u) {
-      tick2n = 0;
-      freq.u = 1;
-    } else {
-      tick2n = (double)1000000000 / freq.u;
-    }
-    tv->tv_sec = tu.u / freq.u;
+    /* QPC frequency is fixed for the boot. Query into local state so calls
+     * from different threads never share mutable conversion data. */
+    if (!QueryPerformanceFrequency(&freq.li) || freq.li.QuadPart <= 0)
+      goto realtime_clock;
+    tv->tv_sec = (time_t)(tu.u / freq.u);
     tv->tv_nsec =
-        (uint64_t)(0ULL + ((double)(tu.u - (tv->tv_sec * freq.u)) * tick2n));
+        (long)((double)(tu.u % freq.u) * (1000000000.0 / (double)freq.u));
     return 0;
   }
   return -1;
 }
 #endif /* __MINGW32__ */
 
-/** patch for pwrite */
+/** Positional write compatibility shim. On synchronous Windows handles the
+ * cursor must be saved/restored: callers must serialize operations on the same
+ * file description (including duplicated descriptors), as with lseek + write.
+ * Native overlapped handles are supported, but this call waits for completion.
+ */
 FIO_SFUNC ssize_t pwrite(int fd, const void *buf, size_t count, off_t offset) {
-  /* Credit to Jan Biedermann (GitHub: @janbiedermann) */
-  ssize_t bytes_written = 0;
+  if (offset < 0) {
+    errno = EINVAL;
+    return -1;
+  }
   HANDLE handle = (HANDLE)_get_osfhandle(fd);
-  if (handle == INVALID_HANDLE_VALUE)
-    goto bad_file;
+  if (handle == INVALID_HANDLE_VALUE) {
+    errno = EBADF;
+    return -1;
+  }
+  if (GetFileType(handle) != FILE_TYPE_DISK) {
+    errno = ESPIPE;
+    return -1;
+  }
+  if (count && !buf) {
+    errno = EINVAL;
+    return -1;
+  }
+  /* Returning a short write is preferable to DWORD truncation or a signed
+   * return overflow (also on 32-bit Windows). */
+  if (count > INT32_MAX)
+    count = INT32_MAX;
+  LARGE_INTEGER zero = {0}, saved = {0};
+  if (!SetFilePointerEx(handle, zero, &saved, FILE_CURRENT)) {
+    errno = EIO;
+    return -1;
+  }
+  HANDLE event = CreateEventA(NULL, TRUE, FALSE, NULL);
+  if (!event) {
+    errno = ENOMEM;
+    return -1;
+  }
   OVERLAPPED overlapped = {0};
-  if (offset > 0)
-    overlapped.Offset = offset;
-  if (WriteFile(handle, buf, count, (u_long *)&bytes_written, &overlapped))
-    return bytes_written;
+  overlapped.Offset = (DWORD)(uint64_t)offset;
+  overlapped.OffsetHigh = (DWORD)((uint64_t)offset >> 32);
+  /* A private event isolates concurrent completions. Its low bit suppresses
+   * IOCP packets that would otherwise retain a pointer to our stack state. */
+  overlapped.hEvent = (HANDLE)((uintptr_t)event | 1);
+  DWORD written = 0;
+  int ok = WriteFile(handle, buf, (DWORD)count, NULL, &overlapped);
+  if (ok || GetLastError() == ERROR_IO_PENDING)
+    ok = GetOverlappedResult(handle, &overlapped, &written, TRUE);
+  if (!SetFilePointerEx(handle, saved, NULL, FILE_BEGIN))
+    ok = 0;
+  CloseHandle(event);
+  if (ok)
+    return (ssize_t)written;
   errno = EIO;
-  return -1;
-bad_file:
-  errno = EBADF;
   return -1;
 }
 
@@ -294,9 +322,15 @@ FIO_STATIC_ALLOC_DEF(fio___sys_env_buf_new,
  * redefinition of getenv. The returned pointer is valid until the next call. */
 FIO_IFUNC char *fio_sys_env(const char *name) {
   char *buf = fio___sys_env_buf_new(1);
+  SetLastError(ERROR_SUCCESS);
   DWORD r = (GetEnvironmentVariableA)(name, buf, (DWORD)4096);
-  if (!r)
+  if (r >= 4096) { /* required capacity includes NUL; output is undefined */
+    errno = ERANGE;
     return NULL;
+  }
+  if (!r && GetLastError() != ERROR_SUCCESS)
+    return NULL;
+  buf[r] = 0; /* includes an existing, empty value */
   return buf;
 }
 
@@ -307,9 +341,12 @@ FIO_IFUNC int fio_sys_env_set(const char *name,
                               const char *value,
                               int overwrite) {
   if (!overwrite) {
+    SetLastError(ERROR_SUCCESS);
     DWORD r = (GetEnvironmentVariableA)(name, NULL, 0);
-    if (r || GetLastError() != ERROR_ENVVAR_NOT_FOUND)
-      return 0; /* already set — leave it alone */
+    if (r || GetLastError() == ERROR_SUCCESS)
+      return 0; /* already set (possibly empty) — leave it alone */
+    if (GetLastError() != ERROR_ENVVAR_NOT_FOUND)
+      return -1;
   }
   return (SetEnvironmentVariableA)(name, value) ? 0 : -1;
 }

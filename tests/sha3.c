@@ -127,6 +127,25 @@ static void fio___test_shake_kat(void) {
   fio_shake256(out, 64, "abc", 3);
   FIO_ASSERT(!FIO_MEMCMP(out, shake256_abc_64, 64),
              "SHAKE256 \"abc\" 64-byte vector mismatch");
+
+  /* Partial-word outputs must be byte-exact prefixes (endian-sensitive). */
+  for (size_t n = 1; n < 32; ++n) {
+    FIO_MEMSET(out, 0xAA, sizeof(out));
+    fio_shake128(out, n, "abc", 3);
+    FIO_ASSERT(!FIO_MEMCMP(out, shake128_abc_32, n) && out[n] == 0xAA,
+               "SHAKE128 \"abc\" %zu-byte prefix mismatch / overwrite",
+               n);
+  }
+  /* Split squeezes with unaligned offsets must match the known vector. */
+  for (size_t step = 1; step < 9; ++step) {
+    fio_sha3_s h = fio_shake256_init();
+    fio_shake_consume(&h, "abc", 3);
+    for (size_t pos = 0; pos < 64; pos += step)
+      fio_shake_squeeze(&h, out + pos, (64 - pos < step) ? (64 - pos) : step);
+    FIO_ASSERT(!FIO_MEMCMP(out, shake256_abc_64, 64),
+               "SHAKE256 \"abc\" split squeeze (step %zu) mismatch",
+               step);
+  }
 }
 
 /* *****************************************************************************
@@ -149,6 +168,24 @@ static void fio___test_sha3_streaming(void) {
   fio_sha3_finalize(&h, out2);
   FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32),
              "SHA3-256 byte-by-byte streaming mismatch");
+
+  /* Zero-length (NULL) updates, including with a partially filled buffer. */
+  h = fio_sha3_256_init();
+  fio_sha3_consume(&h, NULL, 0);
+  fio_sha3_consume(&h, msg, 5);
+  fio_sha3_consume(&h, NULL, 0);
+  fio_sha3_consume(&h, msg + 5, len - 5);
+  fio_sha3_finalize(&h, out2);
+  FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32),
+             "SHA3-256 streaming with (NULL, 0) updates mismatch");
+  /* Finalization wipes the absorbed data and Keccak state. */
+  {
+    static const fio_sha3_s zero_h;
+    FIO_ASSERT(!FIO_MEMCMP(h.state, zero_h.state, sizeof(h.state)) &&
+                   !FIO_MEMCMP(h.buf, zero_h.buf, sizeof(h.buf)) &&
+                   !h.buflen,
+               "SHA3-256 finalize did not wipe the context");
+  }
 
   /* Chunked streaming. */
   h = fio_sha3_256_init();

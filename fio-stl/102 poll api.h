@@ -18,6 +18,12 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_POLL) && !defined(H___FIO_POLL___H) &&                         \
     !defined(FIO___RECURSIVE_INCLUDE)
 
+/* Fatal exit on poller syscall initialization failure by default. Define 0
+ * before inclusion to receive -1 and errno instead. */
+#ifndef FIO_POLL_EXIT_ON_SYSERR
+#define FIO_POLL_EXIT_ON_SYSERR 1
+#endif
+
 #ifndef FIO_POLL_POSSIBLE_FLAGS
 /** The user flags IO events recognize */
 #define FIO_POLL_POSSIBLE_FLAGS (POLLIN | POLLOUT | POLLPRI)
@@ -87,14 +93,17 @@ typedef struct {
  * thread (via deferred destruction) - never concurrently with a review and
  * never from within a `fio_poll_settings_s` callback. */
 
-/** Initializes the polling object, allocating its resources. */
-FIO_IFUNC void fio_poll_init(fio_poll_s *p, fio_poll_settings_s);
+/** Initializes the polling object, allocating its resources.
+ * Returns 0 on success, -1 on failure (errno set). With
+ * FIO_POLL_EXIT_ON_SYSERR=1, backend syscall failure terminates the process
+ * instead. On a returned failure, the poller may be safely destroyed. */
+IFUNC int fio_poll_init(fio_poll_s *p, fio_poll_settings_s);
 /** Initializes the polling object, allocating its resources. */
 #define fio_poll_init(p, ...)                                                  \
   fio_poll_init((p), (fio_poll_settings_s){__VA_ARGS__})
 
 /** Destroys the polling object, freeing its resources. */
-FIO_IFUNC void fio_poll_destroy(fio_poll_s *p);
+IFUNC void fio_poll_destroy(fio_poll_s *p);
 
 /** returns the system call used for polling as a constant string. */
 FIO_IFUNC const char *fio_poll_engine(void);

@@ -36,13 +36,13 @@ Implementations:
 - fio_aes256_gcm_enc/dec (153 aes.h)
 ***************************************************************************** */
 
-typedef void(fio_crypto_enc_fn)(void *restrict mac,
-                                void *restrict data,
-                                size_t len,
-                                const void *ad, /* additional data */
-                                size_t adlen,
-                                const void *key,
-                                const void *nonce);
+typedef int(fio_crypto_enc_fn)(void *restrict mac,
+                               void *restrict data,
+                               size_t len,
+                               const void *ad, /* additional data */
+                               size_t adlen,
+                               const void *key,
+                               const void *nonce);
 typedef int(fio_crypto_dec_fn)(void *restrict mac,
                                void *restrict data,
                                size_t len,

@@ -1719,9 +1719,123 @@ static void test_invalid_huffman_tables(void) {
               "distance-table hole in counting mode must be rejected");
 }
 
+/* Security report 089: boundary and failed-output regressions. */
+static void test_security_boundaries(void) {
+  uint8_t compressed[1024], out[1024];
+  TEST_ASSERT(fio_deflate_compress(compressed, sizeof(compressed), "x",
+                                   (size_t)0xFFFFFF01U, 1) == 0,
+              "unrepresentable matcher input must be rejected before reading");
+  /* Fixed block: literal A, length 3 / distance 1, EOB => AAAA. */
+  static const uint8_t match[] = {0x73, 0x04, 0x02, 0x00};
+  for (size_t cap = 0; cap <= 5; ++cap) {
+    size_t r = fio_deflate_decompress(out, cap, match, sizeof(match));
+    TEST_ASSERT(r == 4, "match overflow cap=%zu returned %zu", cap, r);
+  }
+  for (size_t i = 0; i < 4; ++i)
+    TEST_ASSERT(fio_deflate_decompress_bound(i) == 4096,
+                "tiny decompression bound %zu",
+                i);
+  TEST_ASSERT(fio_deflate_compress_bound((size_t)-1) == (size_t)-1,
+              "compression bound must saturate");
+  for (size_t cap = 18; cap < 23; ++cap)
+    TEST_ASSERT(fio_gzip_compress(compressed, cap, "", 0, 1) == 0,
+                "empty gzip must not succeed without payload, cap=%zu",
+                cap);
+  size_t gz_len = fio_gzip_compress(compressed, sizeof(compressed), "x", 1, 1);
+  TEST_ASSERT(gz_len > 18, "gzip header fixture");
+  if (gz_len > 18) {
+    memmove(compressed + 12, compressed + 10, gz_len - 10);
+    compressed[3] = 2;
+    fio_u2buf16_le(compressed + 10, (uint16_t)fio_crc32(compressed, 10, 0));
+    TEST_ASSERT(fio_gzip_decompress(out, sizeof(out), compressed, gz_len + 2) == 1,
+                "valid gzip FHCRC");
+    compressed[10] ^= 1;
+    TEST_ASSERT(fio_gzip_decompress(out, sizeof(out), compressed, gz_len + 2) == 0,
+                "invalid gzip FHCRC");
+    compressed[3] = 0xE0;
+    TEST_ASSERT(fio_gzip_decompress(out, sizeof(out), compressed, gz_len + 2) == 0,
+                "reserved gzip flags");
+  }
+  /* Reserved fixed litlen symbols 286 and 287. */
+  static const uint8_t reserved[][3] = {{0x1b, 0x03, 0}, {0x1b, 0x07, 0}};
+  for (size_t i = 0; i < 2; ++i)
+    TEST_ASSERT(fio_deflate_decompress(out, sizeof(out), reserved[i], 3) == 0,
+                "reserved fixed litlen %zu",
+                i + 286);
+  /* Reserved distance symbols, including extra bits that used to turn
+   * the invalid entry into distance 1. */
+  for (uint32_t sym = 30; sym < 32; ++sym) {
+    uint8_t lens[288], dlens[32];
+    uint16_t codes[288], dcodes[32];
+    fio___deflate_fixed_litlen_lens(lens);
+    fio___deflate_fixed_dist_lens(dlens);
+    fio___deflate_build_codes(codes, lens, 288);
+    fio___deflate_build_codes(dcodes, dlens, 32);
+    fio___deflate_bitwriter_s w;
+    fio___deflate_bitwriter_init(&w, compressed, sizeof(compressed));
+    fio___deflate_bitwriter_put(&w, 3, 3);
+    fio___deflate_bitwriter_put_huff(&w, codes['A'], lens['A']);
+    fio___deflate_bitwriter_put_huff(&w, codes[257], lens[257]);
+    fio___deflate_bitwriter_put_huff(&w, dcodes[sym], dlens[sym]);
+    fio___deflate_bitwriter_put(&w, 1, sym);
+    fio___deflate_bitwriter_put_huff(&w, codes[256], lens[256]);
+    size_t n = fio___deflate_bitwriter_finish(&w, compressed);
+    TEST_ASSERT(fio_deflate_decompress(out, sizeof(out), compressed, n) == 0,
+                "reserved distance %u",
+                sym);
+    TEST_ASSERT(fio_deflate_decompress(NULL, 0, compressed, n) == 0,
+                "reserved distance query %u",
+                sym);
+  }
+  /* Exact allocations exercise the second wide refill at the input tail. */
+  for (size_t n = 9; n < 32; ++n) {
+    uint8_t *tail = malloc(n);
+    TEST_ASSERT(tail != NULL, "tail allocation");
+    if (!tail)
+      continue;
+    for (uint32_t seed = 1; seed <= 256; ++seed) {
+      fio___deflate_fill(tail, n, seed);
+      tail[0] = (tail[0] & 0xF8) | 3; /* final fixed-Huffman block */
+      (void)fio_deflate_decompress(out, sizeof(out), tail, n);
+    }
+    free(tail);
+  }
+  fio_deflate_s *c = fio_deflate_new_takeover(1, 1);
+  fio_deflate_s *d = fio_deflate_new_takeover(0, 0);
+  TEST_ASSERT(c && d, "transaction contexts");
+  if (c && d) {
+    size_t n =
+        fio_deflate_push(c, compressed, sizeof(compressed), "AAAA", 4, 1);
+    TEST_ASSERT(n > 4, "initial takeover output");
+    fio_deflate_free(c);
+    c = fio_deflate_new_takeover(1, 1);
+    TEST_ASSERT(fio_deflate_push(c, compressed, n - 1, "AAAA", 4, 1) == 0,
+                "trailer-only shortage must fail");
+    TEST_ASSERT(((fio___deflate_takeover_s *)c->tk)->window_pos == 0,
+                "failed compression must not commit history");
+    (void)fio_deflate_push(c, compressed, sizeof(compressed), "prefix", 6, 0);
+    TEST_ASSERT(fio_deflate_push(c, compressed, 12, out, sizeof(out), 1) == 0,
+                "prefix plus data shortage");
+    TEST_ASSERT(c->buf_len == 6 && !memcmp(c->buf, "prefix", 6),
+                "failed compression must retain buffered prefix");
+    size_t r =
+        fio_deflate_push(c, compressed, sizeof(compressed), "suffix", 6, 1);
+    TEST_ASSERT(r > 4, "retry compression succeeds");
+    if (r > 4) {
+      size_t decoded =
+          fio_deflate_push(d, out, sizeof(out), compressed, r - 4, 1);
+      TEST_ASSERT(decoded == 12 && !memcmp(out, "prefixsuffix", 12),
+                  "retry retains prefix and peer-compatible history");
+    }
+  }
+  fio_deflate_free(c);
+  fio_deflate_free(d);
+}
+
 int main(void) {
   fprintf(stderr, "=== DEFLATE/INFLATE Correctness Test Suite ===\n\n");
 
+  test_security_boundaries();
   test_known_stored_block();
   test_raw_roundtrip_levels();
   test_edges_and_errors();

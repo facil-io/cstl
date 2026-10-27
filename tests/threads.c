@@ -71,7 +71,7 @@ FIO_SFUNC void *fio___test_thread_identity_fn(void *arg) {
   state->self = fio_thread_current();
   state->nid = fio_thread_nid();
   state->nid_repeat = fio_thread_nid();
-  fio_atomic_exchange(&state->ready, 1);
+  fio_atomic_or(&state->ready, 1);
   int release = 0;
   while (!release) {
     fio_atomic_load(release, &state->release);
@@ -106,7 +106,7 @@ FIO_SFUNC void fio___test_thread_identity(void) {
   FIO_ASSERT(main_nid != child.nid,
              "Live threads should have different numeral IDs");
 
-  fio_atomic_exchange(&child.release, 1);
+  fio_atomic_or(&child.release, 1);
   result = fio_thread_join(&child_thread);
   FIO_ASSERT(result == 0, "fio_thread_join should succeed");
 
@@ -168,7 +168,7 @@ FIO_SFUNC void *fio___test_thread_detach_fn(void *arg) {
   for (volatile int i = 0; i < 1000; ++i) {
     fio_thread_yield();
   }
-  fio_atomic_exchange(flag, 1);
+  fio_atomic_or(flag, 1);
   return NULL;
 }
 

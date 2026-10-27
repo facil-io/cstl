@@ -103,7 +103,30 @@ int main(void) {
     FIO_MEMSET(buf, 'X', 47);
     fio_time2log(buf, now);
   }
-  /* TODO: test fio_time_add, fio_time_add_milli, and fio_time_cmp */
+  {
+    struct timespec zero = {0, 0}, ten = {10, 0};
+    struct timespec result = fio_time_add(zero, (struct timespec){0, 1000000001L});
+    FIO_ASSERT(result.tv_sec == 1 && result.tv_nsec == 1,
+               "nanosecond carry must normalize");
+    result = fio_time_add(ten, (struct timespec){0, -1});
+    FIO_ASSERT(result.tv_sec == 9 && result.tv_nsec == 999999999L,
+               "nanosecond borrow must normalize");
+    result = fio_time_add_milli(zero, 30000);
+    FIO_ASSERT(result.tv_sec == 30 && result.tv_nsec == 0,
+               "milliseconds must use base 1000");
+    result = fio_time_add_milli(zero, -1);
+    FIO_ASSERT(result.tv_sec == -1 && result.tv_nsec == 999000000L,
+               "negative milliseconds must normalize");
+    FIO_ASSERT(fio_time_cmp((struct timespec){0, 100},
+                            (struct timespec){1, 0}) < 0,
+               "comparison must prioritize seconds");
+  }
+  if (sizeof(time_t) > sizeof(ssize_t)) {
+    struct tm future = fio_time2gm((time_t)2147483648LL);
+    FIO_ASSERT(future.tm_year == 138 && future.tm_mon == 0 &&
+                   future.tm_mday == 19 && future.tm_wday == 2,
+               "2038 must not narrow through ssize_t");
+  }
 }
 #undef FIO___GMTIME_TEST_INTERVAL
 #undef FIO___GMTIME_TEST_RANGE

@@ -49,8 +49,6 @@ Optional companion macros (e.g. `FIO_ARRAY_TYPE`, `FIO_MAP_KEY`, `FIO_MAP_VALUE`
 | Reference Counting | `FIO_REF_NAME` | [→ 249 reference counter.md](./249 reference counter.md) |
 | FIOBJ Soft Types | `FIO_FIOBJ` | [→ 250 fiobj.md](./250 fiobj.md) |
 
-> **Note:** `210 map2.h` is a legacy file kept for backward compatibility and is not part of this active module group.
-
 ---
 
 ## Quick Example — Three Types, One File

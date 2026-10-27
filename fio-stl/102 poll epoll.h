@@ -22,6 +22,7 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
+#include <limits.h>
 #include <sys/epoll.h>
 
 /* *****************************************************************************
@@ -37,26 +38,48 @@ struct fio_poll_s {
 
 FIO_SFUNC void fio___epoll_after_fork(void *p_) {
   fio_poll_s *p = (fio_poll_s *)p_;
+  fio_poll_settings_s settings = p->settings;
   fio_poll_destroy(p);
-  fio_poll_init FIO_NOOP(p, p->settings);
+  (void)fio_poll_init FIO_NOOP(p, settings);
 }
 
 /** Initializes the polling object, allocating its resources. */
-FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
+IFUNC int fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
+  if (!p) {
+    errno = EINVAL;
+    return -1;
+  }
   *p = (fio_poll_s){
       .settings = args,
       .fds =
           {
-              {.fd = epoll_create1(0), .events = (POLLIN | POLLOUT)},
-              {.fd = epoll_create1(0), .events = (POLLIN | POLLOUT)},
+              {.fd = -1, .events = (POLLIN | POLLOUT)},
+              {.fd = -1, .events = (POLLIN | POLLOUT)},
           },
   };
+  for (size_t i = 0; i < 2; ++i) {
+    p->fds[i].fd = epoll_create1(EPOLL_CLOEXEC);
+    if (p->fds[i].fd == -1) {
+      const int err = errno;
+      for (size_t j = 0; j < i; ++j) {
+        close(p->fds[j].fd);
+        p->fds[j].fd = -1;
+      }
+#if FIO_POLL_EXIT_ON_SYSERR
+      FIO_LOG_FATAL("couldn't open epoll.\n");
+      exit(err);
+#endif
+      errno = err;
+      return -1;
+    }
+  }
   FIO_POLL_VALIDATE(p->settings);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___epoll_after_fork, p);
+  return 0;
 }
 
 /** Destroys the polling object, freeing its resources. */
-FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
+IFUNC void fio_poll_destroy(fio_poll_s *p) {
   for (size_t i = 0; i < 2; ++i) {
     if (p->fds[i].fd != -1)
       close(p->fds[i].fd);
@@ -100,8 +123,8 @@ FIO_IFUNC int fio___epoll_add2(fio_socket_i fd,
  * Adds a file descriptor to be monitored, adds events to be monitored or
  * updates the monitored file's `udata`.
  *
- * Possible flags are: `POLLIN` and `POLLOUT`. Other flags may be set but might
- * be ignored.
+ * Possible flags are: `POLLIN`, `POLLPRI` and `POLLOUT`. Other flags may be
+ * set but might be ignored.
  *
  * Monitoring mode is always one-shot. If an event if fired, it is removed from
  * the monitoring state.
@@ -118,10 +141,12 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
                           udata,
                           (EPOLLOUT | EPOLLRDHUP | EPOLLHUP | EPOLLONESHOT),
                           p->fds[0].fd);
-  if ((flags & POLLIN))
+  if ((flags & (POLLIN | POLLPRI)))
     r |= fio___epoll_add2(fd,
                           udata,
-                          (EPOLLIN | EPOLLRDHUP | EPOLLHUP | EPOLLONESHOT),
+                          ((flags & POLLIN ? EPOLLIN : 0) |
+                           (flags & POLLPRI ? EPOLLPRI : 0) | EPOLLRDHUP |
+                           EPOLLHUP | EPOLLONESHOT),
                           p->fds[1].fd);
   return r;
 }
@@ -153,22 +178,20 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   int total = 0;
   struct epoll_event events[FIO_POLL_MAX_EVENTS];
   /* wait for events and handle them */
-  int internal_count = poll(p->fds, 2, timeout);
+  int internal_count =
+      poll(p->fds, 2, timeout > (size_t)INT_MAX ? INT_MAX : (int)timeout);
   if (internal_count <= 0)
     return total;
   int active_count = epoll_wait(p->fds[0].fd, events, FIO_POLL_MAX_EVENTS, 0);
   if (active_count > 0) {
-    /* errors are dispatched via the EPOLLIN queue (see below) */
+    /* write-side errors and hang-ups are reported as closure */
     for (unsigned i = 0; i < (unsigned)active_count; i++) {
-      if (events[i].events & EPOLLOUT) {
-        /* an error/hangup on a writable event is a closure, not readiness
-         * (poll backend parity): a failed non-blocking connect reports
-         * EPOLLOUT together with EPOLLERR/EPOLLHUP. */
-        if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
-          p->settings.on_close(events[i].data.ptr);
-        else
-          p->settings.on_ready(events[i].data.ptr);
-      }
+      /* Errors can arrive without EPOLLOUT (e.g. a full pipe whose reader
+       * closes). A ready event with an error is a closure, not writability. */
+      if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
+        p->settings.on_close(events[i].data.ptr);
+      else if (events[i].events & EPOLLOUT)
+        p->settings.on_ready(events[i].data.ptr);
     } // end for loop
     total += active_count;
   }
@@ -176,10 +199,10 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   if (active_count > 0) {
     for (unsigned i = 0; i < (unsigned)active_count; i++) {
       // holds an active event(s)
-      if (events[i].events & EPOLLIN)
+      if (events[i].events & (EPOLLIN | EPOLLPRI))
         p->settings.on_data(events[i].data.ptr);
       // errors are handled as disconnections (on_close), but only once...
-      if (events[i].events & (~(EPOLLIN | EPOLLOUT)))
+      if (events[i].events & (EPOLLERR | EPOLLHUP | EPOLLRDHUP))
         p->settings.on_close(events[i].data.ptr);
     } // end for loop
     total += active_count;

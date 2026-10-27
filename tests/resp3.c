@@ -493,7 +493,9 @@ static void *test_push_done(void *udata, void *ctx) {
 static void *test_attr_done(void *udata, void *ctx) {
   (void)udata;
   ++test_state.attr_done_count;
-  return ctx;
+  /* Attributes are metadata; parser discards the returned context. */
+  test_obj_free((test_obj_s *)ctx);
+  return NULL;
 }
 
 static void test_free_unused(void *udata, void *obj) {
@@ -516,15 +518,8 @@ static void *test_on_start_string(void *udata, size_t len, uint8_t type) {
   test_state.last_start_string_type = type;
   /* Create a string object to accumulate data */
   test_obj_s *obj = test_obj_new(TEST_OBJ_STRING);
-  if (obj) {
+  if (obj)
     obj->data.str.resp_type = type;
-    /* Pre-allocate if length is known */
-    if (len != (size_t)-1 && len > 0) {
-      obj->data.str.data = (char *)FIO_MEM_REALLOC(NULL, 0, len + 1, 0);
-      if (obj->data.str.data)
-        obj->data.str.data[0] = '\0';
-    }
-  }
   return obj;
 }
 
@@ -1103,9 +1098,11 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_udata)(void) {
   parser.udata = &test_state;
 
   const char *data = ":42\r\n";
-  fio_resp3_parse(&parser, &test_callbacks, data, strlen(data));
+  fio_resp3_result_s r =
+      fio_resp3_parse(&parser, &test_callbacks, data, strlen(data));
 
   /* If callbacks were called, test_state was modified */
+  test_obj_free((test_obj_s *)r.obj);
   FIO_ASSERT(test_state.number_count == 1, "Callback was called with udata");
   (void)expected_ptr;
   (void)udata_received;
@@ -1705,6 +1702,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_streaming_negative_chunk)(void) {
   FIO_ASSERT(test_state.parser_error_count == 1,
              "on_error_protocol should be called once (got %d)",
              test_state.parser_error_count);
+  if (parser.streaming_string_ctx)
+    test_obj_free((test_obj_s *)parser.streaming_string_ctx);
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, resp3_overflowing_int)(void) {
@@ -2139,6 +2138,563 @@ FIO_SFUNC void FIO_NAME_TEST(stl, resp3_stream_blob_in_array)(void) {
   FIO_MEM_FREE(wire, total);
 }
 
+/* Security regressions: callbacks create owned contexts. An error leaves
+ * partial aggregate/string contexts with the caller, not the parser. */
+static void test_security_dispose(fio_resp3_parser_s *p, fio_resp3_result_s r) {
+  for (uint32_t i = p->depth; i > 0; --i) {
+    fio_resp3_frame_s *f = &p->stack[i - 1];
+    if (f->key)
+      test_obj_free((test_obj_s *)f->key);
+    test_obj_free((test_obj_s *)f->ctx);
+  }
+  if (p->streaming_string_ctx)
+    test_obj_free((test_obj_s *)p->streaming_string_ctx);
+  if (r.obj)
+    test_obj_free((test_obj_s *)r.obj);
+  p->depth = 0;
+  p->streaming_string_ctx = NULL;
+}
+
+/* Rejected input must be a protocol error, never a successful prefix that
+ * leaves a following top-level value to be misrouted. */
+static void test_security_reject(const char *wire, int streaming) {
+  test_state_reset();
+  fio_resp3_parser_s p = {.udata = &test_state};
+  fio_resp3_result_s r =
+      fio_resp3_parse(&p,
+                      streaming ? &test_streaming_callbacks : &test_callbacks,
+                      wire,
+                      FIO_STRLEN(wire));
+  int rejected = !!r.err && !!p.error;
+  test_security_dispose(&p, r);
+  FIO_ASSERT(rejected, "malformed RESP3 accepted: %s", wire);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_numeric)(void) {
+  /* Each of ten independently parsed integer fields: empty, sign-only,
+   * and suffix junk. Values/counts are deliberately small for bounded tests. */
+  static const char *const bad[] = {
+      ":\r\n",       ":+\r\n",       ":12x\r\n",
+      "$\r\n\r\n",   "$-\r\n",       "$1x\r\na\r\n",
+      "!\r\n\r\n",   "!+\r\n",       "!1x\r\na\r\n",
+      "=\r\n\r\n",   "=-\r\n",       "=4x\r\ntxt:a\r\n",
+      "*\r\n",       "*+\r\n",       "*1x\r\n:1\r\n",
+      "%\r\n",       "%-\r\n",       "%1x\r\n+a\r\n:1\r\n",
+      "~\r\n",       "~+\r\n",       "~1x\r\n:1\r\n",
+      ">\r\n",       ">-\r\n",       ">1x\r\n:1\r\n",
+      "|\r\n:1\r\n", "|+\r\n:1\r\n", "|1x\r\n+a\r\n:1\r\n:2\r\n",
+      "$?\r\n;\r\n", "$?\r\n;+\r\n", "$?\r\n;1x\r\na\r\n;0\r\n",
+  };
+  for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); ++i)
+    test_security_reject(bad[i], 1);
+  test_security_reject("$?x\r\n;0\r\n", 1);
+  test_security_reject("*?x\r\n.\r\n", 0);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_grammar)(void) {
+  static const char *const malformed[] = {
+      "+A\n",
+      "-A\n",
+      ":1\n",
+      "_x\r\n",
+      "_\n",
+      "#x\r\n",
+      "#true\r\n",
+      "#t\n",
+      ",1.2x\r\n",
+      ",infinity\r\n",
+      ",+infx\r\n",
+      ",nanx\r\n",
+      ",.1\r\n",
+      ",1.\r\n",
+      ",1e\r\n",
+      ",1e+\r\n",
+      ",e1\r\n",
+      ",+\r\n",
+      ",1e2junk\r\n",
+      "(\r\n",
+      "(1x\r\n",
+      "(+\r\n",
+      "$1\r\nAx\n",
+      "$1\r\nA:7\r\n",
+      "!1\r\nAx\n",
+      "=4\r\nab:c\r\n",
+      "=3\r\nabc\r\n",
+      "=4\r\nxy:c\r\n",
+      "*0\n",
+      ".\r\n",
+      "*1\r\n.\r\n",
+      "%?\r\n+k\r\n.\r\n",
+      "$?\r\n;1\r\nAx\n;0\r\n",
+  };
+  for (size_t i = 0; i < sizeof(malformed) / sizeof(*malformed); ++i)
+    test_security_reject(malformed[i], 1);
+  /* Reject chunk-state intrusion rather than producing an intermediate reply.
+   */
+  test_security_reject("$?\r\n:7\r\n;0\r\n", 1);
+  test_security_reject("$?\r\n$0\r\n\r\n;0\r\n", 1);
+  test_security_reject("$?\r\n$?\r\n;0\r\n", 1);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_valid_specials)(void) {
+  static const char *const nan_cases[] = {",nan\r\n", ",NaN\r\n", ",-NAN\r\n"};
+  for (size_t i = 0; i < sizeof(nan_cases) / sizeof(*nan_cases); ++i) {
+    test_state_reset();
+    fio_resp3_parser_s p = {.udata = &test_state};
+    fio_resp3_result_s r = fio_resp3_parse(&p,
+                                           &test_callbacks,
+                                           nan_cases[i],
+                                           FIO_STRLEN(nan_cases[i]));
+    FIO_ASSERT(!r.err && r.consumed == FIO_STRLEN(nan_cases[i]) && r.obj &&
+                   isnan(test_state.last_double),
+               "historical exact NaN must remain accepted (%zu)",
+               i);
+    test_security_dispose(&p, r);
+  }
+  /* RESP3 permits future three-character printable format identifiers. */
+  const char *verbatim = "=5\r\nabc:X\r\n";
+  for (int streaming = 0; streaming <= 1; ++streaming) {
+    test_state_reset();
+    fio_resp3_parser_s p = {.udata = &test_state};
+    fio_resp3_result_s r =
+        fio_resp3_parse(&p,
+                        streaming ? &test_streaming_callbacks : &test_callbacks,
+                        verbatim,
+                        FIO_STRLEN(verbatim));
+    test_obj_s *obj = (test_obj_s *)r.obj;
+    FIO_ASSERT(!r.err && r.consumed == FIO_STRLEN(verbatim) && obj &&
+                   obj->type == TEST_OBJ_STRING &&
+                   obj->data.str.resp_type == FIO_RESP3_VERBATIM &&
+                   obj->data.str.len == 5 &&
+                   !FIO_MEMCMP(obj->data.str.data, "abc:X", 5),
+               "future verbatim format remains valid (%d)",
+               streaming);
+    test_security_dispose(&p, r);
+  }
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_incremental)(void) {
+  /* A split CRLF is valid and each consumed byte must make progress. */
+  const char *parts[] = {"$?\r\n;3\r\nab", "c", "\r", "\n", ";0\r\n"};
+  test_state_reset();
+  fio_resp3_parser_s p = {.udata = &test_state};
+  fio_resp3_result_s r = {0};
+  for (size_t i = 0; i < sizeof(parts) / sizeof(*parts); ++i) {
+    r = fio_resp3_parse(&p,
+                        &test_streaming_callbacks,
+                        parts[i],
+                        FIO_STRLEN(parts[i]));
+    FIO_ASSERT(!r.err && r.consumed == FIO_STRLEN(parts[i]),
+               "valid split chunk CRLF progress (%zu)",
+               i);
+    if (i + 1 != sizeof(parts) / sizeof(*parts))
+      FIO_ASSERT(!r.obj, "chunk must not finish before ;0 CRLF");
+  }
+  FIO_ASSERT(r.obj && ((test_obj_s *)r.obj)->data.str.len == 3 &&
+                 !FIO_MEMCMP(((test_obj_s *)r.obj)->data.str.data, "abc", 3),
+             "split chunk result");
+  test_security_dispose(&p, r);
+
+  /* A wrong LF after a split CR must fail, not finish the blob. */
+  test_state_reset();
+  p = (fio_resp3_parser_s){.udata = &test_state};
+  const char *partial = "$?\r\n;1\r\na\r";
+  r = fio_resp3_parse(&p,
+                      &test_streaming_callbacks,
+                      partial,
+                      FIO_STRLEN(partial));
+  FIO_ASSERT(!r.err, "partial chunk CR");
+  r = fio_resp3_parse(&p, &test_streaming_callbacks, "x", 1);
+  int rejected = !!r.err && !!p.error;
+  test_security_dispose(&p, r);
+  FIO_ASSERT(rejected, "wrong split chunk LF accepted");
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_large_chunk)(void) {
+  /* Valid chunk > Redis's bounded 64-KiB read buffer. Feed at most 8 KiB
+   * per call, so a parser requiring a contiguous chunk stalls immediately. */
+  enum { CHUNK = 65537, STEP = 8192 };
+  const char header[] = "$?\r\n;65537\r\n";
+  char data[STEP];
+  FIO_MEMSET(data, 'q', sizeof(data));
+  test_state_reset();
+  fio_resp3_parser_s p = {.udata = &test_state};
+  fio_resp3_result_s r = fio_resp3_parse(&p,
+                                         &test_streaming_callbacks,
+                                         header,
+                                         sizeof(header) - 1);
+  FIO_ASSERT(!r.err && r.consumed == sizeof(header) - 1,
+             "chunk header progress");
+  size_t sent = 0;
+  while (sent < CHUNK) {
+    size_t n = CHUNK - sent < STEP ? CHUNK - sent : STEP;
+    r = fio_resp3_parse(&p, &test_streaming_callbacks, data, n);
+    FIO_ASSERT(!r.err && r.consumed == n && !r.obj,
+               "large chunk must advance in bounded read buffer at %zu",
+               sent);
+    sent += n;
+  }
+  r = fio_resp3_parse(&p, &test_streaming_callbacks, "\r", 1);
+  FIO_ASSERT(!r.err && r.consumed == 1 && !r.obj, "split chunk CR");
+  r = fio_resp3_parse(&p, &test_streaming_callbacks, "\n;0\r\n", 5);
+  FIO_ASSERT(!r.err && r.consumed == 5 && r.obj,
+             "split chunk LF and terminator complete");
+  FIO_ASSERT(((test_obj_s *)r.obj)->data.str.len == CHUNK,
+             "large chunk length");
+  test_security_dispose(&p, r);
+}
+
+/* F1: an attribute annotates the next element; it is not an element of
+ * any fixed parent. Complete metadata before separately feeding its value. */
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_nested_attributes)(void) {
+  static const struct {
+    const char *prefix;
+    const char *suffix;
+    test_obj_type_e type;
+    size_t count;
+  } cases[] = {
+      {"*1\r\n|1\r\n+k\r\n+v\r\n", ":7\r\n", TEST_OBJ_ARRAY, 1},
+      {"~1\r\n|1\r\n+k\r\n+v\r\n", ":7\r\n", TEST_OBJ_SET, 1},
+      {">1\r\n|1\r\n+k\r\n+v\r\n", ":7\r\n", TEST_OBJ_PUSH, 1},
+      {"%1\r\n|1\r\n+k\r\n+v\r\n", "+key\r\n:7\r\n", TEST_OBJ_MAP, 1},
+      {"%1\r\n+key\r\n|1\r\n+k\r\n+v\r\n", ":7\r\n", TEST_OBJ_MAP, 1},
+      {"*1\r\n|1\r\n+k\r\n+v\r\n|1\r\n+x\r\n+y\r\n",
+       ":7\r\n",
+       TEST_OBJ_ARRAY,
+       1},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    test_state_reset();
+    fio_resp3_parser_s p = {.udata = &test_state};
+    fio_resp3_result_s r = fio_resp3_parse(&p,
+                                           &test_callbacks,
+                                           cases[i].prefix,
+                                           FIO_STRLEN(cases[i].prefix));
+    FIO_ASSERT(!r.err && !r.obj && r.consumed == FIO_STRLEN(cases[i].prefix),
+               "attribute metadata must not complete parent (%zu)",
+               i);
+    r = fio_resp3_parse(&p,
+                        &test_callbacks,
+                        cases[i].suffix,
+                        FIO_STRLEN(cases[i].suffix));
+    test_obj_s *obj = (test_obj_s *)r.obj;
+    FIO_ASSERT(!r.err && obj && r.consumed == FIO_STRLEN(cases[i].suffix),
+               "attribute's value must complete parent (%zu)",
+               i);
+    FIO_ASSERT(obj->type == cases[i].type, "parent type (%zu)", i);
+    if (obj->type == TEST_OBJ_MAP) {
+      FIO_ASSERT(obj->data.map.count == cases[i].count &&
+                     obj->data.map.values[0]->type == TEST_OBJ_NUMBER &&
+                     obj->data.map.values[0]->data.num_val == 7,
+                 "map value after attribute (%zu)",
+                 i);
+    } else {
+      FIO_ASSERT(obj->data.array.count == cases[i].count &&
+                     obj->data.array.items[0]->type == TEST_OBJ_NUMBER &&
+                     obj->data.array.items[0]->data.num_val == 7,
+                 "sequence value after attribute (%zu)",
+                 i);
+    }
+    FIO_ASSERT(test_state.attr_done_count == (i == 5 ? 2 : 1),
+               "metadata completed once (%zu)",
+               i);
+    test_security_dispose(&p, r);
+  }
+}
+
+/* F7: only count callback invocations; the sentinel belongs to no heap.
+ * This keeps huge count and depth tests bounded even against pre-fix code. */
+static void *test_security_count_container(void *udata,
+                                           void *parent,
+                                           int64_t count) {
+  (void)parent;
+  (void)count;
+  ++*(unsigned *)udata;
+  return (void *)(uintptr_t)1;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_reject_before_callback)(void) {
+  const fio_resp3_callbacks_s callbacks = {
+      .on_array = test_security_count_container,
+      .on_map = test_security_count_container,
+      .on_set = test_security_count_container,
+      .on_push = test_security_count_container,
+      .on_attr = test_security_count_container,
+  };
+  static const char *const excessive[] = {"%4611686018427387904\r\n",
+                                          "|4611686018427387904\r\n"};
+  for (size_t i = 0; i < sizeof(excessive) / sizeof(*excessive); ++i) {
+    unsigned callbacks_called = 0;
+    fio_resp3_parser_s p = {.udata = &callbacks_called};
+    fio_resp3_result_s r =
+        fio_resp3_parse(&p, &callbacks, excessive[i], FIO_STRLEN(excessive[i]));
+    FIO_ASSERT(r.err && p.error && !r.obj && !callbacks_called,
+               "reject pair overflow before callback (%zu): %u",
+               i,
+               callbacks_called);
+  }
+
+  /* Fill exactly the allowed depth with small registered frames. The next
+   * start must error without producing an unregistered callback context. */
+  static const char *const starts[] = {"*1\r\n",
+                                       "%1\r\n",
+                                       "~1\r\n",
+                                       ">1\r\n",
+                                       "|1\r\n"};
+  for (size_t i = 0; i < sizeof(starts) / sizeof(*starts); ++i) {
+    unsigned callbacks_called = 0;
+    fio_resp3_parser_s p = {.udata = &callbacks_called};
+    for (size_t n = 0; n < FIO_RESP3_MAX_NESTING; ++n) {
+      fio_resp3_result_s r =
+          fio_resp3_parse(&p, &callbacks, "*1\r\n", FIO_STRLEN("*1\r\n"));
+      FIO_ASSERT(!r.err && !r.obj && r.consumed == FIO_STRLEN("*1\r\n"),
+                 "fill nesting depth (%zu, %zu)",
+                 i,
+                 n);
+    }
+    FIO_ASSERT(p.depth == FIO_RESP3_MAX_NESTING &&
+                   callbacks_called == FIO_RESP3_MAX_NESTING,
+               "depth setup (%zu)",
+               i);
+    fio_resp3_result_s r =
+        fio_resp3_parse(&p, &callbacks, starts[i], FIO_STRLEN(starts[i]));
+    FIO_ASSERT(r.err && p.error && !r.obj &&
+                   callbacks_called == FIO_RESP3_MAX_NESTING,
+               "reject depth before callback (%zu): %u",
+               i,
+               callbacks_called);
+    /* All frames hold the non-owning sentinel. Parser and caller cleanup
+     * intentionally have nothing to free here. */
+  }
+}
+
+/* Refeed unconsumed bytes after every split point. Aggregate callbacks
+ * must produce the same semantic result as a one-shot parse. */
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_split_matrix)(void) {
+  static const struct {
+    const char *wire;
+    test_obj_type_e type;
+    size_t count;
+    int attrs;
+  } cases[] = {
+      {"*1\r\n|1\r\n+k\r\n+v\r\n:7\r\n", TEST_OBJ_ARRAY, 1, 1},
+      {"%1\r\n+k\r\n|1\r\n+x\r\n+y\r\n:7\r\n", TEST_OBJ_MAP, 1, 1},
+      {"~1\r\n|1\r\n+k\r\n+v\r\n:7\r\n", TEST_OBJ_SET, 1, 1},
+      {">1\r\n|1\r\n+k\r\n+v\r\n:7\r\n", TEST_OBJ_PUSH, 1, 1},
+      {"*1\r\n|1\r\n+k\r\n|1\r\n+x\r\n+y\r\n+v\r\n:7\r\n",
+       TEST_OBJ_ARRAY,
+       1,
+       2},
+      {"*?\r\n|1\r\n+k\r\n+v\r\n:7\r\n.\r\n", TEST_OBJ_ARRAY, 1, 1},
+      {"%?\r\n+k\r\n|1\r\n+x\r\n+y\r\n:7\r\n.\r\n", TEST_OBJ_MAP, 1, 1},
+      {"~?\r\n|1\r\n+k\r\n+v\r\n:7\r\n.\r\n", TEST_OBJ_SET, 1, 1},
+      {"*2\r\n$3\r\nabc\r\n=5\r\nabc:X\r\n", TEST_OBJ_ARRAY, 2, 0},
+      {"*1\r\n$?\r\n;3\r\nabc\r\n;0\r\n", TEST_OBJ_ARRAY, 1, 0},
+  };
+  for (int streaming = 0; streaming <= 1; ++streaming) {
+    const fio_resp3_callbacks_s *cb =
+        streaming ? &test_streaming_callbacks : &test_callbacks;
+    for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+      if (!streaming && i == 9)
+        continue; /* Unknown-length blob requires streaming callbacks. */
+      const char *wire = cases[i].wire;
+      const size_t len = FIO_STRLEN(wire);
+      for (size_t split = 0; split <= len; ++split) {
+        test_state_reset();
+        fio_resp3_parser_s p = {.udata = &test_state};
+        fio_resp3_result_s first = fio_resp3_parse(&p, cb, wire, split);
+        FIO_ASSERT(!first.err && first.consumed <= split &&
+                       (!!first.obj == (split == len)),
+                   "split prefix (%d,%zu,%zu)",
+                   streaming,
+                   i,
+                   split);
+        if (split == len) {
+          FIO_ASSERT(first.consumed == len,
+                     "complete first feed (%d,%zu)",
+                     streaming,
+                     i);
+          test_security_dispose(&p, first);
+          continue;
+        }
+        size_t available = len - first.consumed;
+        fio_resp3_result_s r =
+            fio_resp3_parse(&p, cb, wire + first.consumed, available);
+        test_obj_s *obj = (test_obj_s *)r.obj;
+        FIO_ASSERT(!r.err && r.consumed == available && obj &&
+                       obj->type == cases[i].type,
+                   "split completion (%d,%zu,%zu)",
+                   streaming,
+                   i,
+                   split);
+        if (obj->type == TEST_OBJ_MAP)
+          FIO_ASSERT(obj->data.map.count == cases[i].count &&
+                         obj->data.map.values[0]->type == TEST_OBJ_NUMBER &&
+                         obj->data.map.values[0]->data.num_val == 7,
+                     "split map semantic (%d,%zu,%zu)",
+                     streaming,
+                     i,
+                     split);
+        else {
+          FIO_ASSERT(obj->data.array.count == cases[i].count,
+                     "split sequence count (%d,%zu,%zu)",
+                     streaming,
+                     i,
+                     split);
+          if (i != 8 && i != 9)
+            FIO_ASSERT(obj->data.array.items[0]->type == TEST_OBJ_NUMBER &&
+                           obj->data.array.items[0]->data.num_val == 7,
+                       "split sequence semantic (%d,%zu,%zu)",
+                       streaming,
+                       i,
+                       split);
+          else
+            FIO_ASSERT(obj->data.array.items[0]->type == TEST_OBJ_STRING &&
+                           obj->data.array.items[0]->data.str.len == 3 &&
+                           !FIO_MEMCMP(obj->data.array.items[0]->data.str.data,
+                                       "abc",
+                                       3),
+                       "split blob semantic (%d,%zu,%zu)",
+                       streaming,
+                       i,
+                       split);
+        }
+        if (i == 8)
+          FIO_ASSERT(obj->data.array.items[1]->type == TEST_OBJ_STRING &&
+                         obj->data.array.items[1]->data.str.resp_type ==
+                             FIO_RESP3_VERBATIM &&
+                         obj->data.array.items[1]->data.str.len == 5 &&
+                         !FIO_MEMCMP(obj->data.array.items[1]->data.str.data,
+                                     "abc:X",
+                                     5),
+                     "split future verbatim (%d,%zu)",
+                     streaming,
+                     split);
+        FIO_ASSERT(test_state.attr_done_count == cases[i].attrs,
+                   "split attribute count (%d,%zu,%zu)",
+                   streaming,
+                   i,
+                   split);
+        test_security_dispose(&p, r);
+      }
+    }
+  }
+}
+
+/* A small deterministic mutation smoke test uses only non-owning sentinel
+ * callbacks. It makes no validity assumptions about mutated input; it only
+ * checks framing bounds and bounded termination on both feeding styles. */
+static void *test_security_smoke_start(void *udata, size_t len, uint8_t type) {
+  (void)udata;
+  (void)len;
+  (void)type;
+  return (void *)(uintptr_t)1;
+}
+static int test_security_smoke_write(void *udata,
+                                     void *ctx,
+                                     const void *bytes,
+                                     size_t len) {
+  (void)udata;
+  (void)ctx;
+  (void)bytes;
+  (void)len;
+  return 0;
+}
+static void *test_security_smoke_done(void *udata, void *ctx, uint8_t type) {
+  (void)udata;
+  (void)type;
+  return ctx;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_mutation_smoke)(void) {
+  static const fio_resp3_callbacks_s callbacks = {
+      .on_start_string = test_security_smoke_start,
+      .on_string_write = test_security_smoke_write,
+      .on_string_done = test_security_smoke_done,
+  };
+  static const char *const corpus[] = {
+      ":7\r\n",
+      "$3\r\nabc\r\n",
+      "$?\r\n;3\r\nabc\r\n;0\r\n",
+      "*1\r\n|1\r\n+k\r\n+v\r\n:7\r\n",
+      "%?\r\n+k\r\n:7\r\n.\r\n",
+      "=5\r\nabc:X\r\n",
+  };
+  static const char alphabet[] = "\r\n0123456789+-?;.$!*%|:XYZ";
+  uint32_t seed = UINT32_C(0x5eed1234);
+  for (size_t trial = 0; trial < 192; ++trial) {
+    char wire[96];
+    size_t source = trial % (sizeof(corpus) / sizeof(*corpus));
+    size_t n = FIO_STRLEN(corpus[source]);
+    FIO_ASSERT(n < sizeof(wire), "mutation bounded by wire buffer");
+    FIO_MEMCPY(wire, corpus[source], n);
+    seed = seed * UINT32_C(1664525) + UINT32_C(1013904223);
+    if (trial >= sizeof(corpus) / sizeof(*corpus)) {
+      size_t at = (seed >> 8) % n;
+      wire[at] = alphabet[(seed >> 19) % (sizeof(alphabet) - 1)];
+    }
+    for (int incremental = 0; incremental <= 1; ++incremental) {
+      fio_resp3_parser_s p = {0};
+      size_t consumed = 0;
+      size_t supplied = 0;
+      unsigned calls = 0;
+      /* A bounded caller buffer: append 1-7 bytes at a time, retain
+       * unconsumed bytes, and stop at first top-level object or error. */
+      while (calls++ < 128) {
+        if (supplied < n) {
+          size_t step = incremental ? 1 + ((seed >> (calls & 15)) % 7) : n;
+          if (step > n - supplied)
+            step = n - supplied;
+          supplied += step;
+        }
+        FIO_ASSERT(consumed <= supplied, "caller bookkeeping");
+        size_t available = supplied - consumed;
+        fio_resp3_result_s r =
+            fio_resp3_parse(&p, &callbacks, wire + consumed, available);
+        FIO_ASSERT(r.consumed <= available,
+                   "parse consumed beyond buffer (%zu,%d,%u)",
+                   trial,
+                   incremental,
+                   calls);
+        consumed += r.consumed;
+        if (r.err || r.obj || supplied == n)
+          break;
+      }
+      FIO_ASSERT(calls <= 128,
+                 "bounded smoke parse (%zu,%d)",
+                 trial,
+                 incremental);
+      /* p owns no heap objects: a fresh parser starts each trial. */
+    }
+  }
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, resp3_security_size_bounds)(void) {
+  /* Header only: 32-bit size_t must reject narrowing before invoking a
+   * callback or calculating an out-of-object pointer. On 64-bit the header
+   * can remain incomplete; no huge allocation or buffer is supplied. */
+#if SIZE_MAX <= UINT32_MAX
+  static const char *const huge[] = {"$4294967297\r\nA\r\n",
+                                     "!4294967297\r\nA\r\n",
+                                     "=4294967297\r\nA\r\n",
+                                     "$?\r\n;4294967297\r\nA\r\n"};
+  for (size_t i = 0; i < sizeof(huge) / sizeof(*huge); ++i)
+    test_security_reject(huge[i], 1);
+#else
+  static const char *const huge[] = {"$4294967297\r\n",
+                                     "!4294967297\r\n",
+                                     "=4294967297\r\n"};
+  for (size_t i = 0; i < sizeof(huge) / sizeof(*huge); ++i) {
+    test_state_reset();
+    fio_resp3_parser_s p = {.udata = &test_state};
+    fio_resp3_result_s r =
+        fio_resp3_parse(&p, &test_callbacks, huge[i], FIO_STRLEN(huge[i]));
+    FIO_ASSERT(!r.err && !r.obj && !r.consumed && !p.depth,
+               "64-bit large length remains incomplete");
+  }
+#endif
+}
+
 int main(void) {
   FIO_NAME_TEST(stl, resp3_simple_string)();
   FIO_NAME_TEST(stl, resp3_simple_error)();
@@ -2180,5 +2736,15 @@ int main(void) {
   FIO_NAME_TEST(stl, resp3_stream_blob_no_streaming_table)();
   FIO_NAME_TEST(stl, resp3_stream_blob_crlf_split)();
   FIO_NAME_TEST(stl, resp3_stream_blob_in_array)();
+  FIO_NAME_TEST(stl, resp3_security_numeric)();
+  FIO_NAME_TEST(stl, resp3_security_grammar)();
+  FIO_NAME_TEST(stl, resp3_security_valid_specials)();
+  FIO_NAME_TEST(stl, resp3_security_incremental)();
+  FIO_NAME_TEST(stl, resp3_security_large_chunk)();
+  FIO_NAME_TEST(stl, resp3_security_size_bounds)();
+  FIO_NAME_TEST(stl, resp3_security_nested_attributes)();
+  FIO_NAME_TEST(stl, resp3_security_reject_before_callback)();
+  FIO_NAME_TEST(stl, resp3_security_split_matrix)();
+  FIO_NAME_TEST(stl, resp3_security_mutation_smoke)();
   return 0;
 }

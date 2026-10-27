@@ -150,6 +150,62 @@ FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_implicit_rejection)(void) {
              "ML-KEM implicit rejection is not deterministic");
 }
 
+/* Implicit rejection must return exactly K_bar = J(z || ct) = SHAKE256(z||ct).
+ * Checks every byte (a partial select would leak bits of K'). */
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_implicit_rejection_exact)(void) {
+  uint8_t pk[1184], sk[2400], ct[1088], ss_enc[32], ss[32], expect[32];
+  uint8_t zct[32 + 1088];
+  const size_t pos[] = {0, 959, 960, 1087};
+  FIO_ASSERT(!fio_mlkem768_keypair(pk, sk), "ML-KEM keypair generation failed");
+  for (size_t i = 0; i < sizeof(pos) / sizeof(pos[0]); ++i) {
+    FIO_ASSERT(!fio_mlkem768_encaps(ct, ss_enc, pk), "ML-KEM encaps failed");
+    ct[pos[i]] ^= 0x01;
+    FIO_ASSERT(!fio_mlkem768_decaps(ss, ct, sk), "ML-KEM decaps failed");
+    FIO_MEMCPY(zct, sk + 2400 - 32, 32);
+    FIO_MEMCPY(zct + 32, ct, 1088);
+    fio_shake256(expect, 32, zct, sizeof(zct));
+    FIO_ASSERT(!FIO_MEMCMP(ss, expect, 32),
+               "ML-KEM implicit rejection != SHAKE256(z||ct) (pos %zu)",
+               pos[i]);
+  }
+}
+
+/* FIPS 203 7.2 modulus check: coefficients >= q in pk must be rejected. */
+FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_pk_modulus_check)(void) {
+  uint8_t pk[1184], sk[2400], bad[1184], ct[1088], ss[32];
+  uint8_t hpk[1216], hsk[2432], hct[1120], hss[64];
+  static const uint16_t vals[] = {3328, 3329, 4095};
+  static const size_t offs[] = {0, 573, 1149}; /* first, middle, last */
+  FIO_ASSERT(!fio_mlkem768_keypair(pk, sk), "ML-KEM keypair generation failed");
+  for (size_t o = 0; o < 3; ++o) {
+    for (size_t v = 0; v < 3; ++v) {
+      for (size_t hi = 0; hi < 2; ++hi) { /* even or odd coefficient */
+        size_t p = offs[o];
+        int r;
+        FIO_MEMCPY(bad, pk, 1184);
+        if (!hi) {
+          bad[p] = (uint8_t)vals[v];
+          bad[p + 1] = (uint8_t)((bad[p + 1] & 0xF0) | (vals[v] >> 8));
+        } else {
+          bad[p + 1] = (uint8_t)((bad[p + 1] & 0x0F) | ((vals[v] & 15) << 4));
+          bad[p + 2] = (uint8_t)(vals[v] >> 4);
+        }
+        r = fio_mlkem768_encaps(ct, ss, bad);
+        FIO_ASSERT(r == (vals[v] >= 3329 ? -1 : 0),
+                   "ML-KEM pk modulus check wrong (val %u off %zu hi %zu)",
+                   (unsigned)vals[v],
+                   offs[o],
+                   hi);
+      }
+    }
+  }
+  FIO_ASSERT(!fio_x25519mlkem768_keypair(hpk, hsk), "hybrid keypair failed");
+  hpk[0] = 0xFF;
+  hpk[1] |= 0x0F; /* coefficient 0 = 4095 */
+  FIO_ASSERT(fio_x25519mlkem768_encaps(hct, hss, hpk) == -1,
+             "hybrid encaps accepted malformed ML-KEM key");
+}
+
 FIO_SFUNC void FIO_NAME_TEST(stl, mlkem_acvp_keygen)(void) {
   uint8_t d[32], z[32], coins[64];
   uint8_t ek[1184], dk[2400];
@@ -329,6 +385,8 @@ int main(void) {
   FIO_NAME_TEST(stl, mlkem_roundtrip)();
   FIO_NAME_TEST(stl, mlkem_deterministic)();
   FIO_NAME_TEST(stl, mlkem_implicit_rejection)();
+  FIO_NAME_TEST(stl, mlkem_implicit_rejection_exact)();
+  FIO_NAME_TEST(stl, mlkem_pk_modulus_check)();
   FIO_NAME_TEST(stl, mlkem_acvp_keygen)();
   FIO_NAME_TEST(stl, mlkem_acvp_encap)();
   FIO_NAME_TEST(stl, x25519mlkem768_roundtrip)();

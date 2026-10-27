@@ -1195,6 +1195,26 @@ FIO_SFUNC void fio___test_json_error_contract(void) {
 Test: BOM Handling
 ***************************************************************************** */
 
+/* Regression: a quote-less key ending in a truncated UTF-8 lead byte must not
+ * read past the input (exact-size heap copies so ASan reports overreads). */
+FIO_SFUNC void fio___test_json_unquoted_key_utf8_tail(void) {
+  static const struct {
+    const char *s;
+    size_t len;
+  } in[] = {{"{a\xF0", 3}, {"{ab\xE2\x82", 5}, {"{\xC3", 2}};
+  for (size_t i = 0; i < sizeof(in) / sizeof(in[0]); ++i) {
+    char *b = (char *)malloc(in[i].len);
+    FIO_ASSERT_ALLOC(b);
+    FIO_MEMCPY(b, in[i].s, in[i].len);
+    fio_json_result_s r =
+        fio_json_parse(&test_json_callbacks, NULL, NULL, b, in[i].len);
+    FIO_ASSERT(r.err, "truncated UTF-8 key tail parsed as valid (%zu)", i);
+    if (r.ctx)
+      test_json_value_free((test_json_value_s *)r.ctx);
+    free(b);
+  }
+}
+
 FIO_SFUNC void fio___test_json_bom(void) {
   /* UTF-8 BOM followed by JSON */
   const char json_with_bom[] = "\xEF\xBB\xBF"
@@ -1503,6 +1523,7 @@ FIO_SFUNC void fio_test_json(void) {
   /* Error handling */
   fio___test_json_errors();
   fio___test_json_error_contract();
+  fio___test_json_unquoted_key_utf8_tail();
 
   /* Special cases */
   fio___test_json_bom();

@@ -84,12 +84,12 @@ The allocator is only "good enough" thread-safe. The atomic position counter pro
 
 A contention-safe variant of `FIO_STATIC_ALLOC_DEF` for short-lived scratch slots with an explicit checkout lifecycle. Where the round-robin variant silently reuses a slot once more than `max_concurrent_allocations` are outstanding (corrupting the in-flight user), this allocator returns `NULL` when every slot is busy, letting callers fall back gracefully.
 
-Each slot carries a small metadata header holding its busy byte. The header is `min(sizeof(type_T), 16)` bytes: one element for small types (data naturally aligned for `type_T`), capped at 16 bytes for larger types (data 16-byte aligned). `type_T` alignment must be ≤ 16 (enforced at compile time).
+The busy map is kept apart from the slot buffer. The map is a bitmap (one bit per slot). Slots hold only `type_T` data (naturally aligned for `type_T`; cache-line aligned where `FIO_ALIGN` is supported). Checkout scans the bitmap a word at a time from the first slot (one read per `sizeof(size_t) * 8` slots), so heavily occupied pools scan cheaply and lightly loaded pools keep reusing the same cache-warm slots. `units_per_allocation` and `max_concurrent_allocations` must be > 0 (enforced at compile time).
 
 ### Generated API
 
-- **`type_T *name##_try(void)`** — checks out a slot and returns a pointer to its data block (right after the metadata header), or `NULL` when all slots are busy.
-- **`void name##_free(type_T *ptr)`** — releases a slot returned by `name##_try` (clears the busy byte).
+- **`type_T *name##_try(void)`** — checks out a slot and returns a pointer to its data block, or `NULL` when all slots are busy.
+- **`void name##_free(type_T *ptr)`** — releases a slot returned by `name##_try` (clears its busy flag). `NULL` and pointers not returned by `name##_try` are ignored.
 - **`size_t name##_size(void)`** — logical arena capacity in `type_T` units.
 
 ### Example

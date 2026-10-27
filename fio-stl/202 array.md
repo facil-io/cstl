@@ -252,26 +252,28 @@ uint32_t ARY_each(ARY_PTR ary,
                   int64_t start_at);
 ```
 
-### Pointer iteration
+### Index-based iteration
 
 ```c
-/* Returns a pointer to the next element.
-   Pass NULL for `pos` to get the first element.
-   `first` tracks the base pointer across reallocations.
-   Returns NULL when the end is reached. */
-FIO_ARRAY_TYPE *ARY_each_next(ARY_PTR ary,
-                               FIO_ARRAY_TYPE **first,
-                               FIO_ARRAY_TYPE *pos);
+typedef struct ARY_iterator_s {
+    size_t i;            /* logical index */
+    FIO_ARRAY_TYPE *p;   /* element pointer; NULL when invalid */
+} ARY_iterator_s;
+
+/* Zero-init to start; advance previous.i when previous.p is non-NULL. */
+ARY_iterator_s ARY_each_next(ARY_PTR ary, ARY_iterator_s previous);
 ```
+
+Start with `(ARY_iterator_s){0}`. `each_next` reacquires the element pointer from current storage using the saved index; a NULL `previous.p` leaves the index unchanged, and a NULL returned `.p` means invalid or at the end. Reset the iterator explicitly to restart. The index survives `reserve`/`compact`; never dereference a saved `.p` after **any** mutation. Appending before reaching the end makes new elements visitable. Insertion/removal can change which element follows; destroying the array during iteration is unsupported.
 
 ### Loop macro
 
 ```c
-/* Iterates with a typed `pos` pointer.
-   `array_name` must be the literal macro name used when generating the type.
-   Avoid structural mutations inside the loop (push/pop/remove may invalidate pos). */
-FIO_ARRAY_EACH(array_name, array_ptr, pos) { /* pos is a FIO_ARRAY_TYPE * */ }
+/* array_name is the literal name used when generating the array type. */
+FIO_ARRAY_EACH(array_name, array_ptr, i) { /* i is an ARY_iterator_s */ }
 ```
+
+`break` and `continue` retain their usual `for`-loop behavior. As with `each_next`, `.i` is stable across relocation and `.p` must not be used after mutation until the next iteration reacquires it.
 
 ```c
 #define FIO_ARRAY_NAME fio_ary
@@ -279,8 +281,8 @@ FIO_ARRAY_EACH(array_name, array_ptr, pos) { /* pos is a FIO_ARRAY_TYPE * */ }
 #include "fio-stl.h"
 
 void print_all(fio_ary_s *a) {
-    FIO_ARRAY_EACH(fio_ary, a, pos) {
-        printf("%d\n", *pos);
+    FIO_ARRAY_EACH(fio_ary, a, i) {
+        printf("%zu: %d\n", i.i, *i.p);
     }
 }
 ```
@@ -311,8 +313,8 @@ void example(void) {
     str_list_push(&list, "banana");
     str_list_push(&list, "cherry");
 
-    FIO_ARRAY_EACH(str_list, &list, pos) {
-        printf("%s\n", *pos);
+    FIO_ARRAY_EACH(str_list, &list, i) {
+        printf("%s\n", *i.p);
     }
 
     str_list_destroy(&list);

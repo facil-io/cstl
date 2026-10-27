@@ -350,19 +350,20 @@ FIO_SFUNC void test_hybrid_key_generation(void) {
   FIO_ASSERT(client.use_hybrid == 1,
              "Hybrid should be enabled when ML-KEM is available");
 
-  /* Verify hybrid public key has expected structure:
-   * First 32 bytes: X25519 public key
-   * Next 1184 bytes: ML-KEM-768 encapsulation key */
+  /* Verify hybrid public key has expected structure (IETF, ML-KEM first):
+   * First 1184 bytes: ML-KEM-768 encapsulation key
+   * Last 32 bytes: X25519 public key */
 
-  /* Verify X25519 component matches standalone key */
-  FIO_ASSERT(
-      FIO_MEMCMP(client.hybrid_public_key, client.x25519_public_key, 32) != 0,
-      "Hybrid X25519 component should differ from standalone "
-      "(independently generated)");
+  /* Verify X25519 component is independent of the standalone key */
+  FIO_ASSERT(FIO_MEMCMP(client.hybrid_public_key + 1184,
+                        client.x25519_public_key,
+                        32) != 0,
+             "Hybrid X25519 component should differ from standalone "
+             "(independently generated)");
 
   /* Verify ML-KEM component is non-zero */
   int mlkem_nonzero = 0;
-  for (int i = 32; i < 1216; ++i) {
+  for (int i = 0; i < 1184; ++i) {
     if (client.hybrid_public_key[i] != 0) {
       mlkem_nonzero = 1;
       break;

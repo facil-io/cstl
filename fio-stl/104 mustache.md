@@ -59,7 +59,7 @@ When enabled, limits partial lookup scope to the context of the partial's sectio
 #endif
 ```
 
-When enabled, skips partial names that attempt `../` path traversal.
+When enabled, skips partial names containing a `..` path segment, recognizing both `/` and `\` separators. This lexical check is not a filesystem sandbox.
 
 ### Syntax Quick Map
 
@@ -120,7 +120,7 @@ Load / parse settings.
 - `on_yaml_front_matter` - called when front matter is found
 - `udata` - user data for load callbacks
 
-If both `load_file_data` and `free_file_data` are missing, defaults use `fio_bstr_readfile` and `fio_bstr_free`. If one is custom, provide the matching cleanup. Either `filename` or `data` is required.
+If both `load_file_data` and `free_file_data` are missing, defaults use `fio_bstr_readfile` and `fio_bstr_free`. If one is custom, provide the matching cleanup. Every non-NULL loaded buffer is released, including discarded zero-length results. Either `filename` or `data` is required. Nonzero-length filename and template views need no NUL terminator; a zero filename length retains the C-string shorthand.
 
 #### `fio_mustache_bargs_s`
 
@@ -152,12 +152,14 @@ Build / render callbacks.
 - `get_var_index` - returns an item context by index
 - `var2str` - returns a string view for a value
 - `var_is_truthful` - returns non-zero for truthy values
-- `release_var` - releases values returned by callbacks
+- `release_var` - releases each non-NULL value acquired through `get_var` or `get_var_index`, including falsey values and intermediate dotted-path results
 - `is_lambda` - handles lambda sections when lambda support is enabled
 - `ctx` - root render context
 - `udata` - output / user pointer; the final value is returned by `fio_mustache_build`
 
 If both writer callbacks are missing, defaults append to a `fio_bstr` in `udata`. The returned pointer should be freed with `fio_bstr_free`.
+
+`ctx` and `{{.}}` aliases are borrowed; the renderer does not release them. Lookup and array callbacks acquire one value per successful call; each value must remain valid until its matching `release_var`. A child returned by a dotted lookup must survive release of its intermediate parent. `var2str` returns a borrowed view valid until that value is released; the writer consumes it before release. Borrowed-data integrations can leave `release_var` as its default no-op.
 
 ### Loading
 
@@ -173,7 +175,7 @@ Loads and parses a template from `settings.data` or `settings.filename`.
 
 If `filename` is provided and `data` is empty, the loader callback is used. If both are provided, `data` is parsed and `filename` is kept for partial path resolution.
 
-**Returns:** a parsed template object, or `NULL` on error.
+**Returns:** a parsed template object, or `NULL` on parse or allocation error. Variable and section names must be shorter than 65,535 bytes. Compiled instruction streams must be smaller than `UINT32_MAX` bytes.
 
 #### `fio_mustache_free`
 

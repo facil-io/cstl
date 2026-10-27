@@ -58,8 +58,8 @@ Parses `data[0..len)` as URL-encoded form data, decoding each name and value exa
 **Parameters:**
 - `callbacks` - borrowed callback table, valid for the call. `NULL` (or a `NULL` `on_pair`) selects counting-only mode.
 - `udata` - caller-owned context passed unchanged to `on_pair`; may be `NULL`.
-- `data` - borrowed readable buffer containing at least `len` bytes; not modified. A trailing NUL is not required.
-- `len` - number of input bytes to parse; may be zero.
+- `data` - borrowed readable buffer containing at least `len` bytes; not modified. A trailing NUL is not required. May be `NULL` only when `len` is zero.
+- `len` - number of input bytes to parse; may be zero. Empty input returns an all-zero result without invoking callbacks.
 
 **Returns:** the bytes consumed, the pairs processed, and the error. An error stops parsing before the failed pair, so `data + result.consumed` is where that pair starts. Retrying from the beginning repeats earlier callback side effects.
 
@@ -73,7 +73,10 @@ Rules from the implementation:
 - pair boundaries are determined before decoding, so encoded `&` and `=` remain part of their fields
 - percent escapes are decoded and `+` becomes a space in both names and values
 - `%2B` decodes to a literal `+`, not a space; `%2526` decodes to `%26`, not `&`
-- invalid or incomplete percent escapes remain literal, following `fio_string_write_url_dec` (including its `%uXXXX` extension)
+- the non-standard `%uXXXX` extension is also decoded, following `fio_string_write_url_dec`
+- invalid or incomplete percent escapes remain literal
+
+**Note**: this is a permissive decoder, not a strict form-encoding validator. Perform security checks on the decoded names and values. A separate filter that only decodes `%XX` will interpret `%u0061dmin` differently: this parser decodes it to `admin`.
 
 **Ownership:** the caller retains `data`, `callbacks`, and `udata`. The parser owns temporary decoded buffers and releases any heap fallback using `FIO_STRING_FREE2` after the callback returns, including when the callback stops parsing. No buffer ownership is transferred to callbacks.
 

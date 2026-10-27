@@ -55,6 +55,79 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha1_kat)(void) {
 }
 
 /* *****************************************************************************
+SHA-1 padding boundary + HMAC-SHA1 Known-Answer Tests (FIPS 180, RFC 2202)
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, sha1_hex2bin)(uint8_t *dest, const char *hex) {
+  while (hex[0] && hex[1]) {
+    uint8_t hi = (uint8_t)(hex[0] <= '9' ? hex[0] - '0' : (hex[0] | 32) - 87);
+    uint8_t lo = (uint8_t)(hex[1] <= '9' ? hex[1] - '0' : (hex[1] | 32) - 87);
+    *dest++ = (uint8_t)((hi << 4) | lo);
+    hex += 2;
+  }
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, sha1_hmac_kat)(void) {
+  uint8_t expected[20];
+  uint8_t key[80];
+  uint8_t data[50];
+  /* 56 byte message: length field forced into a second block */
+  {
+    const char *str =
+        "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+    fio_sha1_s r = fio_sha1(str, 56);
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected, "84983e441c3bd26ebaae4aa1f95129e5e54670f1");
+    FIO_ASSERT(!FIO_MEMCMP(r.digest, expected, 20), "SHA-1 56 byte KAT");
+    r = fio_sha1("abc", 3);
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected, "a9993e364706816aba3e25717850c26c9cd0d89d");
+    FIO_ASSERT(!FIO_MEMCMP(r.digest, expected, 20), "SHA-1 \"abc\" KAT");
+  }
+  /* RFC 2202 test case 1 */
+  FIO_MEMSET(key, 0x0b, 20);
+  {
+    fio_sha1_s r = fio_sha1_hmac(key, 20, "Hi There", 8);
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected, "b617318655057264e28bc0b6fb378c8ef146be00");
+    FIO_ASSERT(!FIO_MEMCMP(r.digest, expected, 20), "HMAC-SHA1 RFC 2202 #1");
+  }
+  /* RFC 2202 test case 2 */
+  {
+    fio_sha1_s r = fio_sha1_hmac("Jefe", 4, "what do ya want for nothing?", 28);
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected, "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
+    FIO_ASSERT(!FIO_MEMCMP(r.digest, expected, 20), "HMAC-SHA1 RFC 2202 #2");
+  }
+  /* RFC 2202 test case 3 */
+  FIO_MEMSET(key, 0xaa, 80);
+  FIO_MEMSET(data, 0xdd, 50);
+  {
+    fio_sha1_s r = fio_sha1_hmac(key, 20, data, 50);
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected, "125d7342b9ac11cd91a39af48aa17b4f63f175d3");
+    FIO_ASSERT(!FIO_MEMCMP(r.digest, expected, 20), "HMAC-SHA1 RFC 2202 #3");
+  }
+  /* RFC 2202 test case 6 (key longer than block size) */
+  {
+    const char *msg = "Test Using Larger Than Block-Size Key - Hash Key First";
+    fio_sha1_s r = fio_sha1_hmac(key, 80, msg, FIO_STRLEN(msg));
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected, "aa4ae5e15272d00e95705637ce8a3b55ed402112");
+    FIO_ASSERT(!FIO_MEMCMP(r.digest, expected, 20), "HMAC-SHA1 RFC 2202 #6");
+  }
+  /* RFC 2202 test case 7 (long key, data longer than one block) */
+  {
+    const char *msg = "Test Using Larger Than Block-Size Key and Larger Than "
+                      "One Block-Size Data";
+    fio_sha1_s r = fio_sha1_hmac(key, 80, msg, FIO_STRLEN(msg));
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected, "e8e99d0f45237d786d6bbaa7965c7808bbff1a91");
+    FIO_ASSERT(!FIO_MEMCMP(r.digest, expected, 20), "HMAC-SHA1 RFC 2202 #7");
+  }
+}
+
+/* *****************************************************************************
 SHA-2 Known-Answer Tests (NIST / RFC 4634 vectors)
 ***************************************************************************** */
 
@@ -778,10 +851,70 @@ FIO_SFUNC void FIO_NAME_TEST(stl, sha_edge_cases)(void) {
     FIO_ASSERT(!FIO_MEMCMP(h1.u8, h1_2.u8, 32),
                "SHA-256 deterministic mismatch");
   }
+
+  /* Synthetic huge lengths (state forged, zero data bytes): the length field
+   * must use the full 64 bit counter (SHA-256, 32 bit `size_t` truncation)
+   * and the high 64 bits of SHA-512's 128 bit length (>= 2^61 bytes).
+   * Expected values from an independent Python compression model. */
+  {
+    uint8_t expected[64];
+    fio_sha256_s s256 = fio_sha256_init();
+    s256.total_len = ((uint64_t)1ULL << 32) + 5;
+    fio_u256 r256 = fio_sha256_finalize(&s256);
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected,
+     "438c1ec60ee4f7f050dc693f3301107f3a16b1fa3c59a9f9315111e343ade545");
+    FIO_ASSERT(!FIO_MEMCMP(r256.u8, expected, 32),
+               "SHA-256 synthetic 2^32+5 byte length mismatch");
+
+    const char *hex512[2] = {
+        "4e15588b073f68f07592e9a51190a7e00e2efaaa365fb318f27e82e5c6df94a8"
+        "62d54b825cefcc3bd28977fcefc7fd8cac281f334977797ea395dbff21311a72",
+        "1e389e2b9e9ebb5694436173cf1bc43eff2a046d8f36e2db573458a857633708"
+        "1c5ca192ec821ad21e3ec4a6a8b8112fc6774ec05c5ad2fad7b20d4c3684f53a"};
+    for (size_t i = 0; i < 2; ++i) {
+      fio_sha512_s s512 = fio_sha512_init();
+      s512.total_len = ((uint64_t)1ULL << 61) + (i * 5);
+      fio_u512 r512 = fio_sha512_finalize(&s512);
+      FIO_NAME_TEST(stl, sha1_hex2bin)(expected, hex512[i]);
+      FIO_ASSERT(!FIO_MEMCMP(r512.u8, expected, 64),
+                 "SHA-512 synthetic 2^61+%zu byte length mismatch",
+                 i * 5);
+    }
+  }
+
+  /* Empty HMAC key: NULL and non-NULL zero length keys are equivalent. */
+  {
+    uint8_t expected[64];
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected,
+     "fd7adb152c05ef80dccf50a1fa4c05d5a3ec6da95575fc312ae7c5d091836351");
+    fio_u256 r256 = fio_sha256_hmac(NULL, 0, "abc", 3);
+    FIO_ASSERT(!FIO_MEMCMP(r256.u8, expected, 32),
+               "HMAC-SHA-256 empty (NULL) key mismatch");
+    r256 = fio_sha256_hmac("", 0, "abc", 3);
+    FIO_ASSERT(!FIO_MEMCMP(r256.u8, expected, 32),
+               "HMAC-SHA-256 empty key mismatch");
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected,
+     "29689f6b79a8dd686068c2eeae97fd8769ad3ba65cb5381f838358a8045a358e"
+     "e3ba1739c689c7805e31734fb6072f87261d1256995370d55725cba00d10bdd0");
+    fio_u512 r512 = fio_sha512_hmac(NULL, 0, "abc", 3);
+    FIO_ASSERT(!FIO_MEMCMP(r512.u8, expected, 64),
+               "HMAC-SHA-512 empty (NULL) key mismatch");
+    FIO_NAME_TEST(stl, sha1_hex2bin)
+    (expected,
+     "948f7c5caa500c31d7d4a0f52f3e3da7e33c8a9fe6ef528b"
+     "8a9ac3e4adc4e24d908e6f40b737510e82354759dc5e9f06");
+    r512 = fio_sha384_hmac(NULL, 0, "abc", 3);
+    FIO_ASSERT(!FIO_MEMCMP(r512.u8, expected, 48),
+               "HMAC-SHA-384 empty (NULL) key mismatch");
+  }
 }
 
 int main(void) {
   FIO_NAME_TEST(stl, sha1_kat)();
+  FIO_NAME_TEST(stl, sha1_hmac_kat)();
   FIO_NAME_TEST(stl, sha2_kat)();
   FIO_NAME_TEST(stl, sha384_kat)();
   FIO_NAME_TEST(stl, sha2_padding_boundary)();

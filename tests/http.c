@@ -1441,13 +1441,20 @@ static void test_websocket_connect_wrapper(void) {
                      !FIO_MEMCMP(query.buf, cases[i].query, query.len),
                  "websocket_connect(%s): query mismatch",
                  url);
+      /* Host is the URL authority (RFC 9110 §7.2): host + explicit port */
+      char expected_host[128];
+      snprintf(expected_host,
+               sizeof(expected_host),
+               "%s:%u",
+               cases[i].host,
+               port);
       fio_str_info_s host =
           fio_http_request_header(h, FIO_STR_INFO2((char *)"host", 4), 0);
-      FIO_ASSERT(host.len == strlen(cases[i].host) &&
-                     !FIO_MEMCMP(host.buf, cases[i].host, host.len),
+      FIO_ASSERT(host.len == strlen(expected_host) &&
+                     !FIO_MEMCMP(host.buf, expected_host, host.len),
                  "websocket_connect(%s): host header should be %s",
                  url,
-                 cases[i].host);
+                 expected_host);
       FIO_ASSERT(!test_ws_rec_on_http_calls && !test_ws_rec_on_open_calls,
                  "websocket_connect(%s): no callback may fire before the "
                  "response is processed",
@@ -1748,8 +1755,7 @@ static void test_static_compress_attached_readonly(void) {
              "response; got '%.*s')",
              (int)ce.len,
              ce.buf ? ce.buf : "");
-  uint8_t cv;
-  fio_atomic_load(cv, &st->compress_static);
+  uint8_t cv = st->compress_static;
   FIO_ASSERT(!cv,
              "read-only req1: EACCES must disable compress_static "
              "immediately (got %u)",
@@ -1774,7 +1780,7 @@ static void test_static_compress_attached_readonly(void) {
              "read-only req2: content-encoding must be absent (got '%.*s')",
              (int)ce.len,
              ce.buf ? ce.buf : "");
-  fio_atomic_load(cv, &st->compress_static);
+  cv = st->compress_static;
   FIO_ASSERT(!cv,
              "read-only req2: compress_static must remain disabled (got %u)",
              (unsigned)cv);
@@ -2294,6 +2300,182 @@ static void test_http_client_interim_and_head(void) {
   FIO_ASSERT(test_raw.head_clen_ok,
              "head: content-length should be visible as a response header");
 }
+
+/* ===========================================================================
+   Client: limits and lenient response lines against a raw server (live)
+
+   * over-limit responses (Content-Length, chunked, header size) close the
+     connection - the client never sends an error "response" to the server;
+   * `Expect` in a response is a regular header (no `100 Continue` is sent);
+   * status lines with an empty / omitted reason phrase are accepted.
+   ===========================================================================
+ */
+
+static const struct {
+  const char *path; /* request path, followed by a SP on the wire */
+  const char *reply;
+  int rejected; /* the client must close without calling on_http */
+} test_climits_cases[] = {
+    {"/big-cl",
+     "HTTP/1.1 200 OK\r\nContent-Length: 16\r\n\r\n0123456789abcdef",
+     1},
+    {"/big-chunked",
+     "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+     "10\r\n0123456789abcdef\r\n0\r\n\r\n",
+     1},
+    {"/big-header",
+     "HTTP/1.1 200 OK\r\nX-Big1: "
+     "0123456789012345678901234567890123456789012345678901234567890123456789"
+     "0123456789012345678901234567890123456789012345678901234567890123456789"
+     "\r\nX-Big2: "
+     "0123456789012345678901234567890123456789012345678901234567890123456789"
+     "0123456789012345678901234567890123456789012345678901234567890123456789"
+     "\r\nContent-Length: 2\r\n\r\nok",
+     1},
+    {"/expect",
+     "HTTP/1.1 200 OK\r\nExpect: 100-continue\r\nContent-Length: 2\r\n\r\nok",
+     0},
+    {"/empty-reason", "HTTP/1.1 200 \r\nContent-Length: 2\r\n\r\nok", 0},
+    {"/no-reason", "HTTP/1.1 200\r\nContent-Length: 2\r\n\r\nok", 0},
+};
+#define TEST_CLIMITS_COUNT                                                     \
+  (sizeof(test_climits_cases) / sizeof(test_climits_cases[0]))
+
+static struct {
+  volatile int ok[TEST_CLIMITS_COUNT];     /* on_http: 200 + "ok" body */
+  volatile int calls[TEST_CLIMITS_COUNT];  /* on_http calls */
+  volatile int closed[TEST_CLIMITS_COUNT]; /* server saw the client close */
+  volatile int sent_response; /* client wrote a status line to the server */
+  volatile int timed_out;
+  volatile int active;
+} test_climits;
+
+static void test_climits_maybe_stop(void) {
+  for (size_t i = 0; i < TEST_CLIMITS_COUNT; ++i)
+    if (test_climits_cases[i].rejected ? !test_climits.closed[i]
+                                       : !test_climits.calls[i])
+      return;
+  fio_io_stop();
+}
+
+static void test_climits_server_on_data(fio_io_s *io) {
+  char buf[2048];
+  size_t r;
+  while ((r = fio_io_read(io, buf, sizeof(buf) - 1))) {
+    buf[r] = 0;
+    /* requests carry `HTTP/` mid-line, a status line starts a line */
+    if (!FIO_MEMCMP(buf, "HTTP/", 5) || strstr(buf, "\nHTTP/"))
+      test_climits.sent_response = 1;
+    if (fio_io_udata(io))
+      continue;
+    for (size_t i = 0; i < TEST_CLIMITS_COUNT; ++i) {
+      char line[64];
+      snprintf(line, sizeof(line), " %s ", test_climits_cases[i].path);
+      if (!strstr(buf, line))
+        continue;
+      fio_io_udata_set(io, (void *)(uintptr_t)(i + 1));
+      fio_io_write(io,
+                   (void *)test_climits_cases[i].reply,
+                   strlen(test_climits_cases[i].reply));
+      break;
+    }
+  }
+}
+
+static void test_climits_server_on_close(void *iobuf, void *udata) {
+  (void)iobuf;
+  if (!udata)
+    return;
+  test_climits.closed[(uintptr_t)udata - 1] = 1;
+  test_climits_maybe_stop();
+}
+
+static void test_climits_client_on_http(fio_http_s *h) {
+  fio_str_info_s path = fio_http_path(h);
+  fio_str_info_s body = fio_http_body_read(h, (size_t)-1);
+  for (size_t i = 0; i < TEST_CLIMITS_COUNT; ++i) {
+    if (path.len != strlen(test_climits_cases[i].path) ||
+        FIO_MEMCMP(path.buf, test_climits_cases[i].path, path.len))
+      continue;
+    ++test_climits.calls[i];
+    test_climits.ok[i] = fio_http_status(h) == 200 && body.len == 2 &&
+                         fio_buf2u16u(body.buf) == fio_buf2u16u("ok");
+  }
+  test_climits_maybe_stop();
+}
+
+static int test_climits_timeout(void *ignr1, void *ignr2) {
+  (void)ignr1, (void)ignr2;
+  if (!test_climits.active)
+    return -1;
+  test_climits.timed_out = 1;
+  fio_io_stop();
+  return -1;
+}
+
+static void test_http_client_limits_and_status_lines(void) {
+  fprintf(stderr, "  * client limits never send error responses / lenient "
+                  "status lines\n");
+  static fio_io_protocol_s raw_protocol;
+  raw_protocol = (fio_io_protocol_s){
+      .on_data = test_climits_server_on_data,
+      .on_close = test_climits_server_on_close,
+      .on_timeout = fio_io_touch,
+      .timeout = 5000,
+  };
+  FIO_MEMSET(&test_climits, 0, sizeof(test_climits));
+  fio_io_run_every(.fn = test_climits_timeout, .every = 3000, .repetitions = 1);
+  fio_io_listener_s *l = fio_io_listen(.url = "tcp://127.0.0.1:0",
+                                       .protocol = &raw_protocol,
+                                       .hide_from_log = 1);
+  FIO_ASSERT(l, "client limits: raw listener failed");
+  unsigned port = test_ws_listener_port((fio_http_listener_s *)l);
+  FIO_ASSERT(port, "client limits: listener port discovery failed");
+  for (size_t i = 0; i < TEST_CLIMITS_COUNT; ++i) {
+    char url[128];
+    snprintf(url,
+             sizeof(url),
+             "http://127.0.0.1:%u%s",
+             port,
+             test_climits_cases[i].path);
+    FIO_ASSERT(fio_http_connect(url,
+                                NULL,
+                                .on_http = test_climits_client_on_http,
+                                .max_body_size = 8,
+                                .max_line_len = 256,
+                                .max_header_size = 256),
+               "client limits: connect failed (%s)",
+               test_climits_cases[i].path);
+  }
+  test_climits.active = 1;
+  fio_io_start(0);
+  test_climits.active = 0;
+  fio_io_listen_stop(l);
+  fio_queue_perform_all(fio_io_queue());
+
+  FIO_ASSERT(!test_climits.sent_response,
+             "client limits: the client sent a status line to the server");
+  for (size_t i = 0; i < TEST_CLIMITS_COUNT; ++i) {
+    if (test_climits_cases[i].rejected) {
+      FIO_ASSERT(test_climits.closed[i] && !test_climits.calls[i],
+                 "client limits: %s should close without on_http "
+                 "(closed %d, calls %d, timed out %d)",
+                 test_climits_cases[i].path,
+                 test_climits.closed[i],
+                 test_climits.calls[i],
+                 test_climits.timed_out);
+      continue;
+    }
+    FIO_ASSERT(test_climits.calls[i] == 1 && test_climits.ok[i],
+               "client limits: %s should deliver 200 \"ok\" once "
+               "(calls %d, ok %d, timed out %d)",
+               test_climits_cases[i].path,
+               test_climits.calls[i],
+               test_climits.ok[i],
+               test_climits.timed_out);
+  }
+}
+#undef TEST_CLIMITS_COUNT
 
 /* ===========================================================================
    Server: a response line sent by a peer (live reactor)
@@ -2958,30 +3140,38 @@ static void test_http_server_h1_framing(void) {
        TEST_H1F_SMUGGLE("chunked, gzip"),
        "HTTP/1.1 400 ",
        "",
-       1},
-      {"TE gzip", TEST_H1F_SMUGGLE("gzip"), "HTTP/1.1 400 ", "", 1},
-      {"TE identity", TEST_H1F_SMUGGLE("identity"), "HTTP/1.1 400 ", "", 1},
+       .responses = 1},
+      {"TE gzip",
+       TEST_H1F_SMUGGLE("gzip"),
+       "HTTP/1.1 400 ",
+       "",
+       .responses = 1},
+      {"TE identity",
+       TEST_H1F_SMUGGLE("identity"),
+       "HTTP/1.1 400 ",
+       "",
+       .responses = 1},
       {"TE chunked, chunked",
        TEST_H1F_SMUGGLE0("chunked, chunked"),
        "HTTP/1.1 400 ",
        "",
-       1},
+       .responses = 1},
       {"TE chunked;ext, chunked",
        TEST_H1F_SMUGGLE0("Chunked;x=1 , chunked"),
        "HTTP/1.1 400 ",
        "",
-       1},
+       .responses = 1},
       {"TE chunked then gzip field lines",
        TEST_H1F_SMUGGLE0("chunked\r\nTransfer-Encoding: gzip"),
        "HTTP/1.1 400 ",
        "",
-       1},
+       .responses = 1},
       {"TE chunked twice in field lines",
        TEST_H1F_SMUGGLE0("chunked\r\nTransfer-Encoding: chunked"),
        "HTTP/1.1 400 ",
        "",
-       1},
-      {"TE empty", TEST_H1F_SMUGGLE(""), "HTTP/1.1 400 ", "", 1},
+       .responses = 1},
+      {"TE empty", TEST_H1F_SMUGGLE(""), "HTTP/1.1 400 ", "", .responses = 1},
       {"TE gzip, chunked control (gzip passed through)",
        "POST /te HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip, chunked\r\n"
        "Connection: close\r\n\r\n2\r\nhi\r\n0\r\n\r\n",
@@ -2991,17 +3181,17 @@ static void test_http_server_h1_framing(void) {
        NULL,
        NULL,
        "\r\n\r\nok",
-       "gzip"},
+       .te = "gzip"},
       {"HTTP/1.1 missing Host",
        "GET /nohost HTTP/1.1\r\n\r\nGET /next HTTP/1.1\r\nHost: x\r\n\r\n",
        "HTTP/1.1 400 ",
        "",
-       1},
+       .responses = 1},
       {"HTTP/1.1 duplicate Host",
        "GET /dup HTTP/1.1\r\nHost: a\r\nHost: b\r\n\r\n",
        "HTTP/1.1 400 ",
        "",
-       1},
+       .responses = 1},
       {"HTTP/1.0 closes after response",
        "GET /plain HTTP/1.0\r\n\r\nGET /second HTTP/1.0\r\n\r\n",
        "HTTP/1.0 200 ",
@@ -3009,7 +3199,7 @@ static void test_http_server_h1_framing(void) {
        1,
        NULL,
        "connection:keep-alive",
-       "\r\n\r\nok"},
+       .tail = "\r\n\r\nok"},
       {"HTTP/1.0 stream is close delimited",
        "GET /stream HTTP/1.0\r\n\r\n",
        "HTTP/1.0 200 ",
@@ -3017,7 +3207,7 @@ static void test_http_server_h1_framing(void) {
        1,
        NULL,
        "transfer-encoding",
-       "\r\n\r\nabcd"},
+       .tail = "\r\n\r\nabcd"},
       {"HTTP/1.0 keep-alive persists",
        "GET /plain HTTP/1.0\r\nConnection: Keep-Alive\r\n\r\n"
        "GET /second HTTP/1.0\r\n\r\n",
@@ -3026,7 +3216,7 @@ static void test_http_server_h1_framing(void) {
        2,
        "connection:keep-alive",
        NULL,
-       "\r\n\r\nok"},
+       .tail = "\r\n\r\nok"},
       {"HTTP/1.0 keep-alive stream closes",
        "GET /stream HTTP/1.0\r\nConnection: keep-alive\r\n\r\n"
        "GET /second HTTP/1.0\r\n\r\n",
@@ -3035,7 +3225,7 @@ static void test_http_server_h1_framing(void) {
        1,
        NULL,
        "transfer-encoding",
-       "\r\n\r\nabcd"},
+       .tail = "\r\n\r\nabcd"},
 #define TEST_H1F_STATUS(code, mode)                                            \
   "GET /status/" code mode " HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"
       /* RFC 9110 §8.6 / §15: responses without content are never framed */
@@ -3122,7 +3312,7 @@ static void test_http_server_h1_framing(void) {
        1,
        "content-length:0\r\n",
        "body",
-       "\r\n\r\n"},
+       .tail = "\r\n\r\n"},
       {"HEAD response sends no body",
        "HEAD /plain HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
        "HTTP/1.1 200 ",
@@ -3130,7 +3320,7 @@ static void test_http_server_h1_framing(void) {
        1,
        "content-length:2\r\n",
        "\r\n\r\nok",
-       "\r\n\r\n"},
+       .tail = "\r\n\r\n"},
       {"HEAD streamed response sends no chunks",
        "HEAD /stream HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",
        "HTTP/1.1 200 ",
@@ -3177,7 +3367,7 @@ static void test_http_server_h1_framing(void) {
        1,
        "transfer-encoding: chunked\r\n\r\n02\r\nab\r\n0\r\n\r\n",
        "content-length",
-       "\r\n\r\n02\r\nab\r\n0\r\n\r\n"},
+       .tail = "\r\n\r\n02\r\nab\r\n0\r\n\r\n"},
 #define TEST_H1F_BIG(pad)                                                      \
   {"200 large no-copy first chunk (pad " pad ")",                              \
    "GET /big?" pad " HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n",        \
@@ -3186,7 +3376,7 @@ static void test_http_server_h1_framing(void) {
    1,                                                                          \
    "\r\n\r\n011170\r\nBBBB",                                                   \
    NULL,                                                                       \
-   "BBBB\r\n03\r\nend\r\n0\r\n\r\n"}
+   .tail = "BBBB\r\n03\r\nend\r\n0\r\n\r\n"}
       TEST_H1F_BIG("0"),
       TEST_H1F_BIG("1"),
       TEST_H1F_BIG("2"),
@@ -3215,7 +3405,7 @@ static void test_http_server_h1_framing(void) {
        2,
        "transfer-encoding: chunked",
        "connection:keep-alive",
-       "0\r\n\r\n"},
+       .tail = "0\r\n\r\n"},
   };
 #undef TEST_H1F_SMUGGLE
 #undef TEST_H1F_SMUGGLE0
@@ -3313,6 +3503,93 @@ static void test_http_server_h1_framing(void) {
                cases[i].name,
                test_h1f.te,
                cases[i].te);
+  }
+}
+
+/* ===========================================================================
+   Server: body-limit rejections never dispatch or parse the body (live)
+
+   - an over-limit chunk completing in the same read (with its terminating
+     zero chunk) must not dispatch a detached (NULL) handle;
+   - a rejected `Expect: 100-continue` (413) must not parse the declared body
+     as the next request (smuggling): the server responds and closes.
+   ===========================================================================
+ */
+
+static void test_http_server_body_limit_rejections(void) {
+  fprintf(stderr, "  * server body-limit rejections (413 + close)\n");
+  static const struct {
+    const char *name;
+    const char *request;
+  } cases[] = {
+      {"chunked over limit, completed in one read",
+       "POST /chunked HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n"
+       "10\r\n0123456789abcdef\r\n0\r\n\r\n"
+       "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"},
+      {"Expect: 100-continue over limit, body sent anyway",
+       "POST /expect HTTP/1.1\r\nHost: x\r\nExpect: 100-continue\r\n"
+       "Content-Length: 35\r\n\r\n"
+       "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"},
+  };
+  static fio_io_protocol_s raw_client;
+  static uintptr_t generation = 0x413000;
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    fprintf(stderr, "    - %s\n", cases[i].name);
+    raw_client = (fio_io_protocol_s){
+        .on_attach = test_h1f_client_on_attach,
+        .on_data = test_h1f_client_on_data,
+        .on_close = test_h1f_client_on_close,
+        .on_timeout = fio_io_touch,
+        .timeout = 10000,
+    };
+    FIO_MEMSET(&test_h1f, 0, sizeof(test_h1f));
+    test_h1f.client_fd = FIO_SOCKET_INVALID;
+    test_h1f.generation = ++generation;
+    test_h1f.request = cases[i].request;
+    fio_io_run_every(.fn = test_h1f_timeout,
+                     .udata1 = (void *)test_h1f.generation,
+                     .every = 2000,
+                     .repetitions = 1);
+    fio_http_listener_s *l = fio_http_listen("tcp://127.0.0.1:0",
+                                             .on_http = test_h1f_server_on_http,
+                                             .max_body_size = 8,
+                                             .log = 0);
+    FIO_ASSERT(l, "%s: listener failed", cases[i].name);
+    unsigned port = test_ws_listener_port(l);
+    FIO_ASSERT(port, "%s: listener port discovery failed", cases[i].name);
+    char url[128];
+    snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", port);
+    FIO_ASSERT(fio_io_connect(url,
+                              .protocol = &raw_client,
+                              .on_failed = test_h1f_client_on_failed),
+               "%s: raw connect failed",
+               cases[i].name);
+    test_h1f.active = 1;
+    fio_io_start(0);
+    test_h1f.active = 0;
+    fio_io_listen_stop((fio_io_listener_s *)l);
+    fio_queue_perform_all(fio_io_queue());
+
+    FIO_ASSERT(!test_h1f.connect_failed && !test_h1f.overflow,
+               "%s: connect / capture failure",
+               cases[i].name);
+    FIO_ASSERT(!test_h1f.timed_out,
+               "%s: server kept the connection open (paths \"%s\"):\n%s",
+               cases[i].name,
+               test_h1f.paths,
+               test_h1f.wire);
+    FIO_ASSERT(!test_h1f.paths[0],
+               "%s: dispatched \"%s\" (body parsed as a request?)",
+               cases[i].name,
+               test_h1f.paths);
+    FIO_ASSERT(!strncmp(test_h1f.wire, "HTTP/1.1 413 ", 13) &&
+                   test_h1f_count("HTTP/1.") == 1,
+               "%s: expected a single 413 response:\n%s",
+               cases[i].name,
+               test_h1f.wire);
+    FIO_ASSERT(test_h1f.client_closes == 1 && test_h1f.eof,
+               "%s: raw peer must observe clean EOF exactly once",
+               cases[i].name);
   }
 }
 
@@ -3478,9 +3755,11 @@ int main(void) {
   test_http_client_server_roundtrip();
   test_http_live_max_params();
   test_http_client_interim_and_head();
+  test_http_client_limits_and_status_lines();
   test_http_server_rejects_response();
   test_http_server_close_pipeline();
   test_http_server_h1_framing();
+  test_http_server_body_limit_rejections();
 #if FIO_OS_POSIX
   test_http_server_body_store_failure();
 #endif

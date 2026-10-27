@@ -42,7 +42,6 @@ int main(void) {
   } tests[] = {
       {
           .url = (char *)"file://go/home/",
-          5,
           .expected =
               {
                   .scheme = FIO_BUF_INFO1((char *)"file"),
@@ -340,7 +339,10 @@ int main(void) {
   };
   for (size_t i = 0; tests[i].url; ++i) {
     tests[i].len = strlen(tests[i].url);
-    fio_url_s result = fio_url_parse(tests[i].url, tests[i].len);
+    char *input = (char *)malloc(tests[i].len);
+    FIO_ASSERT(input, "URL test allocation failed");
+    FIO_MEMCPY(input, tests[i].url, tests[i].len);
+    fio_url_s result = fio_url_parse(input, tests[i].len);
     fio_url_tls_info_s tls = fio_url_is_tls(result);
     FIO_ASSERT(
         result.scheme.len == tests[i].expected.scheme.len &&
@@ -458,10 +460,10 @@ int main(void) {
         i,
         tests[i].url,
         tests[i].tls.tls ? "TLS" : "none",
-        tests[i].tls.key.buf,
-        tests[i].tls.cert.buf,
-        tests[i].tls.pass.buf,
-        tests[i].tls.trust.buf,
+        tests[i].tls.key.buf ? tests[i].tls.key.buf : "",
+        tests[i].tls.cert.buf ? tests[i].tls.cert.buf : "",
+        tests[i].tls.pass.buf ? tests[i].tls.pass.buf : "",
+        tests[i].tls.trust.buf ? tests[i].tls.trust.buf : "",
         tls.tls ? "TLS" : "none",
         (int)tls.key.len,
         tls.key.buf,
@@ -471,6 +473,7 @@ int main(void) {
         tls.pass.buf,
         (int)tls.trust.len,
         tls.trust.buf);
+    free(input);
   }
 
   {

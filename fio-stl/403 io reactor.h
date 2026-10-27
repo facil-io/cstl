@@ -19,33 +19,21 @@ Copyright and License: see header file (000 copyright.h) or top of file
 The IO Reactor Cycle (the actual work)
 ***************************************************************************** */
 
-static void fio___io_signal_crash(int sig, void *flg) {
-  FIO_LOG_FATAL("(%d) additional stop signal(!) - should crash.", FIO___IO.pid);
-  fio_signal_forget(sig);
-
-#ifdef SIGKILL
-  /* cannot lock, signal may be received during critical section */
-  FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, pos) {
-    if (!pos->done)
-      fio_thread_kill(pos->pid, SIGKILL);
-  }
-  fio_thread_kill(FIO___IO.root_pid, SIGKILL);
-  fio_thread_kill(FIO___IO.pid, SIGKILL);
-#endif
-  exit(-1);
-  (void)sig, (void)flg;
+/* The first stop signal requests graceful shutdown; the second forces exit.
+ * Logging and shutdown run on the reactor thread, not in the handler. */
+static unsigned fio___io_signal_stopping;
+static void fio___io_signal_stop(int sig, void *flg) {
+  if (fio_atomic_or(&fio___io_signal_stopping, 1U))
+    _exit(128 + sig);
+  (void)flg;
 }
 
-static void fio___io_signal_stop(int sig, void *flg) {
-  FIO_LOG_INFO("(%d) stop signal detected.", FIO___IO.pid);
-  fio_io_stop();
-  if (fio_io_is_master())
-    fio_signal_monitor(.sig = sig,
-                       .callback = fio___io_signal_crash,
-                       .udata = flg,
-                       .propagate = 0,
-                       .immediate = 1);
-  (void)sig, (void)flg;
+static void fio___io_signal_review(void) {
+  if (fio_atomic_or(&fio___io_signal_stopping, 0) && !(FIO___IO.stop & 1U)) {
+    fio_io_stop();
+    FIO_LOG_INFO("(%d) stop signal detected.", FIO___IO.pid);
+  }
+  fio_signal_review();
 }
 
 static void fio___io_signal_restart(int sig, void *flg) {
@@ -59,7 +47,7 @@ static void fio___io_signal_restart(int sig, void *flg) {
 }
 
 FIO_IFUNC int fio___io_queue_timers(void) {
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  fio___io_last_tick_update(NULL, NULL);
   fio_timer_push2queue(&FIO___IO.queue, &FIO___IO.timer, FIO___IO.tick);
   int64_t first = fio_timer_next_at(&FIO___IO.timer);
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, a) {
@@ -88,13 +76,13 @@ FIO_SFUNC void fio___io_tick(int max_timeout) {
   idle_round &= (timeout > 0);
   performed_idle &= idle_round;
   idle_round ^= performed_idle;
-  if ((idle_round & !fio_atomic_add(&FIO___IO.stop, 0))) {
+  if ((idle_round & !FIO___IO.stop)) {
     fio_state_callback_force(FIO_CALL_ON_IDLE);
     performed_idle = 1;
   }
   fio___io_queue_timers();
   fio___io_review_timeouts();
-  fio_signal_review();
+  fio___io_signal_review();
 }
 
 FIO_SFUNC void fio___io_run_async_as_sync(void *ignr_1, void *ignr_2) {
@@ -108,7 +96,7 @@ FIO_SFUNC void fio___io_run_async_as_sync(void *ignr_1, void *ignr_2) {
     repeat = 1;
   }
   if (repeat)
-    fio_queue_push(&FIO___IO.queue, fio___io_run_async_as_sync);
+    fio_queue_push(&FIO___IO.queue, fio___io_run_async_as_sync, NULL, NULL);
 }
 
 FIO_SFUNC void fio___io_shutdown_task(void *shutdown_start_, void *a2) {
@@ -117,13 +105,14 @@ FIO_SFUNC void fio___io_shutdown_task(void *shutdown_start_, void *a2) {
   if (shutdown_start < FIO___IO.tick || FIO_LIST_IS_EMPTY(&FIO___IO.protocols))
     return;
   fio___io_tick(100);
-  fio_queue_push(&FIO___IO.queue, fio___io_run_async_as_sync);
+  fio_queue_push(&FIO___IO.queue, fio___io_run_async_as_sync, NULL, NULL);
   fio_queue_push(&FIO___IO.queue, fio___io_shutdown_task, shutdown_start_, a2);
 }
 
 FIO_SFUNC void fio___io_shutdown(void) {
   /* collect tick for shutdown start, to monitor for possible timeout */
-  int64_t shutdown_start = FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  fio___io_last_tick_update(NULL, NULL);
+  int64_t shutdown_start = fio_io_last_tick();
   size_t connected = 0;
   /* first notify that shutdown is starting */
   fio_state_callback_force(FIO_CALL_ON_SHUTDOWN);
@@ -167,8 +156,8 @@ FIO_SFUNC void fio___io_shutdown(void) {
   fio_queue_perform_all(&FIO___IO.queue);
 }
 
-FIO_SFUNC void fio___io_work_task(void *ignr_1, void *ignr_2) {
-  if (fio_atomic_add(&FIO___IO.stop, 0))
+FIO_SFUNC FIO___TSAN_AVOID void fio___io_work_task(void *ignr_1, void *ignr_2) {
+  if (FIO___IO.stop)
     goto no_run;
   fio___io_tick(500);
   fio_queue_push(&FIO___IO.queue, fio___io_work_task, ignr_1, ignr_2);
@@ -182,6 +171,7 @@ FIO_SFUNC void fio___io_work(int is_worker) {
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_start(q);
   }
+  FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_ASYNC); /* restarted after forks */
   /* run pre-start callbacks only once, on master */
   if (fio_io_is_master())
     fio_state_callback_force(FIO_CALL_PRE_START);
@@ -195,13 +185,15 @@ FIO_SFUNC void fio___io_work(int is_worker) {
                  fio_io_pid(),
                  is_worker);
 
-  fio_queue_push(&FIO___IO.queue, fio___io_work_task);
+  fio_queue_push(&FIO___IO.queue, fio___io_work_task, NULL, NULL);
   FIO___IO_FLAG_SET(&FIO___IO, FIO___IO_FLAG_CYCLING);
   fio_queue_perform_all(&FIO___IO.queue);
   FIO___IO_FLAG_UNSET(&FIO___IO, FIO___IO_FLAG_CYCLING);
 
   fio___io_shutdown();
 
+  /* no async task runs after this point (i.e., during ON_STOP callbacks) */
+  FIO___IO_FLAG_UNSET(&FIO___IO, FIO___IO_FLAG_ASYNC);
   FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
     fio___io_async_stop(q);
   }
@@ -261,13 +253,17 @@ static void *fio___io_worker_sentinel(void *pid_data) {
   FIO_LIST_PUSH(&FIO___IO.pids, &sentinal.node);
   FIO___LOCK_UNLOCK(FIO___IO.lock);
 
-  if (fio_thread_waitpid(sentinal.pid, &status, 0) != sentinal.pid &&
-      !FIO___IO.stop)
+  fio_thread_pid_t waited;
+  do { /* retry interrupted waits, the child wasn't reaped yet */
+    waited = fio_thread_waitpid(sentinal.pid, &status, 0);
+  } while (waited == (fio_thread_pid_t)-1 && errno == EINTR);
+  if (waited != sentinal.pid && !FIO___IO.stop)
     FIO_LOG_ERROR("(%d) waitpid failed for %d, worker re-spawning might fail.",
                   fio_thread_getpid(),
                   sentinal.pid);
-  sentinal.done = 1;
+  /* `done` and `stop` are only accessed under the lock while listed. */
   FIO___LOCK_LOCK(FIO___IO.lock);
+  sentinal.done = 1;
   FIO_LIST_REMOVE(&sentinal.node);
   FIO___LOCK_UNLOCK(FIO___IO.lock);
 
@@ -286,7 +282,10 @@ static void *fio___io_worker_sentinel(void *pid_data) {
                     FIO___IO.pid,
                     sentinal.pid);
     fio_atomic_add(&FIO___IO.to_spawn, (uint32_t)1);
-    fio_queue_push_urgent(fio_io_queue(), fio___io_spawn_workers_task);
+    fio_queue_push_urgent(fio_io_queue(),
+                          fio___io_spawn_workers_task,
+                          NULL,
+                          NULL);
   }
 #else /* Non POSIX? no `fork`? no fio_thread_waitpid? */
   FIO_ASSERT(
@@ -298,7 +297,7 @@ static void *fio___io_worker_sentinel(void *pid_data) {
 
 static void fio___io_spawn_worker(void) {
   fio_thread_t t;
-  fio_signal_review();
+  fio___io_signal_review();
 
   if (FIO___IO.stop || !fio_io_is_master())
     return;
@@ -310,11 +309,26 @@ static void fio___io_spawn_worker(void) {
   if (fio_thread_create(&t, fio___io_worker_sentinel, (void *)(uintptr_t)pid)) {
     FIO_LOG_FATAL(
         "sentinel thread creation failed, no worker will be spawned.");
+    /* the worker is untracked - retire and reap it now. */
+    fio_thread_kill(pid, SIGTERM);
+#ifdef WEXITSTATUS
+    {
+      int status = 0;
+      while (fio_thread_waitpid(pid, &status, 0) == (fio_thread_pid_t)-1 &&
+             errno == EINTR)
+        ;
+    }
+#endif
     fio_io_stop();
   }
   return;
 
 is_worker_process:
+  /* Only the forking thread survives: a lock held by any other parent thread
+   * (e.g., an application thread calling `fio_io_defer`) would never be
+   * released. Reset the locks before the queue is used. Better leak the lock,
+   * avoid UB. */
+  fio___io_reset_in_child();
   FIO___IO.pid = fio_thread_getpid();
   FIO___IO.is_worker = 1;
 
@@ -358,8 +372,7 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
   FIO_LOG_INFO("(%d) spawning %d workers.", fio_io_pid(), FIO___IO.to_spawn);
 
   /* do not allow master tasks to run in worker - pretend to stop. */
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
-
+  fio___io_last_tick_update(NULL, NULL);
   if (fio_atomic_or_fetch(&FIO___IO.stop, 2) != 2)
     goto faild_or_done;
 
@@ -370,7 +383,7 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
 
   /* perform forking procedure with the stop flag reset. */
   fio_atomic_and_fetch(&FIO___IO.stop, 1);
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  fio___io_last_tick_update(NULL, NULL);
 
   fio_state_callback_force(FIO_CALL_BEFORE_FORK);
   /* perform actual fork */
@@ -380,9 +393,11 @@ static void fio___io_spawn_workers_task(void *ignr_1, void *ignr_2) {
   } while (fio_atomic_sub_fetch(&FIO___IO.to_spawn, 1));
   fio_state_callback_force(FIO_CALL_AFTER_FORK);
 
-  /* finish up */
-  if ((FIO___IO.flags & FIO___IO_FLAG_CYCLING)) {
+  /* finish up: restart async queues stopped above (pending / late tasks run),
+   * including when spawning from the first queue pass (before cycling). */
+  if ((FIO___IO.flags & FIO___IO_FLAG_CYCLING))
     fio___io_defer_no_wakeup(fio___io_work_task, NULL, NULL);
+  if ((FIO___IO.flags & FIO___IO_FLAG_ASYNC)) {
     FIO_LIST_EACH(fio_io_async_s, node, &FIO___IO.async, q) {
       fio___io_async_start(q);
     }
@@ -402,7 +417,10 @@ SFUNC void fio_io_add_workers(int workers) {
   if (!workers || !fio_io_is_master())
     return;
   fio_atomic_add(&FIO___IO.to_spawn, (uint32_t)fio_io_workers(workers));
-  fio_queue_push_urgent(&FIO___IO.queue, fio___io_spawn_workers_task);
+  fio_queue_push_urgent(&FIO___IO.queue,
+                        fio___io_spawn_workers_task,
+                        NULL,
+                        NULL);
 }
 
 /** Starts the IO reactor, using optional `workers` processes. Will BLOCK! */
@@ -413,20 +431,26 @@ SFUNC void fio_io_start(int workers) {
   FIO___IO.is_worker = !workers;
   fio_sock_maximize_limits(0);
 
-  fio_signal_monitor(.sig = SIGINT,
-                     .callback = fio___io_signal_stop,
-                     .immediate = 1);
-  fio_signal_monitor(.sig = SIGTERM,
-                     .callback = fio___io_signal_stop,
-                     .immediate = 1);
+  fio_atomic_and(&fio___io_signal_stopping, 0U);
+  FIO_ASSERT(!fio_signal_monitor(.sig = SIGINT,
+                                 .callback = fio___io_signal_stop,
+                                 .immediate = 1),
+             "couldn't monitor SIGINT");
+  FIO_ASSERT(!fio_signal_monitor(.sig = SIGTERM,
+                                 .callback = fio___io_signal_stop,
+                                 .immediate = 1),
+             "couldn't monitor SIGTERM");
   if (FIO___IO.restart_signal)
-    fio_signal_monitor(.sig = FIO___IO.restart_signal,
-                       .callback = fio___io_signal_restart);
+    FIO_ASSERT(!fio_signal_monitor(.sig = FIO___IO.restart_signal,
+                                   .callback = fio___io_signal_restart),
+               "couldn't monitor restart signal");
 
 #ifdef SIGPIPE
-  fio_signal_monitor(.sig = SIGPIPE);
+  /* Process-lifetime suppression, shared with the TLS backend. Reactor
+   * shutdown must not re-enable SIGPIPE for outstanding OpenSSL writes. */
+  FIO_ASSERT(!fio_signal_monitor(.sig = SIGPIPE), "couldn't suppress SIGPIPE");
 #endif
-  FIO___IO.tick = FIO___IO_GET_TIME_MILLI();
+  fio___io_last_tick_update(NULL, NULL);
   if (workers) {
     FIO___IO.to_spawn = workers;
     fio___io_spawn_workers_task(NULL, NULL);
@@ -437,13 +461,12 @@ SFUNC void fio_io_start(int workers) {
                    fio_io_root_pid());
   }
   fio___io_work(!workers);
-  fio_signal_forget(SIGINT);
-  fio_signal_forget(SIGTERM);
-  if (FIO___IO.restart_signal)
-    fio_signal_forget(FIO___IO.restart_signal);
-#ifdef SIGPIPE
-  fio_signal_forget(SIGPIPE);
-#endif
+  if (fio_signal_forget(SIGINT))
+    FIO_LOG_ERROR("couldn't stop monitoring SIGINT");
+  if (fio_signal_forget(SIGTERM))
+    FIO_LOG_ERROR("couldn't stop monitoring SIGTERM");
+  if (FIO___IO.restart_signal && fio_signal_forget(FIO___IO.restart_signal))
+    FIO_LOG_ERROR("couldn't stop monitoring restart signal");
   fio_queue_perform_all(&FIO___IO.queue);
 }
 
@@ -458,10 +481,10 @@ SFUNC uint16_t fio_io_workers(int workers) {
       cores = 8;
       FIO_LOG_WARNING(
           "fio_io_start / fio_io_workers called with negative value for worker "
-          "count, but auto-detect failed, assuming %d CPU cores",
+          "count, but auto-detect failed, assuming %ld CPU cores",
           cores);
     }
-    workers = (int)(cores / (0 - workers));
+    workers = (int)(cores / (0 - (int64_t)workers)); /* INT_MIN safe */
     workers += !workers;
   }
   if (workers > 0x0FFF)
@@ -470,7 +493,7 @@ SFUNC uint16_t fio_io_workers(int workers) {
 }
 
 /** Retiers all existing workers and restarts with the number of workers. */
-SFUNC void fio___io_restart(void *workers_, void *ignr_) {
+FIO_SFUNC void fio___io_restart(void *workers_, void *ignr_) {
   int workers = (int)(uintptr_t)workers_;
   (void)ignr_;
   if (!fio_io_is_master())
@@ -487,7 +510,10 @@ SFUNC void fio___io_restart(void *workers_, void *ignr_) {
         workers);
     fio_atomic_add(&FIO___IO.to_spawn, (uint32_t)workers);
     /* schedule workers to spawn - won't run until we return from function. */
-    fio_queue_push_urgent(fio_io_queue(), fio___io_spawn_workers_task);
+    fio_queue_push_urgent(fio_io_queue(),
+                          fio___io_spawn_workers_task,
+                          NULL,
+                          NULL);
   } else {
     FIO_LOG_INFO(
         "(%d) shutting down existing workers and switching to single mode.",
@@ -497,7 +523,13 @@ SFUNC void fio___io_restart(void *workers_, void *ignr_) {
   FIO___LOCK_LOCK(FIO___IO.lock);
   FIO_LIST_EACH(fio___io_pid_s, node, &FIO___IO.pids, w) {
     w->stop = 1;
-    fio_thread_kill(w->pid, FIO___IO.restart_signal);
+    /* signal 0 (no restart signal configured) would not stop the worker */
+    if (fio_thread_kill(
+            w->pid,
+            (FIO___IO.restart_signal ? FIO___IO.restart_signal : SIGTERM)))
+      FIO_LOG_ERROR("(%d) couldn't signal worker %d to stop.",
+                    fio_io_root_pid(),
+                    (int)w->pid);
   }
   FIO___LOCK_UNLOCK(FIO___IO.lock);
   /* switch to single mode? */
@@ -514,7 +546,10 @@ no_workers:
 }
 
 SFUNC void fio_io_restart(int workers) {
-  fio_queue_push(&FIO___IO.queue, fio___io_restart, (void *)(uintptr_t)workers);
+  fio_queue_push(&FIO___IO.queue,
+                 fio___io_restart,
+                 (void *)(uintptr_t)workers,
+                 NULL);
 }
 
 /* *****************************************************************************
@@ -532,8 +567,9 @@ typedef struct {
   void (*on_stop)(fio_io_protocol_s *protocol, void *udata);
   int owner;
   fio_socket_i fd;
-  size_t ref_count;
+  size_t ref_count; /* references beyond the owner's (IO / pending attach) */
   size_t url_len;
+  unsigned stopped;
   uint8_t hide_from_log;
   char url[];
 } fio___io_listen_s;
@@ -546,22 +582,11 @@ static fio___io_listen_s *fio___io_listen_dup(fio___io_listen_s *l) {
 }
 
 FIO_SFUNC void fio___io_listen_attach_task(void *l_);
+/** Drops a reference, releasing the listener on the last one. */
 static void fio___io_listen_free(void *l_) {
   fio___io_listen_s *l = (fio___io_listen_s *)l_;
-  if (l->io) {
-    fio_io_close(l->io);
-    l->io = NULL;
-  }
   if (fio_atomic_sub(&l->ref_count, 1))
     return;
-
-  fio_state_callback_remove(FIO_CALL_AT_EXIT, fio___io_listen_free, (void *)l);
-  fio_state_callback_remove(FIO_CALL_ON_START,
-                            fio___io_listen_attach_task,
-                            (void *)l);
-  fio_state_callback_remove(FIO_CALL_PRE_START,
-                            fio___io_listen_attach_task,
-                            (void *)l);
   fio___io_func_free_context_caller(l->protocol->io_functions.free_context,
                                     l->tls_ctx);
   fio_sock_close(l->fd);
@@ -592,9 +617,26 @@ static void fio___io_listen_free(void *l_) {
   FIO_MEM_FREE_(l, sizeof(*l) + l->url_len + 1);
 }
 
+/** Releases the owner's reference (once), cancelling any future attachment. */
+static void fio___io_listen_stop(void *l_) {
+  fio___io_listen_s *l = (fio___io_listen_s *)l_;
+  if (fio_atomic_or(&l->stopped, 1U))
+    return;
+  fio_state_callback_remove(FIO_CALL_AT_EXIT, fio___io_listen_stop, l_);
+  fio_state_callback_remove(FIO_CALL_ON_START, fio___io_listen_attach_task, l_);
+  fio_state_callback_remove(FIO_CALL_PRE_START,
+                            fio___io_listen_attach_task,
+                            l_);
+  if (l->io) {
+    fio_io_close(l->io);
+    l->io = NULL;
+  }
+  fio___io_listen_free(l);
+}
+
 SFUNC void fio_io_listen_stop(fio_io_listener_s *listener) {
   if (listener)
-    fio___io_listen_free((fio___io_listen_s *)listener);
+    fio___io_listen_stop((void *)listener);
 }
 
 /** Returns the URL on which the listener is listening. */
@@ -636,13 +678,20 @@ static void fio___io_listen_on_data_task(void *io_, void *ignr_) {
   fio_io_s *io = (fio_io_s *)io_;
   fio_socket_i fd;
   fio___io_listen_s *l = (fio___io_listen_s *)fio_io_udata(io);
+  if (!fio_io_is_open(io)) /* closed while the accept task was queued */
+    goto done;
   fio_io_unsuspend(io);
   while (FIO_SOCK_FD_ISVALID(fd = fio_sock_accept(fio_io_fd(io), NULL, NULL))) {
     // FIO_LOG_DDEBUG2("(%d) accepted new connection with fd %d",
     //                 fio_io_pid(),
     //                 fd);
-    fio_io_attach_fd(fd, l->protocol, l->udata, l->tls_ctx);
+    /* each receiver owns its own context reference */
+    fio_io_attach_fd(fd,
+                     l->protocol,
+                     l->udata,
+                     l->protocol->io_functions.dup_context(l->tls_ctx));
   }
+done:
   fio___io_free2(io);
 }
 static void fio___io_listen_on_data_task_reschd(void *io_, void *ignr_) {
@@ -676,7 +725,8 @@ static void fio___io_listen_on_data(fio_io_s *io) {
     fio_io_suspend(io);
     fio_queue_push(l->queue,
                    fio___io_listen_on_data_task_reschd,
-                   fio___io_dup2(io));
+                   fio___io_dup2(io),
+                   NULL);
     return;
   }
   fio___io_listen_on_data_task(fio___io_dup2(io), NULL);
@@ -714,20 +764,27 @@ FIO_SFUNC void fio___io_listen_assert_dup(fio_socket_i fd,
 #endif
 }
 
+/* Consumes the reference taken when the task was scheduled. */
 FIO_SFUNC void fio___io_listen_attach_task_deferred(void *l_, void *ignr_) {
   fio___io_listen_s *l = (fio___io_listen_s *)l_;
-  l = fio___io_listen_dup(l);
+  (void)ignr_;
+  if (l->stopped) {
+    fio___io_listen_free(l); /* stopped before attaching */
+    return;
+  }
   fio_socket_i fd = fio_sock_dup(l->fd);
   fio___io_listen_assert_dup(fd, l->fd);
   FIO_LOG_DEBUG2("(%d) Called dup to attach new fd as a listening socket.",
                  (int)fio_io_pid());
+  /* the reference transfers to the IO (released by on_close) */
   l->io = fio_io_attach_fd(fd, &FIO___IO_LISTEN_PROTOCOL, l, NULL);
-  (void)ignr_;
 }
 
 FIO_SFUNC void fio___io_listen_attach_task(void *l_) {
   /* make sure to run in server thread */
-  fio_io_defer(fio___io_listen_attach_task_deferred, l_, NULL);
+  fio_io_defer(fio___io_listen_attach_task_deferred,
+               fio___io_listen_dup((fio___io_listen_s *)l_),
+               NULL);
 }
 
 int fio_io_listen___(void); /* IDE marker */
@@ -742,27 +799,27 @@ SFUNC fio_io_listener_s *fio_io_listen
 FIO_NOOP(struct fio_io_listen_args_s args) {
   fio___io_listen_s *l = NULL;
   void *built_tls = NULL;
-  int should_free_tls = !args.tls;
   FIO_STR_INFO_TMP_VAR(url_alt, 2048);
   if (!args.protocol) {
     FIO_LOG_ERROR("fio_io_listen requires a protocol to be assigned.");
+    fio_io_tls_free(args.tls);
     return (fio_io_listener_s *)l;
   }
   if (args.on_root && !fio_io_is_master()) {
     FIO_LOG_ERROR("fio_io_listen called with `on_root` by a non-root worker.");
+    fio_io_tls_free(args.tls);
     return (fio_io_listener_s *)l;
   }
-test_url:
   if (!args.url) {
     args.url = fio_sys_env("ADDRESS");
     if (!args.url)
       args.url = "0.0.0.0";
   }
   url_alt.len = FIO_STRLEN(args.url);
-  if (url_alt.len > 2024) {
+  if (url_alt.len > 2024) { /* never fall back to a different address */
     FIO_LOG_ERROR("binding address / url too long.");
-    args.url = NULL;
-    goto test_url;
+    fio_io_tls_free(args.tls);
+    return (fio_io_listener_s *)l;
   }
   fio_url_s url = fio_url_parse(args.url, url_alt.len);
   if (url.scheme.buf &&
@@ -798,6 +855,15 @@ test_url:
   args.tls = fio_io_tls_from_url(args.tls, url);
   fio___io_protocol_init_test(args.protocol, !!args.tls);
   built_tls = args.protocol->io_functions.build_context(args.tls, 0);
+  if (args.tls && !built_tls) { /* TLS requested: never fall back to plain */
+    FIO_LOG_ERROR("(%d) fio_io_listen failed to build a TLS context for %s",
+                  fio_io_pid(),
+                  args.url);
+    fio_io_tls_free(args.tls);
+    if (args.on_stop) /* same cleanup contract as a failed bind */
+      args.on_stop(args.protocol, args.udata);
+    return (fio_io_listener_s *)l;
+  }
   fio_buf_info_s url_buf = FIO_BUF_INFO2((char *)args.url, url_alt.len);
   /* remove query details from URL */
   if (url.query.len)
@@ -806,7 +872,17 @@ test_url:
     url_buf.len = url.target.buf - (url_buf.buf + 1);
   l = (fio___io_listen_s *)
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*l) + url_buf.len + 1, 0);
-  FIO_ASSERT_ALLOC(l);
+  if (!l) { /* same cleanup contract as a failed bind / TLS context */
+    FIO_LOG_ERROR("(%d) fio_io_listen: no memory for %s",
+                  fio_io_pid(),
+                  args.url);
+    fio___io_func_free_context_caller(args.protocol->io_functions.free_context,
+                                      built_tls);
+    fio_io_tls_free(args.tls);
+    if (args.on_stop)
+      args.on_stop(args.protocol, args.udata);
+    return NULL;
+  }
   FIO_LEAK_COUNTER_ON_ALLOC(fio_io_listen);
   *l = (fio___io_listen_s){
       .protocol = args.protocol,
@@ -821,8 +897,7 @@ test_url:
   };
   FIO_MEMCPY(l->url, url_buf.buf, url_buf.len);
   l->url[l->url_len] = 0;
-  if (should_free_tls)
-    fio_io_tls_free(args.tls);
+  fio_io_tls_free(args.tls); /* owned by the call (callers dup to keep it) */
 
   l->fd = fio_sock_open2(l->url, FIO_SOCK_SERVER | FIO_SOCK_TCP);
   if (!FIO_SOCK_FD_ISVALID(l->fd)) {
@@ -830,14 +905,14 @@ test_url:
     return (fio_io_listener_s *)(l = NULL);
   }
   if (fio_io_is_running()) {
-    fio_io_defer(fio___io_listen_attach_task_deferred, l, NULL);
+    fio___io_listen_attach_task(l);
   } else {
     fio_state_callback_add(
         (args.on_root ? FIO_CALL_PRE_START : FIO_CALL_ON_START),
         fio___io_listen_attach_task,
         (void *)l);
   }
-  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___io_listen_free, l);
+  fio_state_callback_add(FIO_CALL_AT_EXIT, fio___io_listen_stop, l);
   return (fio_io_listener_s *)l;
 }
 
@@ -875,10 +950,10 @@ FIO_SFUNC void fio___connecting_on_close(void *buffer, void *udata) {
 FIO_SFUNC void fio___connecting_on_ready(fio_io_s *io) {
   if (!fio_io_is_open(io))
     return;
-  /* A writable socket is not proof of a successful non-blocking connect:
-   * kqueue reports EVFILT_WRITE together with EV_ERROR on failure and poll
-   * may report POLLOUT|POLLERR. Promote only when no async error is pending;
-   * otherwise the following on_close routes the failure to `on_failed`. */
+  /* Readiness is not proof of a successful non-blocking connect: kqueue may
+   * report EV_ERROR and poll may report readiness together with POLLERR.
+   * Promote only when no async error is pending; otherwise the following
+   * on_close routes the failure to `on_failed`. */
   if (fio_sock_error(fio_io_fd(io)))
     return;
   fio___io_connecting_s *c = (fio___io_connecting_s *)fio_io_udata(io);
@@ -896,8 +971,8 @@ FIO_SFUNC void fio___connecting_on_ready(fio_io_s *io) {
 
 void fio_io_connect___(void); /* IDE Marker */
 SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
-  int should_free_tls = !args.tls;
   if (!args.protocol || !args.url) {
+    fio_io_tls_free(args.tls);
     if (args.on_failed)
       fio___io_defer_no_wakeup((void (*)(void *, void *))args.on_failed,
                                args.protocol,
@@ -910,8 +985,11 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   size_t url_len = FIO_STRLEN(args.url);
   fio_url_s url = fio_url_parse(args.url, url_len);
   args.tls = fio_io_tls_from_url(args.tls, url);
+  /* opt-in verification: no trust configured -> trust the system store */
+  if (args.verify && args.tls && !fio_io_tls_trust_count(args.tls))
+    fio_io_tls_trust_add(args.tls, NULL);
   if (args.tls && url.host.len)
-    fio_io_tls_sni_set(args.tls, url.host.buf, url.host.len);
+    fio___io_tls_peer_name_set(args.tls, url.host.buf, url.host.len);
   /* guarded: the protocol may already have live IOs (e.g., shared with a
    * listener or another client) - re-initializing resets its IO lists. */
   fio___io_protocol_init_test(args.protocol, !!args.tls);
@@ -921,12 +999,23 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
     url_len = url.target.buf - (args.url + 1);
   fio___io_connecting_s *c = (fio___io_connecting_s *)
       FIO_MEM_REALLOC_(NULL, 0, sizeof(*c) + url_len + 1, 0);
-  FIO_ASSERT_ALLOC(c);
+  if (!c) {
+    FIO_LOG_ERROR("(%d) fio_io_connect: no memory for %s",
+                  fio_io_pid(),
+                  args.url);
+    fio_io_tls_free(args.tls);
+    if (args.on_failed)
+      fio___io_defer_no_wakeup((void (*)(void *, void *))args.on_failed,
+                               args.protocol,
+                               args.udata);
+    return NULL;
+  }
   FIO_LEAK_COUNTER_ON_ALLOC(fio___io_connecting_s);
   *c = (fio___io_connecting_s){
       .protocol =
           {
               .on_ready = fio___connecting_on_ready,
+              .on_data = fio___connecting_on_ready,
               .on_close = fio___connecting_on_close,
               .io_functions = args.protocol->io_functions,
               .timeout = args.timeout,
@@ -939,17 +1028,24 @@ SFUNC fio_io_s *fio_io_connect FIO_NOOP(fio_io_connect_args_s args) {
   };
   FIO_MEMCPY(c->url, args.url, url_len);
   c->url[url_len] = 0;
-  fio_socket_i fd = fio_sock_open2(c->url, FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
+  fio_socket_i fd = FIO_SOCKET_INVALID;
   fio_io_s *io = NULL;
+  if (args.tls && !c->tls_ctx) /* TLS requested: never fall back to plain */
+    FIO_LOG_ERROR("(%d) fio_io_connect failed to build a TLS context for %s",
+                  fio_io_pid(),
+                  c->url);
+  else
+    fd = fio_sock_open2(c->url, FIO_SOCK_CLIENT | FIO_SOCK_NONBLOCK);
   if (FIO_SOCK_FD_ISVALID(fd)) {
-    /* the TLS context's ownership transfers to the reactor (attach_fd) */
-    io = fio_io_attach_fd(fd, &c->protocol, c, c->tls_ctx);
+    /* the TLS context reference transfers to the IO (success or failure) */
+    void *tls = c->tls_ctx;
+    c->tls_ctx = NULL;
+    io = fio_io_attach_fd(fd, &c->protocol, c, tls);
   } else {
     /* never attached. Teardown in IO thread for safety. */
     fio___io_defer_no_wakeup(fio___connecting_on_close, NULL, c);
   }
-  if (should_free_tls)
-    fio_io_tls_free(args.tls);
+  fio_io_tls_free(args.tls); /* owned by the call (callers dup to keep it) */
   return io;
 }
 /* *****************************************************************************

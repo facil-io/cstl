@@ -24,7 +24,7 @@ struct fio_poll_s {
 };
 ```
 
-Two internal `epoll` file descriptors are used: one for `POLLOUT` readiness and one for `POLLIN`/error events. A `pollfd` pair wakes the internal `poll` used to wait on both epoll FDs at once.
+Two close-on-exec `epoll` file descriptors are used: one for `POLLOUT` readiness and one for `POLLIN` events. Both report errors and hang-ups. A `pollfd` pair wakes the internal `poll` used to wait on both epoll FDs at once.
 
 #### `fio_poll_engine`
 
@@ -39,7 +39,9 @@ A state callback re-creates the epoll FDs in the child process after `fork`.
 ## Notes
 
 - Events are monitored in one-shot mode (`EPOLLONESHOT`). After an event fires, the descriptor must be re-armed with `fio_poll_monitor`.
-- Error and hang-up events are dispatched through the read-side epoll FD and delivered to `on_close`.
+- Error and hang-up events on a write-only registration are delivered to `on_close`, even without `EPOLLOUT`. Read registrations dispatch `on_close` on errors and hang-ups.
+- `POLLPRI` monitors urgent input through `EPOLLPRI` and invokes `on_data`.
 - `EPOLLRDHUP` and `EPOLLHUP` are always included in the monitored events.
+- Timeouts greater than `INT_MAX` milliseconds are capped at `INT_MAX` before calling `poll`.
 
 ------------------------------------------------------------

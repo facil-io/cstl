@@ -80,7 +80,7 @@ typedef struct {
  * Clinger's fast path and the Eisel-Lemire algorithm. Leading-zero numbers with
  * a fraction or exponent are decimal (e.g., `012.5` is 12.5, as in C).
  */
-FIO_SFUNC fio_aton_s fio_aton(char **pstr);
+SFUNC fio_aton_s fio_aton(char **pstr);
 
 /* *****************************************************************************
 Strings to Signed Numbers - API
@@ -180,7 +180,7 @@ FIO_SFUNC size_t fio_digits8u(uint64_t i);
 FIO_SFUNC size_t fio_digits16u(uint64_t i);
 /** Returns the number of digits in base 2 for an unsigned number. */
 FIO_SFUNC size_t fio_digits_bin(uint64_t i);
-/** Returns the number of digits in any base X<65 for an unsigned number. */
+/** Returns the number of digits in base 2-36 (other bases return 0). */
 FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base);
 
 /** Writes a signed number to `dest` using `digits` bytes (+ `NUL`) */
@@ -194,7 +194,8 @@ FIO_IFUNC void fio_ltoa10u(char *dest, uint64_t i, size_t digits);
 FIO_IFUNC void fio_ltoa16u(char *dest, uint64_t i, size_t digits);
 /** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
 FIO_IFUNC void fio_ltoa_bin(char *dest, uint64_t i, size_t digits);
-/** Writes unsigned number to `dest` using `digits` bytes (+ `NUL`) */
+/** Writes unsigned number in base 2-36 to `dest` using `digits` bytes (+ `NUL`)
+ * - other bases write an empty string. */
 FIO_IFUNC void fio_ltoa_xbase(char *dest,
                               uint64_t i,
                               size_t digits,
@@ -208,7 +209,8 @@ SFUNC uint64_t fio_atol10u(char **pstr);
 SFUNC uint64_t fio_atol16u(char **pstr);
 /** Reads an unsigned binary formatted number (possibly prefixed with "0b"). */
 SFUNC uint64_t fio_atol_bin(char **pstr);
-/** Read an unsigned number in any base up to base 36. */
+/** Reads an unsigned number in base 2-36 (other bases return 0, consuming
+ * nothing). Sets `errno == E2BIG` on overflow, stopping before the digit. */
 SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base);
 
 /* *****************************************************************************
@@ -361,8 +363,10 @@ FIO_SFUNC size_t fio_digits16u(uint64_t i) {
   return 16;
 }
 
-/** Returns the number of digits in base X<65 for an unsigned number. */
+/** Returns the number of digits in base 2-36 (other bases return 0). */
 FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base) {
+  if (FIO_UNLIKELY((base - 2) > 34))
+    return 0;
   size_t base2 = base * base;
   size_t base3 = base2 * base;
   size_t base4 = base3 * base;
@@ -454,6 +458,10 @@ FIO_IFUNC void fio_ltoa_xbase(char *dest,
                               uint64_t i,
                               size_t digits,
                               size_t base) {
+  if (FIO_UNLIKELY((base - 2) > 34)) {
+    *dest = 0;
+    return;
+  }
   dest += digits;
   *dest-- = 0;
   while (i >= base) {
@@ -519,47 +527,42 @@ FIO_IFUNC double fio_u2d(uint64_t mant, int64_t exponent) {
     uint64_t u64;
     double d;
   } u = {0};
-  size_t msbi;
+  int64_t msbi, shift;
   if (!mant)
     return u.d;
-  msbi = fio_msb_index_unsafe(mant);
-  if (FIO___ATON_TIE2EVEN && FIO_UNLIKELY(msbi > 52)) { /* losing precision */
-    bool not53 = (msbi != 53);
-    bool far_set = ((mant >> (53 + not53)) != 0);
-    mant = mant >> (msbi - (53 + not53));
-    mant |= far_set;
-    mant |= (mant >> (1U + not53)) & 1; /* set the non-even bit as rounder */
-    mant += 1; /* 1 will propagate if rounding is necessary. */
-    bool add_to_expo = (mant >> (53U + not53)) & 1;
-    mant >>= (1U + not53 + add_to_expo);
-    exponent += add_to_expo;
+  /* saturate: beyond these bounds any mantissa is infinity / zero */
+  if (FIO_UNLIKELY(exponent > 4096))
+    exponent = 4096;
+  else if (FIO_UNLIKELY(exponent < -4096))
+    exponent = -4096;
+  msbi = (int64_t)fio_msb_index_unsafe(mant);
+  exponent += msbi + 1023; /* biased exponent */
+  if (FIO_UNLIKELY(exponent > 2046))
+    goto is_infinity;
+  shift = msbi - 52; /* align the most significant bit to bit[52] */
+  if (FIO_UNLIKELY(exponent < 1)) { /* subnormal: fixed 2^-1074 scale */
+    shift += 1 - exponent;
+    exponent = 1;
   }
-  /* normalize exponent */
-  exponent += msbi + 1023;
-  if (FIO_UNLIKELY(exponent > 2047))
-    goto is_inifinity_or_nan;
-  if (FIO_UNLIKELY(exponent <= 0))
-    goto is_subnormal;
-  exponent = (int64_t)((uint64_t)exponent << 52);
-  u.u64 |= (uint64_t)exponent;
-  /* reposition mant bits so we "hide" the fist set bit in bit[52] */
-  if (msbi < 52)
-    mant = mant << (52 - msbi);
-  else if (!FIO___ATON_TIE2EVEN &&
-           FIO_UNLIKELY(msbi > 52)) /* losing precision */
-    mant = mant >> (msbi - 52);
-  u.u64 |= mant & FIO_MATH_DBL_MANT_MASK; /* remove the 1 set bit */
+  if (shift > 0) { /* losing precision */
+    if (FIO_UNLIKELY(shift > 64))
+      return u.d;
+    uint64_t m = (shift == 64) ? 0 : (mant >> shift);
+    if (FIO___ATON_TIE2EVEN) { /* round to nearest, tie to even */
+      const uint64_t half = (uint64_t)1 << (shift - 1);
+      const uint64_t rem = mant & ((half << 1) - 1);
+      m += (uint64_t)((rem > half) | ((rem == half) & (m & 1)));
+    }
+    mant = m;
+  } else
+    mant <<= (0 - shift);
+  /* the hidden bit (or a rounding carry) adds to the exponent field, so a
+   * carry into bit[53] or into the first normal / infinity is exact. */
+  u.u64 = ((uint64_t)(exponent - 1) << 52) + mant;
   return u.d;
 
-is_inifinity_or_nan:
+is_infinity:
   u.u64 = FIO_MATH_DBL_EXPO_MASK;
-  return u.d;
-
-is_subnormal:
-  exponent += 51 - msbi;
-  if (exponent < 0)
-    return u.d;
-  u.u64 = mant >> exponent;
   return u.d;
 }
 
@@ -572,7 +575,7 @@ FIO_IFUNC double fio_i2d(int64_t mant, int64_t exponent) {
   } u = {.i64 = mant};
   bool sign = (u.i64 < 0);
   if (sign)
-    u.i64 = -u.i64;
+    u.u64 = (uint64_t)0 - u.u64; /* INT64_MIN safe */
   u.d = fio_u2d(u.u64, exponent);
   u.u64 |= ((uint64_t)sign) << 63;
   return u.d;
@@ -962,17 +965,20 @@ SFUNC uint64_t fio_atol_xbase(char **pstr, size_t base) {
     return (r = fio_atol16u(pstr));
   if (base == 2)
     return (r = fio_atol_bin(pstr));
+  if (FIO_UNLIKELY(base < 2))
+    return r;
   const uint64_t limit = (~UINT64_C(0)) / base;
+  const uint64_t limit_d = (~UINT64_C(0)) % base;
   size_t d;
   while ((d = (size_t)fio_c2i((unsigned char)(**pstr))) < base) {
+    if (FIO_UNLIKELY(r >= limit) && (r > limit || d > limit_d)) {
+      errno = E2BIG; /* overflow: stop before the digit */
+      return r;
+    }
     r *= base;
     r += d;
     ++*pstr;
-    if (r > limit)
-      break;
   }
-  if ((fio_c2i((uint8_t)(**pstr))) < base)
-    errno = E2BIG;
   return r;
 }
 
@@ -1005,9 +1011,9 @@ SFUNC int64_t FIO___ASAN_AVOID fio_atol(char **pstr) {
   if ((p[0] | 32) == 'b' && (uint8_t)(p[1] - '0') < 2)
     base = 2; /* binary: `0b` / `b` prefix followed by a binary digit */
   else if ((p[0] | 32) == 'x' && fio_c2i((uint8_t)p[1]) < 16)
-    base = 3;      /* hex: `0x` / `x` prefix followed by a hex digit */
-  p += (base > 1); /* consume 'b' or 'x' */
-  char *const s = p;                             /* mark starting point */
+    base = 3;              /* hex: `0x` / `x` prefix followed by a hex digit */
+  p += (base > 1);         /* consume 'b' or 'x' */
+  char *const s = p;       /* mark starting point */
   u.u64 = fn[base](&p);    /* convert string to unsigned long long */
   if (p != s || base == 1) /* false oct base, a single '0'? */
     *pstr = p;
@@ -1764,7 +1770,7 @@ FIO_IFUNC char *fio___aton_digits(char *p,
   return p;
 }
 
-FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
+SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
   /* note: sanitizer avoided due to possible 8 byte overflow within mem-page */
   static uint64_t (*const fn[])(char **) = {
       fio_atol10u,
@@ -1798,7 +1804,7 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
   if ((p[0] | 32) == 'b' && (uint8_t)(p[1] - '0') < 2)
     base = 2; /* binary: `0b` / `b` prefix followed by a binary digit */
   else if ((p[0] | 32) == 'x' && (fio_c2i((uint8_t)p[1]) < 16 || p[1] == '.'))
-    base = 3; /* hex: `0x` / `x` prefix followed by a hex digit (or dot) */
+    base = 3;      /* hex: `0x` / `x` prefix followed by a hex digit (or dot) */
   p += (base > 1); /* consume 'b' or 'x' */
   start = p;       /* mark starting point */
   if (base == 1) { /* leading zero: octal, unless it's a decimal float */
@@ -1834,6 +1840,8 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
     expo = fio_atol10u((char **)&p);
     while ((uint8_t)(p[0] - '0') < 10)
       ++p;
+    if (expo > 0xFFFFFULL) /* saturate (any value beyond is inf / zero) */
+      expo = 0xFFFFFULL;
   }
   if (p != start || base == 1) /* false oct base, a single '0'? */
     *pstr = p;
@@ -1843,20 +1851,27 @@ FIO_SFUNC FIO___ASAN_AVOID fio_aton_s fio_aton(char **pstr) {
       r.i = (int64_t)(0 - r.u);
     return r;
   }
-  dbl = (long double)before_dot;
-  dbl_dot = (long double)after_dot;
-  if (base == 3) {
-    dbl *= fio_u2d(1U, (int64_t)(head_expo << 2));
-    dbl_dot *= fio_u2d(1U, ((int64_t)0 - (dot_expo << 2)));
-  } else { /* if (base == 1) */
-    dbl *= fio_u2d(1U, (int64_t)(head_expo * 3));
-    dbl_dot *= fio_u2d(1U, ((int64_t)0 - (dot_expo * 3)));
+  {
+    const int64_t bits = (int64_t)(base == 3) + 3; /* hex: 4, oct: 3 */
+    int64_t e = expo_neg ? ((int64_t)0 - (int64_t)expo) : (int64_t)expo;
+    dbl = (long double)before_dot;
+    if (head_expo) { /* dropped digits: the fraction is insignificant */
+      if (head_expo > 0xFFFFFULL)
+        head_expo = 0xFFFFFULL;
+      e += (int64_t)head_expo * bits; /* single scale: no `inf * 0` NaN */
+    } else if (after_dot) {
+      dbl_dot = (long double)after_dot;
+      dbl += dbl_dot * fio_u2d(1U, (int64_t)0 - ((int64_t)dot_expo * bits));
+    }
+    if (FIO_UNLIKELY(e < -1022 ||
+                     e > 1023)) { /* keep factors finite / normal */
+      if (dbl != 0)
+        dbl *= fio_u2d(1U, e / 2);
+      e -= e / 2;
+    }
+    if (e && dbl != 0) /* `0 * inf` would be NaN */
+      dbl *= fio_u2d(1U, e);
   }
-  dbl += dbl_dot;
-  if (expo)
-    dbl *=
-        fio_u2d(1U,
-                (expo_neg ? (int64_t)((uint64_t)0ULL - expo) : (int64_t)expo));
   r.is_float = 1;
   r.f = (double)dbl;
   r.u |= (uint64_t)neg << 63;
@@ -1913,10 +1928,10 @@ is_infinity:
   if ((p[1] | 32) == 'n' && (p[2] | 32) == 'f') { /* inf */
     r.is_float = 1;
     r.u = ((uint64_t)neg << 63) | ((uint64_t)2047ULL << 52);
-    p += 3 + (((p[3] | 32) == 'i' &&
-               fio_buf2u64u("infinity") ==
-                   (fio_buf2u64u(p) | 0x2020202020202020ULL)) *
-              5);
+    p += 3; /* bytewise: never read past a terminator (no 8 byte probe) */
+    if ((p[0] | 32) == 'i' && (p[1] | 32) == 'n' && (p[2] | 32) == 'i' &&
+        (p[3] | 32) == 't' && (p[4] | 32) == 'y')
+      p += 5;
     *pstr = (char *)p;
   } else
     r.err = 1;
@@ -1950,17 +1965,19 @@ Big Numbers
 
 FIO_IFUNC void fio___uXXX_hex_read(uint64_t *t, char **p, size_t l) {
   char *start = *p;
-  start += (((unsigned)(start[0] == '0') & (start[1] == 'x')) << 1);
+  /* short-circuit: never read `start[1]` past a terminator */
+  start += ((start[0] == '0' && (start[1] | 32) == 'x') << 1);
   char *pos = start;
-  while (fio_i2c((uint8_t)*pos) < 16)
+  while (fio_c2i((uint8_t)*pos) < 16)
     ++pos;
-  ++pos;
+  if (pos == start && start != *p) /* "0x" without digits: just the '0' */
+    pos = start = *p + 1;
   *p = pos;
   for (size_t i = 0; i < l; ++i) { /* per uint64_t in t */
     uint64_t wrd = 0;
     for (size_t j = 0; j < 16 && pos > start; ++j) {
       --pos;
-      wrd |= ((uint64_t)fio_i2c((uint8_t)*pos) << (j << 2));
+      wrd |= ((uint64_t)fio_c2i((uint8_t)*pos) << (j << 2));
     }
     *t = wrd;
     ++t;
@@ -1972,6 +1989,7 @@ FIO_IFUNC size_t fio___uXXX_hex_write(char *dest, const uint64_t *t, size_t l) {
     ;
   if (!l && !t[0]) {
     dest[0] = '0';
+    dest[1] = 0;
     return 1;
   }
   char *pos = dest;

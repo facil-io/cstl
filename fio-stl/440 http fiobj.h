@@ -15,7 +15,7 @@ module depends on the other.
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#if !defined(FIO___RECURSIVE_INCLUDE) && defined(H___FIO_HTTP_API___H) &&       \
+#if !defined(FIO___RECURSIVE_INCLUDE) && defined(H___FIO_HTTP_API___H) &&      \
     defined(H___FIO_FIOBJ___H) && !defined(H___FIO_HTTP_FIOBJ___H)
 #define H___FIO_HTTP_FIOBJ___H
 
@@ -54,7 +54,13 @@ HTTP Params to FIOBJ - Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+/* Fail closed: a native NULL `obj` means "nothing" to the parsers, so a
+ * failed constructor must report an error rather than silently drop data. */
+#define FIO___HTTP_FIOBJ_ERR    FIO_HTTP_PARAMS_PARSE_ERROR
 #define FIO___HTTP_FIOBJ_OBJ(o) ((fio_json_obj_result_s){.obj = (void *)(o)})
+#define FIO___HTTP_FIOBJ_NEW(o)                                                \
+  ((o) ? FIO___HTTP_FIOBJ_OBJ(o)                                               \
+       : (fio_json_obj_result_s){.err = FIO___HTTP_FIOBJ_ERR})
 FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_on_null(void *udata) {
   (void)udata;
   return FIO___HTTP_FIOBJ_OBJ(fiobj_null()); /* a real object: conflicts */
@@ -67,27 +73,60 @@ FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_on_false(void *udata) {
   (void)udata;
   return FIO___HTTP_FIOBJ_OBJ(fiobj_false());
 }
-FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_on_number(void *udata,
-                                                           int64_t num) {
-  (void)udata;
-  return FIO___HTTP_FIOBJ_OBJ(fiobj_num_new((intptr_t)num));
-}
 FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_on_float(void *udata,
                                                           double num) {
   (void)udata;
-  return FIO___HTTP_FIOBJ_OBJ(fiobj_float_new(num));
+  FIOBJ o = fiobj_float_new(num);
+  return FIO___HTTP_FIOBJ_NEW(o);
+}
+FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_on_number(void *udata,
+                                                           int64_t num) {
+#if INTPTR_MAX < INT64_MAX
+  /* FIOBJ Numbers hold an `intptr_t`: never narrow a peer's integer. Wider
+   * values become Floats, as integers past the int64_t range already do. */
+  if (num > (int64_t)INTPTR_MAX || num < (int64_t)INTPTR_MIN)
+    return fio___http_fiobj_on_float(udata, (double)num);
+#endif
+  (void)udata;
+  FIOBJ o = fiobj_num_new((intptr_t)num);
+  return FIO___HTTP_FIOBJ_NEW(o);
 }
 FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_on_string(void *udata,
                                                            fio_buf_info_s s) {
   (void)udata;
   FIOBJ str = fiobj_str_new();
-  fiobj_str_write_unescape(str, s.buf, s.len);
+  if (!str)
+    return (fio_json_obj_result_s){.err = FIO___HTTP_FIOBJ_ERR};
+  /* Unescaping never grows the text: one up-front reservation means the
+   * write can't fail midway and publish a truncated value. */
+  if (s.len && (fiobj_str_reserve(str, s.len).capa <= s.len ||
+                !fiobj_str_write_unescape(str, s.buf, s.len).len)) {
+    fiobj_free(str);
+    return (fio_json_obj_result_s){.err = FIO___HTTP_FIOBJ_ERR};
+  }
   return FIO___HTTP_FIOBJ_OBJ(str);
 }
 FIO_SFUNC fio_json_obj_result_s
 fio___http_fiobj_on_string_simple(void *udata, fio_buf_info_s s) {
   (void)udata;
-  return FIO___HTTP_FIOBJ_OBJ(fiobj_str_new_cstr(s.buf, s.len));
+  FIOBJ str = fiobj_str_new_cstr(s.buf, s.len); /* NULL on any failure */
+  return FIO___HTTP_FIOBJ_NEW(str);
+}
+/* Stores `value` at `map[key]`, consuming it on every path; a replaced value
+ * is handed back through `old`. Returns 0 on success. */
+FIO_SFUNC int fio___http_fiobj_hash_set(FIOBJ map,
+                                        fio_buf_info_s key,
+                                        FIOBJ value,
+                                        FIOBJ *old) {
+  FIOBJ name = fiobj_str_new_cstr(key.buf, key.len);
+  if (!name) {
+    fiobj_free(value);
+    return FIO___HTTP_FIOBJ_ERR;
+  }
+  /* the map duplicates the key and discards `value` if insertion fails */
+  FIOBJ stored = fiobj_hash_set(map, name, value, old);
+  fiobj_free(name);
+  return stored == value ? 0 : FIO___HTTP_FIOBJ_ERR;
 }
 /* Opens a container at `parent[key]`. The root reuses `udata` (the caller's
  * Hash) when its type matches. A matching member is reused (merge / append);
@@ -111,18 +150,23 @@ fio___http_fiobj_on_container(void *udata,
     }
   }
   FIOBJ o = (type == FIOBJ_T_HASH) ? fiobj_hash_new() : fiobj_array_new();
-  r.obj = (void *)o;
-  if (!parent)
-    return r; /* a new, owned root */
-  if (!key.buf) {
-    fiobj_array_push((FIOBJ)parent, o);
-    return r;
-  }
-  FIOBJ name = fiobj_str_new_cstr(key.buf, key.len);
   FIOBJ replaced = FIOBJ_INVALID;
-  fiobj_hash_set((FIOBJ)parent, name, o, &replaced);
-  fiobj_free(name); /* fiobj_hash_set duplicates the key */
+  if (!o)
+    goto failed;
+  /* Insertion consumes `o` even on failure: never publish it unless stored. */
+  if (parent) {
+    if (key.buf) {
+      if (fio___http_fiobj_hash_set((FIOBJ)parent, key, o, &replaced))
+        goto failed;
+    } else if (!fiobj_array_push((FIOBJ)parent, o)) {
+      goto failed;
+    }
+  }
+  r.obj = (void *)o; /* a new, owned root when `parent` is NULL */
   r.old = (void *)replaced;
+  return r;
+failed:
+  r.err = FIO___HTTP_FIOBJ_ERR;
   return r;
 }
 FIO_SFUNC fio_json_push_result_s fio___http_fiobj_on_map(void *udata,
@@ -136,9 +180,8 @@ FIO_SFUNC fio_json_push_result_s fio___http_fiobj_on_array(void *udata,
   return fio___http_fiobj_on_container(udata, parent, key, FIOBJ_T_ARRAY);
 }
 FIO_SFUNC int fio___http_fiobj_array_push(void *udata, void *a, void *value) {
-  (void)udata;
-  fiobj_array_push((FIOBJ)a, (FIOBJ)value);
-  return 0;
+  (void)udata; /* push destroys `value` on failure */
+  return fiobj_array_push((FIOBJ)a, (FIOBJ)value) ? 0 : FIO___HTTP_FIOBJ_ERR;
 }
 /* Stores `value`, handing a replaced value back for conflict resolution. */
 FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_map_push(void *udata,
@@ -146,10 +189,9 @@ FIO_SFUNC fio_json_obj_result_s fio___http_fiobj_map_push(void *udata,
                                                           fio_buf_info_s key,
                                                           void *value) {
   (void)udata;
-  FIOBJ name = fiobj_str_new_cstr(key.buf, key.len);
   FIOBJ replaced = FIOBJ_INVALID;
-  fiobj_hash_set((FIOBJ)map, name, (FIOBJ)value, &replaced);
-  fiobj_free(name); /* fiobj_hash_set duplicates the key */
+  if (fio___http_fiobj_hash_set((FIOBJ)map, key, (FIOBJ)value, &replaced))
+    return (fio_json_obj_result_s){.err = FIO___HTTP_FIOBJ_ERR};
   return FIO___HTTP_FIOBJ_OBJ(replaced);
 }
 FIO_SFUNC int fio___http_fiobj_is_array(void *udata, void *obj) {
@@ -164,30 +206,37 @@ FIO_SFUNC void fio___http_fiobj_free_unused(void *udata, void *obj) {
   (void)udata;
   fiobj_free((FIOBJ)obj);
 }
+#undef FIO___HTTP_FIOBJ_NEW
 #undef FIO___HTTP_FIOBJ_OBJ
-FIO_SFUNC void *fio___http_fiobj_on_file(void *udata,
-                                         fio_str_info_s name,
-                                         fio_str_info_s filename,
-                                         fio_str_info_s content_type,
-                                         fio_str_info_s headers) {
+/* Copies a complete upload into a data object (spilled to a temporary file
+ * past its RAM limit). */
+FIO_SFUNC fio_json_obj_result_s
+fio___http_fiobj_on_file(void *udata,
+                         fio_str_info_s name,
+                         fio_str_info_s filename,
+                         fio_str_info_s type,
+                         fio_str_info_s headers,
+                         fio_buf_info_s data) {
   (void)udata, (void)name;
   FIOBJ file = fiobj_data_new(0);
-  if (file == FIOBJ_INVALID)
-    return NULL;
-  fiobj_data_filename_set(file, filename);
-  if (content_type.buf)
-    fiobj_data_type_set(file, content_type);
-  fiobj_data_headers_set(file, headers);
-  return (void *)file;
-}
-FIO_SFUNC int fio___http_fiobj_on_file_data(void *udata,
-                                            void *file,
-                                            fio_buf_info_s data) {
-  (void)udata;
-  fio_data_s *d = fiobj_data_ptr((FIOBJ)file);
+  fio_data_s *d = fiobj_data_ptr(file);
   if (!d)
-    return -1;
-  return fio_data_write(d, data.buf, data.len);
+    return (fio_json_obj_result_s){.err = FIO___HTTP_FIOBJ_ERR};
+  /* A setter leaves its property unset on OOM (a NULL `buf` sets nothing). */
+  fiobj_data_filename_set(file, filename);
+  fiobj_data_type_set(file, type);
+  fiobj_data_headers_set(file, headers);
+  if ((filename.buf && !fiobj_data_filename(file).buf) ||
+      (type.buf && !fiobj_data_type(file).buf) ||
+      (headers.buf && !fiobj_data_headers(file).buf))
+    goto failed;
+  fio_data_expect(d, data.len);
+  if (data.len && fio_data_write(d, data.buf, data.len))
+    goto failed;
+  return (fio_json_obj_result_s){.obj = (void *)file};
+failed:
+  fiobj_free(file);
+  return (fio_json_obj_result_s){.err = FIO___HTTP_FIOBJ_ERR};
 }
 
 static const fio_http_params_parse_callbacks_s FIO___HTTP_FIOBJ_CALLBACKS = {
@@ -206,7 +255,6 @@ static const fio_http_params_parse_callbacks_s FIO___HTTP_FIOBJ_CALLBACKS = {
     .is_map = fio___http_fiobj_is_map,
     .free_unused_object = fio___http_fiobj_free_unused,
     .on_file = fio___http_fiobj_on_file,
-    .on_file_data = fio___http_fiobj_on_file_data,
 };
 
 SFUNC FIOBJ fio_http_params2FIOBJ(FIOBJ dest, fio_http_s *h) {
@@ -232,5 +280,6 @@ SFUNC FIOBJ fio_http_params2FIOBJ(FIOBJ dest, fio_http_s *h) {
   return dest;
 }
 
+#undef FIO___HTTP_FIOBJ_ERR
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* H___FIO_HTTP_FIOBJ___H */

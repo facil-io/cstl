@@ -381,6 +381,242 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aton_formats)(void) {
   }
 }
 
+/* Places `s` (with its NUL) at the end of a page followed by an inaccessible
+ * guard page, so any read past the terminator faults (POSIX only). */
+#if FIO_OS_POSIX
+#include <sys/mman.h>
+static char *fio___test_atol_guard_page;
+static size_t fio___test_atol_guard_size;
+FIO_SFUNC char *fio___test_atol_guarded(const char *s) {
+  size_t len = strlen(s) + 1;
+  if (!fio___test_atol_guard_page) {
+    fio___test_atol_guard_size = (size_t)sysconf(_SC_PAGESIZE);
+    fio___test_atol_guard_page = (char *)mmap(NULL,
+                                              fio___test_atol_guard_size * 2,
+                                              PROT_READ | PROT_WRITE,
+                                              MAP_PRIVATE | MAP_ANONYMOUS,
+                                              -1,
+                                              0);
+    FIO_ASSERT(fio___test_atol_guard_page != MAP_FAILED, "mmap failed");
+    FIO_ASSERT(!mprotect(fio___test_atol_guard_page +
+                             fio___test_atol_guard_size,
+                         fio___test_atol_guard_size,
+                         PROT_NONE),
+               "mprotect failed");
+  }
+  char *r = fio___test_atol_guard_page + fio___test_atol_guard_size - len;
+  FIO_MEMCPY(r, s, len);
+  return r;
+}
+#else
+static char fio___test_atol_guard_buf[256];
+FIO_SFUNC char *fio___test_atol_guarded(const char *s) {
+  size_t len = strlen(s) + 1;
+  char *r = fio___test_atol_guard_buf + sizeof(fio___test_atol_guard_buf) - len;
+  FIO_MEMCPY(r, s, len);
+  return r;
+}
+#endif
+
+/* Regressions: input bounds, exponent saturation, generic bases, wide hex */
+FIO_SFUNC void FIO_NAME_TEST(stl, atol_bounds)(void) {
+  fprintf(stderr, "\t* Testing number parsing bounds and limits:\n");
+  union {
+    double f;
+    uint64_t u;
+  } u;
+  char *p, *s;
+  /* infinity: no 8 byte probe past a short terminator */
+  struct {
+    const char *s;
+    size_t len;
+  } inf[] = {{"inf", 3},
+             {"infi", 3},
+             {"infiX", 3},
+             {"infinit", 3},
+             {"-INFINITY", 9},
+             {"InFiNiTyX", 8}};
+  for (size_t i = 0; i < sizeof(inf) / sizeof(inf[0]); ++i) {
+    p = s = fio___test_atol_guarded(inf[i].s);
+    fio_aton_s r = fio_aton(&p);
+    FIO_ASSERT(r.is_float && isinf(r.f) && (size_t)(p - s) == inf[i].len &&
+                   (signbit(r.f) != 0) == (inf[i].s[0] == '-'),
+               "fio_aton infinity error for \"%s\" (%zu bytes)",
+               inf[i].s,
+               (size_t)(p - s));
+  }
+  /* extreme exponents saturate to infinity / zero (sign preserved) */
+  struct {
+    const char *s;
+    double d;
+  } ex[] = {
+      {"0x1p18446744073709551615", INFINITY},
+      {"0x1p-18446744073709551615", 0.0},
+      {"0x1p99999999999999999999999", INFINITY},
+      {"-0x1p9223372036854775808", -INFINITY},
+      {"-0x1p-9223372036854775808", -0.0},
+      {"0x1p1023", 0x1p1023},
+      {"0x1p-1074", 0x1p-1074},
+      {"0x1.8p-1", 0.75},
+      {"0x1p-1073", 0x1p-1073},
+      {"0x1000p-1080", 0x1p-1068},
+      {"0x0.0000001p1050", 0x1p1022},
+      {"0x0p99999", 0.0},
+      {"-0x0p-99999", -0.0},
+      {"0x1.fffffffffffffp1023", 0x1.fffffffffffffp1023},
+  };
+  for (size_t i = 0; i < sizeof(ex) / sizeof(ex[0]); ++i) {
+    p = (char *)ex[i].s;
+    u.f = fio_atof(&p);
+    FIO_ASSERT(u.f == ex[i].d && signbit(u.f) == signbit(ex[i].d) && !*p,
+               "fio_atof exponent saturation error for \"%s\": %.17g",
+               ex[i].s,
+               u.f);
+  }
+  { /* many dropped hex digits and a huge negative exponent: zero, not NaN */
+    char hex[512];
+    hex[0] = '0';
+    hex[1] = 'x';
+    FIO_MEMSET(hex + 2, 'F', 400);
+    FIO_MEMCPY(hex + 402, "p-99999", 8);
+    p = hex;
+    u.f = fio_atof(&p);
+    FIO_ASSERT(u.f == 0.0 && !*p, "fio_atof huge hex mantissa error");
+    hex[401] = 0; /* no exponent: infinity */
+    p = hex;
+    u.f = fio_atof(&p);
+    FIO_ASSERT(isinf(u.f) && !*p, "fio_atof huge hex integer error");
+  }
+  FIO_ASSERT(isinf(fio_u2d(1, INT64_MAX)) && fio_u2d(1, INT64_MIN) == 0.0 &&
+                 isinf(fio_u2d(~(uint64_t)0, 4096)),
+             "fio_u2d exponent saturation error");
+  u.f = fio_i2d(INT64_MIN, 0);
+  FIO_ASSERT(u.f == -0x1p63, "fio_i2d(INT64_MIN) error: %.17g", u.f);
+  /* top exponent with mantissa bits is infinity (not NaN), subnormals scale */
+  FIO_ASSERT(isinf(fio_u2d(3, 1023)) && fio_u2d(3, 1022) == 0x1.8p1023 &&
+                 fio_u2d(1, -1073) == 0x1p-1073 &&
+                 fio_u2d(1, -1074) == 0x1p-1074 && fio_u2d(1, -1075) == 0.0 &&
+                 fio_u2d(0xFFFFF, -1070) == 0xFFFFFp-1070 &&
+                 fio_u2d((uint64_t)1 << 63, -1137) == 0x1p-1074,
+             "fio_u2d boundary error");
+  /* rounding: tie to even (FIO___ATON_TIE2EVEN) or truncation (default) */
+  FIO_ASSERT(fio_u2d(3, -1075) == (FIO___ATON_TIE2EVEN ? 0x1p-1073 : 0x1p-1074) &&
+                 fio_u2d(5, -1076) == 0x1p-1074 &&
+                 fio_u2d(((uint64_t)1 << 54) - 1, 0) ==
+                     (FIO___ATON_TIE2EVEN ? 0x1p54 : 0x1.fffffffffffffp53) &&
+                 fio_u2d(((uint64_t)1 << 53) + 1, 0) == 0x1p53 &&
+                 fio_u2d(((uint64_t)1 << 53) + 3, 0) ==
+                     (FIO___ATON_TIE2EVEN ? 0x1.0000000000002p53 : 0x1.0000000000001p53) &&
+                 !!isinf(fio_u2d(~(uint64_t)0, 960)) == !!FIO___ATON_TIE2EVEN &&
+                 (fio_u2d(((uint64_t)1 << 63) + 1, -1137) == 0x1p-1074) &&
+                 fio_u2d(((uint64_t)1 << 63) + 1, -1138) ==
+                     (FIO___ATON_TIE2EVEN ? 0x1p-1074 : 0.0),
+             "fio_u2d rounding error");
+  for (size_t i = 0; i < (1ULL << 14); ++i) {
+    uint64_t mant = fio_rand64() >> (i & 63);
+    int64_t e = (int64_t)(fio_rand64() % 2300) - 1200;
+    size_t msbi = mant ? fio_msb_index_unsafe(mant) : 0;
+    double expected;
+    if (FIO___ATON_TIE2EVEN) { /* host FPU rounds to nearest even */
+      if (msbi > 52 && e + (int64_t)msbi < -1022)
+        continue; /* `(double)mant` would round twice */
+      expected = ldexp((double)mant, (int)e);
+    } else {
+      if (e + (int64_t)msbi < -1022)
+        continue; /* truncated subnormals are covered above */
+      uint64_t t = (msbi > 52) ? ((mant >> (msbi - 52)) << (msbi - 52)) : mant;
+      expected = ldexp((double)t, (int)e);
+    }
+    u.f = fio_u2d(mant, e);
+    FIO_ASSERT(u.f == expected,
+               "fio_u2d(%llu, %lld) error: %a != %a",
+               (unsigned long long)mant,
+               (long long)e,
+               u.f,
+               expected);
+  }
+  /* generic bases: overflow is detected before wrapping */
+  p = s = (char *)"3W5E11264SGSF";
+  errno = 0;
+  FIO_ASSERT(fio_atol_xbase(&p, 36) == ~(uint64_t)0 && !*p && !errno,
+             "fio_atol_xbase UINT64_MAX boundary error");
+  p = s = (char *)"3W5E11264SGSG";
+  errno = 0;
+  uint64_t xr = fio_atol_xbase(&p, 36);
+  FIO_ASSERT(xr == ~(uint64_t)0 / 36 && p == s + 12 && errno == E2BIG,
+             "fio_atol_xbase overflow not detected (%llu, %zu bytes)",
+             (unsigned long long)xr,
+             (size_t)(p - s));
+  p = s = (char *)"zzzzzzzzzzzzzz";
+  errno = 0;
+  fio_atol_xbase(&p, 36);
+  FIO_ASSERT(errno == E2BIG && p == s + 12, "fio_atol_xbase overflow error");
+  {
+    size_t bases[] = {0, 1, 37};
+    char buf[8] = "xxxxxxx";
+    for (size_t i = 0; i < sizeof(bases) / sizeof(bases[0]); ++i) {
+      p = s = (char *)"101";
+      FIO_ASSERT(!fio_atol_xbase(&p, bases[i]) && p == s,
+                 "fio_atol_xbase accepted base %zu",
+                 bases[i]);
+      FIO_ASSERT(!fio_digits_xbase(5, bases[i]),
+                 "fio_digits_xbase accepted base %zu",
+                 bases[i]);
+      fio_ltoa_xbase(buf, 5, 3, bases[i]);
+      FIO_ASSERT(!buf[0] && buf[1] == 'x',
+                 "fio_ltoa_xbase accepted base %zu",
+                 bases[i]);
+    }
+    FIO_ASSERT(fio_digits_xbase(35, 36) == 1 && fio_digits_xbase(36, 36) == 2,
+               "fio_digits_xbase base 36 error");
+    fio_ltoa_xbase(buf, 71, 2, 36);
+    FIO_ASSERT(!strcmp(buf, "1Z"), "fio_ltoa_xbase base 36 error: %s", buf);
+  }
+  /* wide hex: values, prefixes, cursors and empty input */
+  {
+    fio_u128 v;
+    p = s = (char *)"0x0123456789abcdefFEDCBA9876543210-";
+    v = fio_u128_hex_read(&p);
+    FIO_ASSERT(v.u64[0] == 0xFEDCBA9876543210ULL &&
+                   v.u64[1] == 0x0123456789ABCDEFULL && *p == '-',
+               "fio_u128_hex_read value / cursor error");
+    p = s = (char *)"12g";
+    v = fio_u128_hex_read(&p);
+    FIO_ASSERT(v.u64[0] == 0x12 && !v.u64[1] && p == s + 2,
+               "fio_u128_hex_read terminator error");
+    p = s = (char *)"0xg";
+    v = fio_u128_hex_read(&p);
+    FIO_ASSERT(!v.u64[0] && !v.u64[1] && p == s + 1,
+               "fio_u128_hex_read digit-less prefix error");
+    p = s = fio___test_atol_guarded("");
+    v = fio_u128_hex_read(&p);
+    FIO_ASSERT(!v.u64[0] && !v.u64[1] && p == s,
+               "fio_u128_hex_read empty input error");
+  }
+  {
+    fio_u4096 a, b;
+    char buf[1100];
+    for (size_t i = 0; i < sizeof(a.u64) / sizeof(a.u64[0]); ++i)
+      a.u64[i] = fio_rand64();
+    size_t len = fio_u4096_hex_write(buf, &a);
+    FIO_ASSERT(len == strlen(buf), "fio_u4096_hex_write NUL error");
+    p = buf;
+    b = fio_u4096_hex_read(&p);
+    FIO_ASSERT(!FIO_MEMCMP(&a, &b, sizeof(a)) && p == buf + len,
+               "fio_u4096 hex round-trip error");
+    FIO_MEMSET(&a, 0, sizeof(a));
+    FIO_MEMSET(buf, 'x', 4);
+    FIO_ASSERT(fio_u4096_hex_write(buf, &a) == 1 && buf[0] == '0' && !buf[1] &&
+                   buf[2] == 'x',
+               "fio_u4096_hex_write zero error");
+    fio_u128 z;
+    FIO_MEMSET(&z, 0, sizeof(z));
+    FIO_MEMSET(buf, 'x', 4);
+    FIO_ASSERT(fio_u128_hex_write(buf, &z) == 1 && !strcmp(buf, "0"),
+               "fio_u128_hex_write zero error");
+  }
+}
+
 int main(void) {
   char buffer[1024];
   for (int i = 0 - FIO_ATOL_TEST_MAX; i < FIO_ATOL_TEST_MAX; ++i) {
@@ -390,7 +626,7 @@ int main(void) {
     int i2 = (int)fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error (1:%i)", i);
     FIO_ASSERT(i == i2,
-               "fio_ltoa-fio_atol roundtrip error %lld != %lld",
+               "fio_ltoa-fio_atol roundtrip error %d != %d",
                i,
                i2);
   }
@@ -403,7 +639,7 @@ int main(void) {
     int64_t i2 = fio_atol(&tmp2);
     FIO_ASSERT(tmp2 > buffer, "fio_atol pointer motion error (2:%zu)", bit);
     FIO_ASSERT((int64_t)i == i2,
-               "fio_ltoa-fio_atol roundtrip error %lld != %lld",
+               "fio_ltoa-fio_atol roundtrip error %" PRIu64 " != %" PRId64,
                i,
                i2);
   }
@@ -434,7 +670,8 @@ int main(void) {
                e[1].p,
                r[1].p);
   }
-  for (size_t i = 1; i < (~0ULL); i = ((i << 1U) | 1U)) {
+  /* `(size_t)~0ULL`: a plain `~0ULL` never ends the loop on 32 bit */
+  for (size_t i = 1; i < (size_t)(~0ULL); i = ((i << 1U) | 1U)) {
     union {
       double d;
       void *p;
@@ -707,6 +944,7 @@ int main(void) {
   }
   FIO_NAME_TEST(stl, aton_vectors)();
   FIO_NAME_TEST(stl, aton_formats)();
+  FIO_NAME_TEST(stl, atol_bounds)();
 
 #define TEST_DOUBLE(s, d, stop)                                                \
   do {                                                                         \

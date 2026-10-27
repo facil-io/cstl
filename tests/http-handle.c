@@ -1816,11 +1816,12 @@ static void test_body_free_unused(void *udata, void *obj) {
   test_obj_free((test_obj_s *)obj);
 }
 
-static void *test_body_on_file(void *udata,
-                               fio_str_info_s name,
-                               fio_str_info_s filename,
-                               fio_str_info_s content_type,
-                               fio_str_info_s headers) {
+static fio_json_obj_result_s test_body_on_file(void *udata,
+                                               fio_str_info_s name,
+                                               fio_str_info_s filename,
+                                               fio_str_info_s content_type,
+                                               fio_str_info_s headers,
+                                               fio_buf_info_s data) {
   test_body_ctx_s *ctx = (test_body_ctx_s *)udata;
   ++ctx->file_starts;
   test_body_strcpy(ctx->pending_file_name,
@@ -1840,29 +1841,26 @@ static void *test_body_on_file(void *udata,
                    sizeof(ctx->pending_file_headers),
                    headers.buf,
                    headers.len);
-  ctx->pending_file_data_len = 0;
-  /* NULL would skip the file; the object is stored or freed by the parser. */
+  size_t n = data.len < sizeof(ctx->pending_file_data)
+                 ? data.len
+                 : sizeof(ctx->pending_file_data);
+  FIO_MEMCPY(ctx->pending_file_data, data.buf, n);
+  ctx->pending_file_data_len = n;
+  /* a NULL obj stores nothing; the object is stored (or freed) by the parser */
   ctx->pending_file = test_obj_str_new("<file>", 6);
-  return ctx->pending_file;
+  return TEST_OBJ_R(ctx->pending_file);
 }
 
-static int test_body_on_file_data(void *udata,
-                                  void *file,
-                                  fio_buf_info_s data) {
-  test_body_ctx_s *ctx = (test_body_ctx_s *)udata;
-  (void)file;
-  size_t avail = sizeof(ctx->pending_file_data) - ctx->pending_file_data_len;
-  size_t n = data.len < avail ? data.len : avail;
-  FIO_MEMCPY(ctx->pending_file_data + ctx->pending_file_data_len, data.buf, n);
-  ctx->pending_file_data_len += n;
-  return 0;
-}
-
-static int test_body_on_file_data_abort(void *udata,
-                                        void *file,
-                                        fio_buf_info_s data) {
-  (void)udata, (void)file, (void)data;
-  return -77; /* an opaque error, returned unchanged */
+static fio_json_obj_result_s test_body_on_file_abort(void *udata,
+                                                     fio_str_info_s name,
+                                                     fio_str_info_s filename,
+                                                     fio_str_info_s content_type,
+                                                     fio_str_info_s headers,
+                                                     fio_buf_info_s data) {
+  ++((test_body_ctx_s *)udata)->file_starts;
+  (void)name, (void)filename, (void)content_type, (void)headers, (void)data;
+  /* an opaque error, returned unchanged */
+  return (fio_json_obj_result_s){.err = -77};
 }
 
 /* Fails (with the configured error) for key "a"; takes `value` either way. */
@@ -1891,7 +1889,6 @@ static const fio_http_params_parse_callbacks_s TEST_BODY_CALLBACKS = {
     .array_push = test_body_array_push,
     .map_push = test_body_map_push,
     .on_file = test_body_on_file,
-    .on_file_data = test_body_on_file_data,
     .is_map = test_body_is_map,
     .is_array = test_body_is_array,
     .free_unused_object = test_body_free_unused,
@@ -2380,14 +2377,15 @@ static void test_body_parse_multipart_upload_rules(void) {
 
 /* ---- Multipart file skipping and streaming ---- */
 
-static void *test_body_on_file_skip(void *udata,
-                                    fio_str_info_s name,
-                                    fio_str_info_s filename,
-                                    fio_str_info_s content_type,
-                                    fio_str_info_s headers) {
+static fio_json_obj_result_s test_body_on_file_skip(void *udata,
+                                                    fio_str_info_s name,
+                                                    fio_str_info_s filename,
+                                                    fio_str_info_s content_type,
+                                                    fio_str_info_s headers,
+                                                    fio_buf_info_s data) {
   ((test_body_ctx_s *)udata)->got_array += 1; /* counts on_file calls */
-  (void)name, (void)filename, (void)content_type, (void)headers;
-  return NULL;
+  (void)name, (void)filename, (void)content_type, (void)headers, (void)data;
+  return TEST_OBJ_R(NULL);
 }
 
 static const fio_http_params_parse_callbacks_s TEST_SKIP_FILE_CALLBACKS = {
@@ -2403,14 +2401,13 @@ static const fio_http_params_parse_callbacks_s TEST_SKIP_FILE_CALLBACKS = {
     .on_map = test_body_on_map,
     .map_push = test_body_map_push,
     .on_file = test_body_on_file_skip,
-    .on_file_data = test_body_on_file_data,
     .is_map = test_body_is_map,
     .is_array = test_body_is_array,
     .free_unused_object = test_body_free_unused,
 };
 
 static void test_body_parse_multipart_skip_file(void) {
-  fprintf(stderr, "  * body_parse multipart: on_file NULL skips the file\n");
+  fprintf(stderr, "  * body_parse multipart: a NULL on_file obj stores nothing\n");
   char body[1024];
   size_t body_len = test_body_build_multipart(body,
                                               sizeof(body),
@@ -2437,8 +2434,7 @@ static void test_body_parse_multipart_skip_file(void) {
   FIO_ASSERT(ctx.count == 1 && !strcmp(ctx.pairs[0].key, "f") &&
                  !ctx.pending_file_data_len && !ctx.files_stored &&
                  !ctx.files_freed,
-             "skip file: on_file_data must not run, nothing stored (%zu "
-             "pairs)",
+             "skip file: nothing stored (%zu pairs)",
              ctx.count);
   test_body_free_result(&r);
   fio_http_free(h);
@@ -2481,25 +2477,22 @@ static fio_json_obj_result_s test_stream_map_push(void *udata,
   (void)map;
   return TEST_OBJ_R(NULL);
 }
-static void *test_stream_on_file(void *udata,
-                                 fio_str_info_s name,
-                                 fio_str_info_s filename,
-                                 fio_str_info_s content_type,
-                                 fio_str_info_s headers) {
-  (void)name, (void)filename, (void)content_type, (void)headers;
-  return udata; /* the context itself is the file handle */
-}
-static int test_stream_on_file_data(void *udata,
-                                    void *file,
-                                    fio_buf_info_s data) {
+/* Checks the complete upload; the context itself is the stored object. */
+static fio_json_obj_result_s test_stream_on_file(void *udata,
+                                                 fio_str_info_s name,
+                                                 fio_str_info_s filename,
+                                                 fio_str_info_s content_type,
+                                                 fio_str_info_s headers,
+                                                 fio_buf_info_s data) {
   test_stream_ctx_s *c = (test_stream_ctx_s *)udata;
-  c->mismatch |= (file != udata) || (c->got + data.len > c->expect_len) ||
+  (void)name, (void)filename, (void)content_type, (void)headers;
+  c->mismatch |= (c->got + data.len > c->expect_len) ||
                  memcmp(c->expect + c->got, data.buf, data.len);
   c->got += data.len;
   c->calls += 1;
   if (data.len > c->max_chunk)
     c->max_chunk = data.len;
-  return 0;
+  return TEST_OBJ_R(udata);
 }
 static void test_stream_free_unused(void *udata, void *obj) {
   if (obj == udata)
@@ -2521,12 +2514,11 @@ static const fio_http_params_parse_callbacks_s TEST_STREAM_CALLBACKS = {
     .on_map = test_stream_on_map,
     .map_push = test_stream_map_push,
     .on_file = test_stream_on_file,
-    .on_file_data = test_stream_on_file_data,
     .free_unused_object = test_stream_free_unused,
 };
 
 static void test_body_parse_multipart_stream_large(void) {
-  fprintf(stderr, "  * params_parse multipart: large upload is streamed\n");
+  fprintf(stderr, "  * params_parse multipart: large upload, complete and in place\n");
   const size_t file_len = (FIO_HTTP_BODY_RAM_LIMIT * 4) + 12345;
   char *file = (char *)malloc(file_len);
   FIO_ASSERT(file, "allocation failed");
@@ -2556,8 +2548,8 @@ static void test_body_parse_multipart_stream_large(void) {
              file_len,
              c.mismatch,
              c.done);
-  FIO_ASSERT(c.calls > 4 && c.max_chunk <= (1UL << 16),
-             "stream large: expected bounded chunks (%zu calls, max %zu)",
+  FIO_ASSERT(c.calls == 1 && c.max_chunk == file_len,
+             "stream large: expected one complete file (%zu calls, max %zu)",
              c.calls,
              c.max_chunk);
   FIO_ASSERT(c.fields == 1, "stream large: field after the file missing");
@@ -2567,7 +2559,7 @@ static void test_body_parse_multipart_stream_large(void) {
              fio_http_body_length(h));
   test_obj_free((test_obj_s *)r.result);
 
-  /* truncated body: the open file is closed and the parse fails */
+  /* truncated body: the file never reaches on_file and the parse fails */
   fio_http_s *t = fio_http_new();
   fio_http_request_header_set(
       t,
@@ -2577,14 +2569,134 @@ static void test_body_parse_multipart_stream_large(void) {
   fio_http_body_write(t, file, file_len / 2);
   test_stream_ctx_s c2 = {.expect = file, .expect_len = file_len};
   r = fio_http_params_parse(t, .callbacks = &TEST_STREAM_CALLBACKS, .udata = &c2);
-  FIO_ASSERT(r.err == FIO_HTTP_PARAMS_PARSE_ERROR && c2.done == 1 &&
-                 !c2.mismatch,
+  FIO_ASSERT(r.err == FIO_HTTP_PARAMS_PARSE_ERROR && !c2.done && !c2.calls,
              "stream truncated: err %d, done %d",
              r.err,
              c2.done);
   test_obj_free((test_obj_s *)r.result);
   fio_http_free(t);
   fio_http_free(h);
+  free(file);
+}
+
+/* Records a large field ("big") while delegating to the stream callbacks. */
+static size_t test_framing_big_len;
+static int test_framing_big_ok;
+static fio_json_obj_result_s test_framing_map_push(void *udata,
+                                                   void *map,
+                                                   fio_buf_info_s key,
+                                                   void *v) {
+  if (key.len == 3 && !memcmp(key.buf, "big", 3) && v != udata) {
+    test_obj_s *o = (test_obj_s *)v;
+    test_framing_big_len = o->u.str.len;
+    test_framing_big_ok = 1;
+    for (size_t i = 0; i < o->u.str.len; ++i)
+      test_framing_big_ok &= (o->u.str.buf[i] == (char)('a' + (i % 23)));
+  }
+  return test_stream_map_push(udata, map, key, v);
+}
+
+/* Builds and parses `head`, `fill` bytes of a file / field, then `tail`. */
+static fio_http_params_parse_result_s test_framing_run(
+    test_stream_ctx_s *c,
+    const fio_http_params_parse_callbacks_s *cb,
+    const char *head,
+    const char *file,
+    size_t fill,
+    const char *tail) {
+  fio_http_s *h = fio_http_new();
+  fio_http_request_header_set(
+      h,
+      FIO_STR_INFO2((char *)"content-type", 12),
+      FIO_STR_INFO1((char *)"multipart/form-data; boundary=edge"));
+  fio_http_body_write(h, head, strlen(head));
+  fio_http_body_write(h, file, fill);
+  fio_http_body_write(h, tail, strlen(tail));
+  fio_http_params_parse_result_s r =
+      fio_http_params_parse(h, .callbacks = cb, .udata = c);
+  test_obj_free((test_obj_s *)r.result);
+  r.result = NULL;
+  fio_http_free(h);
+  return r;
+}
+
+static void test_body_parse_multipart_framing(void) {
+  fprintf(stderr, "  * params_parse multipart: read edges and big fields\n");
+  const size_t edge = (1UL << 16); /* FIO___HTTP_PARAMS_CHUNK */
+  const size_t big = (FIO_HTTP_BODY_RAM_LIMIT * 2) + 777;
+  char *file = (char *)malloc(big);
+  FIO_ASSERT(file, "allocation failed");
+  for (size_t i = 0; i < big; ++i)
+    file[i] = (char)('a' + (i % 23));
+  const char *head = "--edge\r\nContent-Disposition: form-data; name=\"up\"; "
+                     "filename=\"e.bin\"\r\n\r\n";
+  const char *close = "\r\n--edge--";
+  /* the closing delimiter ends exactly at the first read's end */
+  size_t fill = edge - strlen(head) - strlen(close);
+  static const struct {
+    const char *suffix;
+    int ok;
+  } cases[] = {
+      {"", 1},
+      {"\r\nepilogue", 1},
+      {"  \t\r\n", 1},
+      {"  ", 1},
+      {"garbage", 0},
+      {"  x", 0},
+      {"\r", 0},
+  };
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    char tail[64];
+    snprintf(tail, sizeof(tail), "%s%s", close, cases[i].suffix);
+    test_stream_ctx_s c = {.expect = file, .expect_len = fill};
+    fio_http_params_parse_result_s r =
+        test_framing_run(&c, &TEST_STREAM_CALLBACKS, head, file, fill, tail);
+    FIO_ASSERT((cases[i].ok ? (!r.err && c.done == 1 && c.got == fill)
+                            : (r.err == FIO_HTTP_PARAMS_PARSE_ERROR &&
+                               !c.done && !c.got)) &&
+                   !c.mismatch,
+               "read edge close + \"%s\": err %d, done %d, got %zu",
+               cases[i].suffix,
+               r.err,
+               c.done,
+               c.got);
+  }
+
+  /* a field larger than a read (spilled body): parsed whole, in place */
+  {
+    fio_http_params_parse_callbacks_s cb = TEST_STREAM_CALLBACKS;
+    cb.map_push = test_framing_map_push;
+    test_stream_ctx_s c = {0};
+    test_framing_big_len = 0;
+    test_framing_big_ok = 0;
+    fio_http_params_parse_result_s r = test_framing_run(
+        &c,
+        &cb,
+        "--edge\r\nContent-Disposition: form-data; name=\"big\"\r\n\r\n",
+        file,
+        big,
+        "\r\n--edge\r\nContent-Disposition: form-data; name=\"after\"\r\n\r\n"
+        "ok\r\n--edge--\r\n");
+    FIO_ASSERT(!r.err && test_framing_big_len == big && test_framing_big_ok &&
+                   c.fields == 1,
+               "big field: err %d, len %zu / %zu (ok %d), after %d",
+               r.err,
+               test_framing_big_len,
+               big,
+               test_framing_big_ok,
+               c.fields);
+    /* truncated big field fails */
+    r = test_framing_run(
+        &c,
+        &cb,
+        "--edge\r\nContent-Disposition: form-data; name=\"big\"\r\n\r\n",
+        file,
+        big,
+        "");
+    FIO_ASSERT(r.err == FIO_HTTP_PARAMS_PARSE_ERROR,
+               "truncated big field: err %d",
+               r.err);
+  }
   free(file);
 }
 
@@ -3009,14 +3121,15 @@ static void test_params_typed_multipart_errors(void) {
       fio_http_query_set(h, FIO_STR_INFO1((char *)"q=1"));
     test_body_ctx_s ctx = {0};
     fio_http_params_parse_callbacks_s callbacks = TEST_BODY_CALLBACKS;
-    callbacks.on_file_data = test_body_on_file_data_abort;
+    callbacks.on_file = test_body_on_file_abort;
     fio_http_params_parse_result_s r =
         test_params_parse_api(combined, h, &callbacks, &ctx);
     FIO_ASSERT(r.err == -77 && TEST_BODY_PARTIAL(ctx, r) &&
                    r.count == (size_t)(1 + combined) && !ctx.files_stored &&
-                   ctx.files_freed == 1 && !test_body_find(&ctx, "up"),
-               "multipart callback abort combined=%d: the aborted upload "
-               "must be freed, not stored (err=%d count=%zu)",
+                   ctx.file_starts == 1 && !ctx.files_freed &&
+                   !test_body_find(&ctx, "up"),
+               "multipart callback abort combined=%d: no upload object may "
+               "be stored (err=%d count=%zu)",
                combined,
                r.err,
                r.count);
@@ -3024,7 +3137,7 @@ static void test_params_typed_multipart_errors(void) {
     fio_http_free(h);
   }
 
-  /* a file part cut off before its boundary is freed, not stored */
+  /* a file part cut off before its boundary never reaches on_file */
   const char *cut = "--X\r\nContent-Disposition: form-data; name=\"up\"; "
                     "filename=\"x\"\r\n\r\nxyz";
   for (int combined = 0; combined < 2; ++combined) {
@@ -3038,8 +3151,9 @@ static void test_params_typed_multipart_errors(void) {
         test_params_parse_api(combined, h, &TEST_BODY_CALLBACKS, &ctx);
     FIO_ASSERT(r.err == FIO_HTTP_PARAMS_PARSE_ERROR &&
                    TEST_BODY_PARTIAL(ctx, r) && !ctx.files_stored &&
-                   ctx.files_freed == 1 && !test_body_find(&ctx, "up"),
-               "truncated upload combined=%d: must be freed (err=%d "
+                   !ctx.file_starts && !ctx.files_freed &&
+                   !test_body_find(&ctx, "up"),
+               "truncated upload combined=%d: no on_file (err=%d "
                "stored=%zu freed=%zu)",
                combined,
                r.err,
@@ -4249,6 +4363,7 @@ int main(void) {
   test_params_parse_limit_count();
   test_body_parse_multipart_skip_file();
   test_body_parse_multipart_stream_large();
+  test_body_parse_multipart_framing();
   test_body_parse_json_simple();
   test_body_parse_spilled();
   test_body_parse_json_array();

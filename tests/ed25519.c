@@ -253,12 +253,131 @@ FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_x25519_conversion)(void) {
 }
 
 /* *****************************************************************************
+Strict verification: small-order keys/R, S >= L, non-canonical encodings
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, ed25519_strict_verify)(void) {
+  /* canonical y of every small-order point (sign bit added below) */
+  static const uint8_t small_order[5][32] = {
+      {0},
+      {1},
+      {0xec, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+       0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f},
+      {0x26, 0xe8, 0x95, 0x8f, 0xc2, 0xb2, 0x27, 0xb0, 0x45, 0xc3, 0xf4,
+       0x89, 0xf2, 0xef, 0x98, 0xf0, 0xd5, 0xdf, 0xac, 0x05, 0xd3, 0xc6,
+       0x33, 0x39, 0xb1, 0x38, 0x02, 0x88, 0x6d, 0x53, 0xfc, 0x05},
+      {0xc7, 0x17, 0x6a, 0x70, 0x3d, 0x4d, 0xd8, 0x4f, 0xba, 0x3c, 0x0b,
+       0x76, 0x0d, 0x10, 0x67, 0x0f, 0x2a, 0x20, 0x53, 0xfa, 0x2c, 0x39,
+       0xcc, 0xc6, 0x4e, 0xc7, 0xfd, 0x77, 0x92, 0xac, 0x03, 0x7a},
+  };
+  static const uint8_t L[32] = {
+      0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7,
+      0xa2, 0xde, 0xf9, 0xde, 0x14, 0,    0,    0,    0,    0,    0,
+      0,    0,    0,    0,    0,    0,    0,    0,    0,    0x10};
+  const char *msg = "any message at all";
+  size_t msg_len = FIO_STRLEN(msg);
+  uint8_t sig[64];
+  fio___ge_p3_s pt;
+
+  /* Identity-key universal forgery: A = identity, R = B, S = 1. */
+  {
+    uint8_t identity[32] = {1};
+    FIO_MEMSET(sig, 0x66, 32);
+    sig[0] = 0x58; /* encoded base point */
+    FIO_MEMSET(sig + 32, 0, 32);
+    sig[32] = 1;
+    FIO_ASSERT(fio_ed25519_verify(sig, msg, msg_len, identity) != 0,
+               "Ed25519 identity-key forgery must be rejected");
+  }
+
+  /* every small-order point decodes, but is rejected as A and as R */
+  uint8_t sk[32], pk[32];
+  fio_ed25519_keypair(sk, pk);
+  fio_ed25519_sign(sig, msg, msg_len, sk, pk);
+  FIO_ASSERT(!fio_ed25519_verify(sig, msg, msg_len, pk),
+             "Ed25519 valid signature should verify");
+  for (int i = 0; i < 5; ++i) {
+    for (int neg = 0; neg < 2; ++neg) {
+      uint8_t p[32], s2[64];
+      FIO_MEMCPY(p, small_order[i], 32);
+      p[31] |= (uint8_t)(neg << 7);
+      FIO_MEMCPY(s2, sig, 64);
+      FIO_MEMCPY(s2, p, 32);
+      FIO_ASSERT(fio_ed25519_verify(sig, msg, msg_len, p) != 0,
+                 "Ed25519 small-order public key %d/%d must be rejected",
+                 i,
+                 neg);
+      FIO_ASSERT(fio_ed25519_verify(s2, msg, msg_len, pk) != 0,
+                 "Ed25519 small-order R %d/%d must be rejected",
+                 i,
+                 neg);
+    }
+  }
+
+  /* S >= L is rejected (S == L and the malleated S + L). */
+  {
+    uint8_t s2[64];
+    FIO_MEMCPY(s2, sig, 32);
+    FIO_MEMCPY(s2 + 32, L, 32);
+    FIO_ASSERT(fio_ed25519_verify(s2, msg, msg_len, pk) != 0,
+               "Ed25519 S == L must be rejected");
+    unsigned carry = 0;
+    for (int i = 0; i < 32; ++i) {
+      carry += (unsigned)sig[32 + i] + L[i];
+      s2[32 + i] = (uint8_t)carry;
+      carry >>= 8;
+    }
+    FIO_ASSERT(fio_ed25519_verify(s2, msg, msg_len, pk) != 0,
+               "Ed25519 malleated S + L must be rejected");
+  }
+
+  /* Non-canonical y (y + p, for y in 0..18) and negative zero. */
+  for (int y = 0; y < 19; ++y) {
+    uint8_t p[32];
+    FIO_MEMSET(p, 0xff, 32);
+    p[0] = (uint8_t)(0xed + y);
+    p[31] = 0x7f;
+    for (int neg = 0; neg < 2; ++neg) {
+      p[31] = (uint8_t)(0x7f | (neg << 7));
+      FIO_ASSERT(fio___ge_p3_frombytes(pt, p) != 0,
+                 "Ed25519 non-canonical y = p + %d must not decode",
+                 y);
+      FIO_ASSERT(fio_ed25519_verify(sig, msg, msg_len, p) != 0,
+                 "Ed25519 non-canonical public key must be rejected");
+    }
+  }
+  {
+    uint8_t nz[32] = {1};
+    nz[31] = 0x80; /* y = 1 => x = 0, sign bit set */
+    FIO_ASSERT(fio___ge_p3_frombytes(pt, nz) != 0,
+               "Ed25519 negative zero (y = 1) must not decode");
+    FIO_MEMCPY(nz, small_order[2], 32);
+    nz[31] |= 0x80; /* y = -1 => x = 0, sign bit set */
+    FIO_ASSERT(fio___ge_p3_frombytes(pt, nz) != 0,
+               "Ed25519 negative zero (y = -1) must not decode");
+    nz[31] &= 0x7f;
+    FIO_ASSERT(fio___ge_p3_frombytes(pt, nz) == 0,
+               "Ed25519 canonical y = -1 should decode");
+  }
+
+  /* NULL inputs return errors (never crash) */
+  FIO_ASSERT(fio_ed25519_verify(NULL, msg, msg_len, pk) != 0,
+             "Ed25519 verify(NULL sig) must fail");
+  FIO_ASSERT(fio_ed25519_verify(sig, msg, msg_len, NULL) != 0,
+             "Ed25519 verify(NULL key) must fail");
+  FIO_ASSERT(fio_ed25519_verify(sig, NULL, 1, pk) != 0,
+             "Ed25519 verify(NULL message, len) must fail");
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 
 int main(void) {
   FIO_NAME_TEST(stl, ed25519_rfc8032)();
   FIO_NAME_TEST(stl, ed25519_signature_edge_cases)();
+  FIO_NAME_TEST(stl, ed25519_strict_verify)();
   FIO_NAME_TEST(stl, ed25519_x25519_conversion)();
   return 0;
 }

@@ -248,6 +248,73 @@ static void test_history_replay_integration(void) {
 }
 
 /* *****************************************************************************
+Unit Tests - History Channel Buffer (sparse slots after eviction)
+***************************************************************************** */
+
+static void test_history_channel_sparse(void) {
+  fprintf(stderr, "* Testing pub/sub history channel eviction holes.\n");
+  fio___pubsub_history_channel_s map = {0};
+  fio_ipc_s *msgs[6];
+  for (size_t i = 0; i < 6; ++i) {
+    msgs[i] = fio_ipc_new(.timestamp = 100 + i, .id = 1 + i);
+    FIO_ASSERT(msgs[i], "fio_ipc_new failed");
+  }
+  for (size_t i = 0; i < 4; ++i) /* pushed out of order (forces sorting) */
+    FIO_ASSERT(!fio___pubsub_history_channel_push(&map, msgs[3 - i]),
+               "history push failed");
+  /* evict oldest without a rehash, leaving a NULL slot at ary[0] */
+  FIO_ASSERT(fio___pubsub_history_channel_pop(&map), "history pop failed");
+  FIO_ASSERT(map.count == 3 && map.w == 4 && !map.ary[0],
+             "eviction should leave a sparse slot (test precondition)");
+  /* sort must not see the NULL slot (comparator dereferences elements) */
+  FIO_ASSERT(!fio___pubsub_history_channel_push(&map, msgs[5]),
+             "history push after eviction failed");
+  FIO_ASSERT(!fio___pubsub_history_channel_push(&map, msgs[4]),
+             "history push after eviction failed");
+  FIO_ASSERT(map.count == 5 && map.w == 5, "history should be compact");
+  for (size_t i = 0; i < 5; ++i)
+    FIO_ASSERT(map.ary[i] == msgs[i + 1], "history order error at %zu", i);
+  /* pop must evict the oldest even when ary[0] is a removed slot */
+  FIO_ASSERT(fio___pubsub_history_channel_pop(&map), "history pop failed");
+  FIO_ASSERT(fio___pubsub_history_channel_get(&map, msgs[2]) &&
+                 !fio___pubsub_history_channel_get(&map, msgs[1]),
+             "history pop should evict the oldest message");
+  FIO_ASSERT(fio___pubsub_history_channel_pop(&map), "history pop failed");
+  FIO_ASSERT(!fio___pubsub_history_channel_get(&map, msgs[2]) &&
+                 fio___pubsub_history_channel_get(&map, msgs[3]),
+             "history pop after hole should evict the oldest message");
+  /* compaction (used by replay / oldest) keeps the time order */
+  fio___pubsub_history_channel_compact(&map);
+  FIO_ASSERT(map.count == 3 && map.w == 3 && map.ary[0] == msgs[3] &&
+                 map.ary[1] == msgs[4] && map.ary[2] == msgs[5],
+             "compaction should keep the time order");
+  fio___pubsub_history_channel_destroy_all(&map);
+  for (size_t i = 0; i < 6; ++i)
+    fio_ipc_free(msgs[i]);
+  fprintf(stderr, "* Pub/sub history channel eviction tests passed.\n");
+}
+
+/* *****************************************************************************
+Unit Tests - History Cache Accounting (no wrap, oversize entries rejected)
+***************************************************************************** */
+
+static void test_history_cache_accounting(void) {
+  fprintf(stderr, "* Testing pub/sub history cache accounting bounds.\n");
+  const size_t overhead = fio___pubsub_history_cache_bytes(0);
+  FIO_ASSERT(overhead == sizeof(fio_ipc_s) + 8, "per-message overhead");
+  FIO_ASSERT(fio___pubsub_history_cache_bytes(SIZE_MAX) == SIZE_MAX,
+             "byte count must saturate, not wrap");
+  FIO_ASSERT(fio___pubsub_history_cache_fits(0, 100, 100), "exact fit");
+  FIO_ASSERT(!fio___pubsub_history_cache_fits(0, 100, 101),
+             "an entry larger than the limit is rejected");
+  FIO_ASSERT(!fio___pubsub_history_cache_fits(0, SIZE_MAX, SIZE_MAX),
+             "a saturated entry is rejected");
+  FIO_ASSERT(!fio___pubsub_history_cache_fits(SIZE_MAX - 4, SIZE_MAX, 8),
+             "the size total must not wrap");
+  fprintf(stderr, "* Pub/sub history cache accounting tests passed.\n");
+}
+
+/* *****************************************************************************
 Main entry point
 ***************************************************************************** */
 
@@ -258,6 +325,8 @@ int main(void) {
   fprintf(stderr, "=== Pub/Sub history correctness tests ===\n");
 
   test_history_cache_api();
+  test_history_channel_sparse();
+  test_history_cache_accounting();
   test_history_manager_api();
   test_history_replay_integration();
 

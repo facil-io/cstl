@@ -425,7 +425,7 @@ FIO_SFUNC void fio_bench_gzip(void) {
     size_t data_size = fio___bench_sizes[si];
     /* gzip adds ~18 bytes header+trailer */
     size_t comp_bound = fio_deflate_compress_bound(data_size) + 32;
-    size_t decomp_bound = fio_deflate_decompress_bound(comp_bound);
+    size_t decomp_bound = data_size; /* original size is known in this benchmark */
     uint8_t *src = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, data_size, 0);
     uint8_t *dst = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, comp_bound, 0);
     uint8_t *dec = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, decomp_bound, 0);

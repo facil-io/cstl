@@ -190,8 +190,8 @@ The parser's internal checks are not identical for every callback:
 - `fio_http1_on_header` during chunked trailers is passed through; negative
   values become parse errors and positive values stop the current parse as
   incomplete.
-- `fio_http1_on_expect` is special: any non-zero return rejects the expectation,
-  resets the parser, and stops the current parse without calling
+- `fio_http1_on_expect` is special: any non-zero return rejects the message as
+  a parse error (`FIO_HTTP1_PARSER_ERROR`) without calling
   `fio_http1_on_complete`.
 
 All `fio_buf_info_s` values point into the `buf` memory passed to
@@ -243,9 +243,11 @@ static int fio_http1_on_status(size_t istatus,
 For response lines, the parser calls `fio_http1_on_version` first and then
 `fio_http1_on_status`.
 
-`istatus` is parsed from the numeric status token. `status` is the remaining
-status text slice after the numeric token. The version slice is clamped to at
-most 14 bytes.
+`istatus` is parsed from the numeric status token, which must be exactly three
+digits (`100`-`999`); anything else is rejected. `status` is the reason phrase
+after the numeric token. It may be empty (`.len == 0`): both `HTTP/1.1 200 ` and
+`HTTP/1.1 200` (no SP) are accepted. The version slice is clamped to at most
+14 bytes.
 
 The parser decides whether the first line is a response by checking whether the
 second token starts with a decimal digit.
@@ -315,7 +317,8 @@ smuggling):
   followed by any other `transfer-encoding` line), a repeated `chunked`
   coding (`chunked, chunked`), malformed separators before the final
   `chunked` token, a `content-length` header, and requests using `GET`,
-  `HEAD`, or `OPTIONS`.
+  `HEAD`, or `OPTIONS`. The final `chunked` must be a whole list element:
+  `gzip, chunked` is accepted, `gzip chunked` or `xchunked` are rejected.
 
 Requests must carry exactly one `host` header, as required by RFC 9112 §3.2:
 
@@ -327,8 +330,10 @@ Requests must carry exactly one `host` header, as required by RFC 9112 §3.2:
 - responses aren't affected. The `host` header itself is passed to
   `fio_http1_on_header`.
 
-`expect` is special when its value is exactly `100-continue`. Any other
-`Expect` value is rejected.
+In requests, `expect` is special when its value is exactly `100-continue`. Any
+other `Expect` value is rejected. `Expect` is a request header (RFC 9110
+§10.1.1): in responses it's forwarded to `fio_http1_on_header` unchanged and
+`fio_http1_on_expect` is never called.
 
 ### Messages Without a Body
 
@@ -364,8 +369,11 @@ requires a post-header decision and a body may follow (a `Content-Length` body
 or `transfer-encoding: chunked`). It is not called for messages that cannot
 carry a body (e.g., `GET` / `HEAD` / `OPTIONS` or a zero `Content-Length`),
 since there is nothing to continue (RFC 9110 §10.1.1).
-Return `0` to continue into the body / completion flow. Return non-zero to reset
-the parser and stop the current parse without calling `fio_http1_on_complete`.
+Return `0` to continue into the body / completion flow. Return non-zero to
+reject the message: `fio_http1_parse` returns `FIO_HTTP1_PARSER_ERROR` without
+calling `fio_http1_on_complete`. The client may send the declared body anyway
+(RFC 9110 §10.1.1), so the parser never reads it as the next message; send any
+final response, then close the connection.
 
 ### Body Chunks
 
@@ -405,8 +413,9 @@ Details worth keeping in mind:
 - The parser accepts `\n` line endings and handles an optional preceding `\r`.
 - Chunk size lines are hexadecimal, capped by the implementation, and do not
   support chunk extensions.
+- Chunk data must be followed by CRLF (or a bare LF); anything else is rejected.
 - A zero-size chunk either completes immediately when followed by an empty line
-  or enters trailer parsing.
+  (CRLF or LF) or enters trailer parsing.
 
 ---
 

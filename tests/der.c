@@ -133,6 +133,40 @@ FIO_SFUNC void FIO_NAME_TEST(stl, der_parse_integer)(void) {
   FIO_ASSERT(fio_der_parse(&elem, test_null, sizeof(test_null)) &&
                  fio_der_parse_integer(&elem, &value) != 0,
              "NULL as INTEGER should fail");
+
+  /* Lenient INTEGERs: {bytes, len, ok_with_value, ok_without_value, v} */
+  static const struct {
+    uint8_t b[12];
+    uint8_t n;
+    uint8_t ok_v, ok_nov;
+    uint64_t v;
+  } mi[] = {
+      {{0x02, 0x00}, 2, 0, 0, 0},                         /* empty */
+      {{0x02, 0x01, 0x00}, 3, 1, 1, 0},                   /* 0 */
+      {{0x02, 0x02, 0x00, 0x7F}, 4, 1, 1, 127},           /* redundant 00 */
+      {{0x02, 0x02, 0x00, 0x00}, 4, 1, 1, 0},             /* redundant 00 */
+      {{0x02, 0x02, 0x00, 0x80}, 4, 1, 1, 128},           /* sign byte ok */
+      {{0x02, 0x01, 0xFF}, 3, 0, 1, 0},                   /* -1 */
+      {{0x02, 0x02, 0xFF, 0x80}, 4, 0, 1, 0},             /* redundant FF */
+      {{0x02, 0x02, 0xFF, 0x7F}, 4, 0, 1, 0},             /* -129 */
+      {{0x02, 0x01, 0x80}, 3, 0, 1, 0},                   /* -128 */
+      {{0x02, 0x09, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+       11, 1, 1, ~(uint64_t)0},                           /* UINT64_MAX */
+      {{0x02, 0x09, 0x01, 0, 0, 0, 0, 0, 0, 0, 0}, 11, 0, 1, 0}, /* 2^64 */
+      {{0x02, 0x0A, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF},
+       12, 1, 1, ~(uint64_t)0}, /* UINT64_MAX, redundant 00 (lenient) */
+  };
+  for (size_t i = 0; i < sizeof(mi) / sizeof(mi[0]); ++i) {
+    FIO_ASSERT(fio_der_parse(&elem, mi[i].b, mi[i].n), "INTEGER TLV %zu", i);
+    value = 0xDEAD;
+    int r = fio_der_parse_integer(&elem, &value);
+    FIO_ASSERT((r == 0) == mi[i].ok_v && (r || value == mi[i].v),
+               "INTEGER minimal/sign check (value) failed at %zu",
+               i);
+    FIO_ASSERT((fio_der_parse_integer(&elem, NULL) == 0) == mi[i].ok_nov,
+               "INTEGER minimal check (NULL) failed at %zu",
+               i);
+  }
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, der_parse_boolean)(void) {
@@ -281,6 +315,16 @@ FIO_SFUNC void FIO_NAME_TEST(stl, der_parse_time)(void) {
   FIO_ASSERT(fio_der_parse(&elem, test_gen_time, sizeof(test_gen_time)) &&
                  fio_der_parse_time(&elem, &gen_ts) == 0 && gen_ts == utc_ts,
              "GeneralizedTime != UTCTime");
+  {
+    /* 2106 dates must not wrap via a 32-bit time_t to appear valid today. */
+    static const uint8_t future[] = {
+        0x18, 0x0F, '2', '1', '0', '6', '0', '2', '0', '7',
+        '0', '6', '2', '8', '1', '6', 'Z'};
+    FIO_ASSERT(fio_der_parse(&elem, future, sizeof(future)) &&
+                   fio_der_parse_time(&elem, &gen_ts) == 0 &&
+                   gen_ts == 4294967296LL,
+               "GeneralizedTime must preserve dates beyond 32-bit time_t");
+  }
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, der_iterator)(void) {
@@ -471,6 +515,10 @@ FIO_SFUNC void FIO_NAME_TEST(stl, der_oid_registry_round_trip)(void) {
       {FIO_X509_OID_SHA384_WITH_RSA, "1.2.840.113549.1.1.12"},
       {FIO_X509_OID_SHA512_WITH_RSA, "1.2.840.113549.1.1.13"},
       {FIO_X509_OID_RSA_PSS, "1.2.840.113549.1.1.10"},
+      {FIO_X509_OID_MGF1, "1.2.840.113549.1.1.8"},
+      {FIO_X509_OID_SHA256, "2.16.840.1.101.3.4.2.1"},
+      {FIO_X509_OID_SHA384, "2.16.840.1.101.3.4.2.2"},
+      {FIO_X509_OID_SHA512, "2.16.840.1.101.3.4.2.3"},
       {FIO_X509_OID_ECDSA_WITH_SHA256, "1.2.840.10045.4.3.2"},
       {FIO_X509_OID_ECDSA_WITH_SHA384, "1.2.840.10045.4.3.3"},
       {FIO_X509_OID_ECDSA_WITH_SHA512, "1.2.840.10045.4.3.4"},
@@ -491,6 +539,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, der_oid_registry_round_trip)(void) {
       {FIO_X509_OID_CERT_POLICIES, "2.5.29.32"},
       {FIO_X509_OID_AUTH_KEY_ID, "2.5.29.35"},
       {FIO_X509_OID_EXT_KEY_USAGE, "2.5.29.37"},
+      {FIO_X509_OID_NAME_CONSTRAINTS, "2.5.29.30"},
+      {FIO_X509_OID_EKU_ANY, "2.5.29.37.0"},
       {FIO_X509_OID_EKU_SERVER_AUTH, "1.3.6.1.5.5.7.3.1"},
       {FIO_X509_OID_EKU_CLIENT_AUTH, "1.3.6.1.5.5.7.3.2"},
       {FIO_X509_OID_COMMON_NAME, "2.5.4.3"},
@@ -592,6 +642,233 @@ FIO_SFUNC void FIO_NAME_TEST(stl, der_encode_headers)(void) {
              "BOOLEAN encode failed");
 }
 
+/* Security regressions: bounded time parsing, OID arcs, canonical DER. */
+FIO_SFUNC void FIO_NAME_TEST(stl, der_security)(void) {
+  fio_der_element_s elem;
+  int64_t ts;
+  char oid[64];
+
+  /* Time content ending in a digit (no 'Z') must not read past the element:
+   * copy into an exact-size heap allocation so ASan catches any over-read. */
+  {
+    static const char *bad[] = {"2401151230",      "240115123045",
+                                "2401151230Z1",    "2413151230Z",
+                                "2402301230Z",     "2401152460Z",
+                                "24011512 0Z",     "240115123045z",
+                                "2401151230+01",   "2401151230+2400",
+                                "2401151230.5Z",   "24011512Z "};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+      size_t n = FIO_STRLEN(bad[i]);
+      uint8_t *m = (uint8_t *)malloc(n + 2);
+      FIO_ASSERT_ALLOC(m);
+      m[0] = FIO_DER_UTC_TIME;
+      m[1] = (uint8_t)n;
+      FIO_MEMCPY(m + 2, bad[i], n);
+      FIO_ASSERT(fio_der_parse(&elem, m, n + 2), "time TLV parse failed");
+      FIO_ASSERT(fio_der_parse_time(&elem, &ts) == -1,
+                 "malformed UTCTime accepted: %s",
+                 bad[i]);
+      free(m);
+    }
+    /* every truncation of a valid GeneralizedTime is rejected */
+    static const char good[] = "20240229123045.123Z";
+    for (size_t n = 0; n < sizeof(good) - 1; ++n) {
+      uint8_t *m = (uint8_t *)malloc(n + 2);
+      FIO_ASSERT_ALLOC(m);
+      m[0] = FIO_DER_GENERALIZED_TIME;
+      m[1] = (uint8_t)n;
+      FIO_MEMCPY(m + 2, good, n);
+      if (fio_der_parse(&elem, m, n + 2))
+        FIO_ASSERT(fio_der_parse_time(&elem, &ts) == -1,
+                   "truncated GeneralizedTime accepted (%zu)",
+                   n);
+      free(m);
+    }
+    /* lenient (BER, X.680) forms that decode unambiguously */
+    static const struct {
+      uint8_t tag;
+      const char *s;
+      int64_t t;
+    } lenient[] = {
+        {FIO_DER_UTC_TIME, "240115123045.5Z", 1705321845},
+        {FIO_DER_UTC_TIME, "2401151230+0100", 1705318200},
+        {FIO_DER_GENERALIZED_TIME, "20240115123045,5-0230", 1705330845},
+        {FIO_DER_GENERALIZED_TIME, "2024011512Z", 1705320000},
+        {FIO_DER_UTC_TIME, "24011512Z", 1705320000},
+    };
+    for (size_t i = 0; i < sizeof(lenient) / sizeof(lenient[0]); ++i) {
+      size_t n = FIO_STRLEN(lenient[i].s);
+      uint8_t *m = (uint8_t *)malloc(n + 2);
+      FIO_ASSERT_ALLOC(m);
+      m[0] = lenient[i].tag;
+      m[1] = (uint8_t)n;
+      FIO_MEMCPY(m + 2, lenient[i].s, n);
+      FIO_ASSERT(fio_der_parse(&elem, m, n + 2) &&
+                     !fio_der_parse_time(&elem, &ts) && ts == lenient[i].t,
+                 "lenient time rejected or wrong: %s",
+                 lenient[i].s);
+      free(m);
+    }
+    uint8_t ok[2 + sizeof(good) - 1] = {FIO_DER_GENERALIZED_TIME,
+                                        (uint8_t)(sizeof(good) - 1)};
+    FIO_MEMCPY(ok + 2, good, sizeof(good) - 1);
+    FIO_ASSERT(fio_der_parse(&elem, ok, sizeof(ok)) &&
+                   !fio_der_parse_time(&elem, &ts) && ts == 1709209845,
+               "valid leap-day GeneralizedTime rejected / wrong");
+  }
+
+  /* OID 2.999.3 has a multi-byte first subidentifier */
+  {
+    static const uint8_t o[] = {0x06, 0x03, 0x88, 0x37, 0x03};
+    FIO_ASSERT(fio_der_parse(&elem, o, sizeof(o)) &&
+                   fio_der_parse_oid(&elem, oid, sizeof(oid)) == 7 &&
+                   !FIO_MEMCMP(oid, "2.999.3", 8),
+               "OID 2.999.3 misdecoded: %s",
+               oid);
+    static const uint8_t big[] =
+        {0x06, 0x0B, 0x2A, 0x82, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+         0x80, 0x00}; /* 1.2.(2^64) */
+    FIO_ASSERT(fio_der_parse(&elem, big, sizeof(big)) &&
+                   fio_der_parse_oid(&elem, oid, sizeof(oid)) == -1,
+               "OID arc overflow accepted");
+    static const uint8_t nonmin[] = {0x06, 0x03, 0x2A, 0x80, 0x01};
+    FIO_ASSERT(fio_der_parse(&elem, nonmin, sizeof(nonmin)) &&
+                   fio_der_parse_oid(&elem, oid, sizeof(oid)) == -1,
+               "non-minimal OID arc accepted");
+  }
+
+  /* Lengths and tags: non-minimal forms decode (lenient), ambiguous fail */
+  {
+    static const uint8_t l1[] = {0x04, 0x81, 0x01, 0x00};
+    static const uint8_t l2[] = {0x04, 0x82, 0x00, 0x01, 0x00};
+    static const uint8_t l3[] = {0x04, 0x80, 0x00, 0x00}; /* indefinite */
+    static const uint8_t t1[] = {0x9F, 0x82, 0x00, 0x00}; /* tag 256 */
+    static const uint8_t t2[] = {0x1F, 0x02, 0x01, 0x05}; /* long INTEGER tag */
+    static const uint8_t t3[] = {0x9F, 0x20, 0x00};       /* tag 32 */
+    static const uint8_t t4[] = {0x9F, 0x80, 0x21, 0x00}; /* [33], zero pad */
+    static const uint8_t t5[] = {0x9F, 0x81};             /* unterminated */
+    uint64_t v = 0;
+    FIO_ASSERT(fio_der_parse(&elem, l1, sizeof(l1)) == l1 + 4 && elem.len == 1,
+               "non-minimal length should decode");
+    FIO_ASSERT(fio_der_parse(&elem, l2, sizeof(l2)) == l2 + 5 && elem.len == 1,
+               "leading-zero length should decode");
+    FIO_ASSERT(!fio_der_parse(&elem, l3, sizeof(l3)), "indefinite length");
+    FIO_ASSERT(!fio_der_parse(&elem, t1, sizeof(t1)), "tag > 255 truncated");
+    FIO_ASSERT(fio_der_parse(&elem, t2, sizeof(t2)) &&
+                   fio_der_is_tag(&elem, FIO_DER_INTEGER) &&
+                   !fio_der_parse_integer(&elem, &v) && v == 5,
+               "long-form INTEGER tag should normalize");
+    FIO_ASSERT(fio_der_parse(&elem, t3, sizeof(t3)) && elem.tag_number == 32,
+               "high-tag 32 rejected");
+    FIO_ASSERT(fio_der_parse(&elem, t4, sizeof(t4)) &&
+                   fio_der_is_context_tag(&elem, 33),
+               "zero-padded high tag should decode");
+    FIO_ASSERT(!fio_der_parse(&elem, t5, sizeof(t5)), "unterminated tag");
+  }
+
+  /* Full identifier matching: class + constructed bit + number */
+  {
+    static const uint8_t prim_seq[] = {0x10, 0x00};       /* primitive 0x10 */
+    static const uint8_t cons_int[] = {0x22, 0x03, 0x02, 0x01, 0x05};
+    static const uint8_t ctx_0[] = {0xA0, 0x00};          /* [0] */
+    static const uint8_t seq[] = {0x30, 0x00};
+    static const uint8_t set[] = {0x31, 0x00};
+    static const uint8_t cons_bits[] = {0x23, 0x03, 0x03, 0x01, 0x00};
+    static const uint8_t cons_oid[] = {0x26, 0x01, 0x2A};
+    static const uint8_t cons_bool[] = {0x21, 0x01, 0xFF};
+    static const uint8_t cons_utf8[] = {0x2C, 0x01, 'a'};
+    static const uint8_t app_int[] = {0x42, 0x01, 0x05}; /* [APPLICATION 2] */
+    static const uint8_t cons_time[] = {0x37, 0x0B, '2', '4', '0', '1', '1',
+                                        '5', '1', '2', '3', '0', 'Z'};
+    uint64_t u;
+    int b;
+    size_t sl;
+    const uint8_t *bits;
+    size_t bl;
+    uint8_t ub;
+
+    FIO_ASSERT(fio_der_parse(&elem, prim_seq, sizeof(prim_seq)) &&
+                   !fio_der_is_tag(&elem, FIO_DER_SEQUENCE),
+               "primitive 0x10 matched SEQUENCE");
+    FIO_ASSERT(fio_der_parse(&elem, seq, sizeof(seq)) &&
+                   fio_der_is_tag(&elem, FIO_DER_SEQUENCE) &&
+                   fio_der_is_tag(&elem, 0x30) &&
+                   !fio_der_is_tag(&elem, FIO_DER_SET),
+               "SEQUENCE match failed");
+    FIO_ASSERT(fio_der_parse(&elem, set, sizeof(set)) &&
+                   fio_der_is_tag(&elem, FIO_DER_SET),
+               "SET match failed");
+    FIO_ASSERT(fio_der_parse(&elem, cons_int, sizeof(cons_int)) &&
+                   !fio_der_is_tag(&elem, FIO_DER_INTEGER) &&
+                   fio_der_parse_integer(&elem, &u) == -1,
+               "constructed 0x22 accepted as INTEGER");
+    FIO_ASSERT(fio_der_parse(&elem, app_int, sizeof(app_int)) &&
+                   !fio_der_is_tag(&elem, FIO_DER_INTEGER) &&
+                   fio_der_parse_integer(&elem, &u) == -1,
+               "APPLICATION 2 accepted as INTEGER");
+    FIO_ASSERT(fio_der_parse(&elem, ctx_0, sizeof(ctx_0)) &&
+                   !fio_der_is_tag(&elem, FIO_DER_EOC) &&
+                   fio_der_is_tag(&elem, FIO_DER_CONTEXT_0),
+               "[0] matched universal EOC / [0] mismatch");
+    FIO_ASSERT(fio_der_parse(&elem, cons_bits, sizeof(cons_bits)) &&
+                   fio_der_parse_bit_string(&elem, &bits, &bl, &ub) == -1,
+               "constructed BIT STRING accepted");
+    FIO_ASSERT(fio_der_parse(&elem, cons_oid, sizeof(cons_oid)) &&
+                   fio_der_parse_oid(&elem, oid, sizeof(oid)) == -1,
+               "constructed OID accepted");
+    FIO_ASSERT(fio_der_parse(&elem, cons_bool, sizeof(cons_bool)) &&
+                   fio_der_parse_boolean(&elem, &b) == -1,
+               "constructed BOOLEAN accepted");
+    FIO_ASSERT(fio_der_parse(&elem, cons_utf8, sizeof(cons_utf8)) &&
+                   !fio_der_parse_string(&elem, &sl),
+               "constructed UTF8String accepted");
+    FIO_ASSERT(fio_der_parse(&elem, cons_time, sizeof(cons_time)) &&
+                   fio_der_parse_time(&elem, &ts) == -1,
+               "constructed UTCTime accepted");
+
+    /* context tags: is_context_tag is form-agnostic; is_tag is exact */
+    static const uint8_t ctx_p2[] = {0x82, 0x01, 'a'}; /* [2] IMPLICIT prim */
+    static const uint8_t ctx_hi[] = {0x9F, 0x21, 0x00}; /* [33] primitive */
+    FIO_ASSERT(fio_der_parse(&elem, ctx_p2, sizeof(ctx_p2)) &&
+                   fio_der_is_context_tag(&elem, 2) &&
+                   fio_der_is_tag(&elem, 0x82) &&
+                   !fio_der_is_tag(&elem, FIO_DER_CONTEXT_2) &&
+                   fio_der_tag_number(&elem) == 2,
+               "primitive [2] match failed");
+    FIO_ASSERT(fio_der_parse(&elem, ctx_0, sizeof(ctx_0)) &&
+                   fio_der_is_context_tag(&elem, 0) &&
+                   !fio_der_is_tag(&elem, 0x80),
+               "constructed [0] matched primitive [0]");
+    FIO_ASSERT(fio_der_parse(&elem, ctx_hi, sizeof(ctx_hi)) &&
+                   fio_der_is_context_tag(&elem, 33) &&
+                   !fio_der_is_context_tag(&elem, 31) &&
+                   !fio_der_is_context_tag(&elem, 1) &&
+                   fio_der_tag_number(&elem) == 33,
+               "high-tag context [33] match failed");
+  }
+
+  /* Time encoders: UTCTime range and GeneralizedTime past 2049 */
+  {
+    uint8_t buf[32];
+    const int64_t y2050 = 2524608000LL; /* 2050-01-01T00:00:00Z */
+    FIO_ASSERT(!fio_der_encode_utc_time(buf, y2050), "UTCTime 2050 encoded");
+    FIO_ASSERT(fio_der_encode_utc_time(buf, y2050 - 1) == 15 &&
+                   !FIO_MEMCMP(buf + 2, "491231235959Z", 13),
+               "UTCTime 2049 boundary");
+    size_t n = fio_der_encode_generalized_time(buf, y2050);
+    FIO_ASSERT(n == 17 && !FIO_MEMCMP(buf + 2, "20500101000000Z", 15) &&
+                   fio_der_parse(&elem, buf, n) &&
+                   !fio_der_parse_time(&elem, &ts) && ts == y2050,
+               "GeneralizedTime 2050 round-trip");
+    n = fio_der_encode_generalized_time(buf, -1);
+    FIO_ASSERT(n == 17 && !FIO_MEMCMP(buf + 2, "19691231235959Z", 15),
+               "GeneralizedTime negative time");
+    FIO_ASSERT(!fio_der_encode_generalized_time(buf, INT64_MAX) &&
+                   !fio_der_encode_generalized_time(buf, INT64_MIN),
+               "GeneralizedTime extreme range accepted");
+  }
+}
+
 /* *****************************************************************************
 Main
 ***************************************************************************** */
@@ -616,5 +893,6 @@ int main(void) {
   FIO_NAME_TEST(stl, der_encode_strings)();
   FIO_NAME_TEST(stl, der_encode_time)();
   FIO_NAME_TEST(stl, der_encode_headers)();
+  FIO_NAME_TEST(stl, der_security)();
   return 0;
 }

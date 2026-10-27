@@ -501,7 +501,10 @@ FIO_SFUNC void test_queue_destroy_discards_without_workers(void) {
   for (size_t i = 0; i < FIO___QUEUE_TEST_COUNT; ++i)
     FIO_ASSERT(!fio_queue_push(&q, fio___queue_increment_task, &counter, NULL),
                "push failed");
-  FIO_ASSERT(!fio_queue_push_urgent(&q, fio___queue_increment_task, &counter),
+  FIO_ASSERT(!fio_queue_push_urgent(&q,
+                                    fio___queue_increment_task,
+                                    &counter,
+                                    NULL),
              "urgent push failed");
   fio_queue_destroy(&q);
   FIO_ASSERT(!counter, "destroy without workers performed tasks (%zu)",

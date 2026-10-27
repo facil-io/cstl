@@ -52,6 +52,9 @@ typedef struct {
  * Output is written to the returned buffer (up to 512 bytes via fio_u512).
  * For outlen > 64, use fio_lyra2_hash() instead.
  *
+ * On error (invalid arguments, allocation failure) the result is all zeros.
+ * When the output is used as a key, use fio_lyra2_hash() and check its return.
+ *
  * Use `fio_ct_is_eq` to compare output hashes in constant time.
  */
 SFUNC fio_u512 fio_lyra2(fio_lyra2_args_s args);
@@ -59,8 +62,8 @@ SFUNC fio_u512 fio_lyra2(fio_lyra2_args_s args);
 
 /**
  * Computes Lyra2 password hash into a caller-provided buffer.
- * Supports arbitrary output lengths.
- * Returns 0 on success, -1 on error.
+ * Supports output lengths up to 2^32-1 bytes.
+ * Returns 0 on success, -1 on error (leaving `out` untouched).
  */
 SFUNC int fio_lyra2_hash(void *out, fio_lyra2_args_s args);
 #define fio_lyra2_hash(out, ...)                                               \
@@ -329,10 +332,9 @@ Fills M[0] from column C-1 down to 0 using reduced permutation.
 FIO_SFUNC void fio___lyra2_squeeze_row0(uint64_t *state,
                                         uint64_t *row_out,
                                         size_t n_cols) {
-  uint64_t *ptr = row_out + (n_cols - 1) * FIO___LYRA2_BLOCK_LEN_INT64;
-  for (size_t i = 0; i < n_cols; ++i) {
-    fio___lyra2_copy12(ptr, state);
-    ptr -= FIO___LYRA2_BLOCK_LEN_INT64;
+  /* index-based reverse walk (never forms a pointer before `row_out`) */
+  for (size_t i = n_cols; i--;) {
+    fio___lyra2_copy12(row_out + i * FIO___LYRA2_BLOCK_LEN_INT64, state);
     fio___lyra2_sponge_reduced(state);
   }
 }
@@ -348,13 +350,13 @@ FIO_SFUNC void fio___lyra2_duplex_row1and2(uint64_t *state,
                                            uint64_t *row_out,
                                            size_t n_cols) {
   uint64_t *ptr_in = row_in;
-  uint64_t *ptr_out = row_out + (n_cols - 1) * FIO___LYRA2_BLOCK_LEN_INT64;
-  for (size_t i = 0; i < n_cols; ++i) {
+  for (size_t i = n_cols; i--;) { /* rowOut written from column C-1 down */
     fio___lyra2_xor12(state, ptr_in);
     fio___lyra2_sponge_reduced(state);
-    fio___lyra2_xor12_into(ptr_out, ptr_in, state);
+    fio___lyra2_xor12_into(row_out + i * FIO___LYRA2_BLOCK_LEN_INT64,
+                           ptr_in,
+                           state);
     ptr_in += FIO___LYRA2_BLOCK_LEN_INT64;
-    ptr_out -= FIO___LYRA2_BLOCK_LEN_INT64;
   }
 }
 
@@ -374,17 +376,17 @@ FIO_SFUNC void fio___lyra2_duplex_row_filling(uint64_t *state,
   uint64_t *ptr_inout = row_inout;
   uint64_t *ptr_in0 = row_in0;
   uint64_t *ptr_in1 = row_in1;
-  uint64_t *ptr_out = row_out + (n_cols - 1) * FIO___LYRA2_BLOCK_LEN_INT64;
 
-  for (size_t i = 0; i < n_cols; ++i) {
+  for (size_t i = n_cols; i--;) { /* rowOut written from column C-1 down */
     fio___lyra2_xor_add3(state, ptr_inout, ptr_in0, ptr_in1);
     fio___lyra2_sponge_reduced(state);
-    fio___lyra2_xor12_into(ptr_out, ptr_in0, state);
+    fio___lyra2_xor12_into(row_out + i * FIO___LYRA2_BLOCK_LEN_INT64,
+                           ptr_in0,
+                           state);
     fio___lyra2_xor_rotw(ptr_inout, state);
     ptr_inout += FIO___LYRA2_BLOCK_LEN_INT64;
     ptr_in0 += FIO___LYRA2_BLOCK_LEN_INT64;
     ptr_in1 += FIO___LYRA2_BLOCK_LEN_INT64;
-    ptr_out -= FIO___LYRA2_BLOCK_LEN_INT64;
   }
 }
 
@@ -432,29 +434,36 @@ SFUNC int fio_lyra2_hash FIO_NOOP(void *K, fio_lyra2_args_s args) {
   if (!K)
     return -1;
 
-  /* Validate and clamp parameters */
-  unsigned int kLen = (unsigned int)(args.outlen ? args.outlen : 32);
-  unsigned int pwdlen =
-      (unsigned int)(args.password.buf ? args.password.len : 0);
-  unsigned int saltlen = (unsigned int)(args.salt.buf ? args.salt.len : 0);
-  unsigned int timeCost = (unsigned int)(args.t_cost < 1 ? 1 : args.t_cost);
-  unsigned int nRows = (unsigned int)(args.m_cost < 3 ? 3 : args.m_cost);
-  unsigned int nCols = (unsigned int)(args.n_cols ? args.n_cols : 256);
+  /* Validate and clamp parameters. Every value is encoded / processed as a
+   * reference `unsigned int` - reject (never truncate) larger values. */
+  const uint64_t lim = (uint64_t)(unsigned int)-1;
+  uint64_t a_klen = args.outlen ? (uint64_t)args.outlen : 32;
+  uint64_t a_pwdlen = args.password.buf ? (uint64_t)args.password.len : 0;
+  uint64_t a_saltlen = args.salt.buf ? (uint64_t)args.salt.len : 0;
+  uint64_t a_tcost = args.t_cost < 1 ? 1 : args.t_cost;
+  uint64_t a_rows = args.m_cost < 3 ? 3 : args.m_cost;
+  uint64_t a_cols = args.n_cols ? (uint64_t)args.n_cols : 256;
+  if ((a_klen | a_pwdlen | a_saltlen | a_tcost | a_rows | a_cols) > lim)
+    return -1;
+  /* row size must fit size_t (32-bit systems) */
+  if (a_cols > ((size_t)-1 / FIO___LYRA2_BLOCK_LEN_BYTES))
+    return -1;
+  unsigned int kLen = (unsigned int)a_klen;
+  unsigned int pwdlen = (unsigned int)a_pwdlen;
+  unsigned int saltlen = (unsigned int)a_saltlen;
+  unsigned int timeCost = (unsigned int)a_tcost;
+  unsigned int nRows = (unsigned int)a_rows;
+  unsigned int nCols = (unsigned int)a_cols;
   const void *pwd = args.password.buf;
   const void *salt = args.salt.buf;
 
   size_t row_len_int64 = FIO___LYRA2_ROW_LEN_INT64(nCols);
   size_t row_len_bytes = FIO___LYRA2_ROW_LEN_BYTES(nCols);
 
-  /* Overflow check */
-  if (nRows > (SIZE_MAX / row_len_bytes))
+  /* Matrix size must fit size_t */
+  if (nRows > ((size_t)-1 / row_len_bytes))
     return -1;
-
-  /* Single allocation for entire matrix (no separate row pointer array) */
   size_t matrix_bytes = (size_t)nRows * row_len_bytes;
-  uint64_t *wholeMatrix = (uint64_t *)FIO_MEM_REALLOC(NULL, 0, matrix_bytes, 0);
-  if (!wholeMatrix)
-    return -1;
 
   /* ======================== Padding (pwd || salt || params) =============== */
   /* params = kLen || pwdlen || saltlen || timeCost || nRows || nCols
@@ -463,6 +472,19 @@ SFUNC int fio_lyra2_hash FIO_NOOP(void *K, fio_lyra2_args_s args) {
       ((uint64_t)saltlen + (uint64_t)pwdlen + 6 * sizeof(unsigned int)) /
           FIO___LYRA2_BLAKE2_SAFE_BYTES +
       1;
+  /* The padded input is staged in the matrix buffer. The reference silently
+   * overflows when it doesn't fit - grow the buffer instead (the result is
+   * well defined, as absorption doesn't depend on the matrix size). */
+  if (nBlocksInput > ((size_t)-1 / FIO___LYRA2_BLAKE2_SAFE_BYTES))
+    return -1;
+  size_t alloc_bytes = (size_t)nBlocksInput * FIO___LYRA2_BLAKE2_SAFE_BYTES;
+  if (alloc_bytes < matrix_bytes)
+    alloc_bytes = matrix_bytes;
+
+  /* Single allocation for entire matrix (no separate row pointer array) */
+  uint64_t *wholeMatrix = (uint64_t *)FIO_MEM_REALLOC(NULL, 0, alloc_bytes, 0);
+  if (!wholeMatrix)
+    return -1;
 
   /* Write into beginning of wholeMatrix */
   unsigned char *ptrByte = (unsigned char *)wholeMatrix;
@@ -578,8 +600,8 @@ SFUNC int fio_lyra2_hash FIO_NOOP(void *K, fio_lyra2_args_s args) {
   }
 
   /* ======================== Cleanup ====================================== */
-  fio_secure_zero(wholeMatrix, matrix_bytes);
-  FIO_MEM_FREE(wholeMatrix, matrix_bytes);
+  fio_secure_zero(wholeMatrix, alloc_bytes);
+  FIO_MEM_FREE(wholeMatrix, alloc_bytes);
   fio_secure_zero(state, sizeof(state));
 
   return 0;
@@ -588,7 +610,7 @@ SFUNC int fio_lyra2_hash FIO_NOOP(void *K, fio_lyra2_args_s args) {
 void fio_lyra2___(void); /* IDE Marker */
 /** Computes Lyra2 password hash, returning result as fio_u512. */
 SFUNC fio_u512 fio_lyra2 FIO_NOOP(fio_lyra2_args_s args) {
-  fio_u512 result = {0};
+  fio_u512 result = {0}; /* stays all-zero on error */
   size_t outlen = args.outlen ? args.outlen : 32;
   if (outlen > 64)
     outlen = 64;

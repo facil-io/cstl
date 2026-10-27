@@ -124,13 +124,16 @@ SFUNC int fio_io_pid(void);
 /** Returns the root / master process id. */
 SFUNC int fio_io_root_pid(void);
 
-/** Returns the last millisecond when the IO reactor polled for events. */
+/** Returns the last millisecond when the IO reactor polled for events.
+ *
+ * While the reactor is stopped, returns the current (monotonic) time. */
 SFUNC int64_t fio_io_last_tick(void);
 
 /** Returns a cached real-time (wall-clock) timestamp in milliseconds,
  * updated each IO tick alongside `fio_io_last_tick`. Use this to avoid
  * repeated `clock_gettime` syscalls when an approximate wall-clock ms is
- * sufficient (e.g., HTTP Date headers, access-log timestamps). */
+ * sufficient (e.g., HTTP Date headers, access-log timestamps). While the
+ * reactor is stopped, returns the current time. */
 SFUNC int64_t fio_io_last_tick_time(void);
 
 /* *****************************************************************************
@@ -165,7 +168,7 @@ typedef struct fio_io_listen_args_s {
   fio_io_protocol_s *protocol;
   /** The default `udata` set for (new) incoming connections. */
   void *udata;
-  /** TLS object used for incoming connections (ownership moved to listener). */
+  /** TLS settings; the call owns this reference on success and failure. */
   fio_io_tls_s *tls;
   /**
    * Called when the a listening socket starts to listen.
@@ -195,6 +198,14 @@ typedef struct fio_io_listener_s fio_io_listener_s;
  * Sets up a network service on a listening socket.
  *
  * Returns a self-destructible listener handle on success or NULL on error.
+ * The call releases its `.tls` reference before returning, on every path.
+ * Pass `fio_io_tls_dup(tls)` to keep your own reference.
+ *
+ * TLS is a must when requested: if a TLS object is in effect (`.tls` or TLS
+ * URL scheme / hints) and `build_context` returns NULL (e.g., a missing
+ * certificate file), no listener is created and NULL is returned. As with a
+ * failed bind, `on_stop` (if any) is called so the caller can release
+ * `protocol` / `udata` state.
  *
  * NOTE: this schedules a task and should NOT be called within a PRE_START or
  * ON_START state callback.
@@ -238,10 +249,23 @@ typedef struct {
   void (*on_failed)(fio_io_protocol_s *protocol, void *udata);
   /** Opaque user data (set only once connection was established). */
   void *udata;
-  /** TLS builder object for TLS connections. */
+  /** TLS builder object for TLS connections (ownership moved to the call). */
   fio_io_tls_s *tls;
   /** Connection timeout in milliseconds (defaults to 30 seconds). */
   uint32_t timeout;
+  /**
+   * Opt-in peer verification for TLS connections.
+   *
+   * When set and the connection uses TLS, a TLS object without any trust
+   * entries gets the system trust store (same as `?trust=sys` or
+   * `fio_io_tls_trust_add(tls, NULL)`). Explicit trust entries are kept.
+   *
+   * Like URL TLS hints, this updates the `tls` object (if any), which callers
+   * keeping a `fio_io_tls_dup` reference will see.
+   *
+   * Ignored for non-TLS connections (the scheme is never changed).
+   */
+  uint8_t verify;
 } fio_io_connect_args_s;
 
 /**
@@ -255,12 +279,17 @@ typedef struct {
  * performed only from `on_failed` (connection never established) or
  * `on_close` (established connection closed) - never in response to
  * `fio_io_connect` returning `NULL`, as the reactor retains the connecting
- * state until the deferred failure task runs.
+ * state until the deferred failure task runs. `tls` ownership moves too (it
+ * is released before the call returns; `fio_io_tls_dup` to keep it).
  *
  * `on_failed` always runs on the IO thread and may fire asynchronously,
  * after `fio_io_connect` returns (including when `NULL` is returned). This
  * implies the reactor MUST run at some point after a call, or the
  * transferred ownership is never released.
+ *
+ * TLS is a must when requested: if a TLS object is in effect (`.tls` or TLS
+ * URL scheme / hints) and `build_context` returns NULL, no socket is opened,
+ * NULL is returned and `on_failed` runs (as above).
  * */
 SFUNC fio_io_s *fio_io_connect(fio_io_connect_args_s args);
 
@@ -275,7 +304,8 @@ SFUNC fio_io_s *fio_io_connect(fio_io_connect_args_s args);
  * performed only from `on_failed` (connection never established) or
  * `on_close` (established connection closed) - never in response to
  * `fio_io_connect` returning `NULL`, as the reactor retains the connecting
- * state until the deferred failure task runs.
+ * state until the deferred failure task runs. `tls` ownership moves too (it
+ * is released before the call returns; `fio_io_tls_dup` to keep it).
  *
  * `on_failed` always runs on the IO thread and may fire asynchronously,
  * after `fio_io_connect` returns (including when `NULL` is returned). This
@@ -295,6 +325,7 @@ IO Operations
  * * `fd` should point to a valid socket.
  *
  * * `protocol` may be the existing protocol or NULL (for partial hijack).
+ *   With NULL, `tls` must come from the default TLS backend.
  *
  * * `udata` is opaque user data and may be any value, including NULL.
  *
@@ -304,10 +335,17 @@ IO Operations
  * Returns NULL on error. the `fio_io_s` pointer must NOT be used except
  * within proper callbacks.
  *
- * Ownership of `tls` transfers to the reactor when `fio_io_attach_fd` is
- * called, whether the call succeeds or fails - callers must not use or free
- * it afterwards. On failure the reactor releases it with the TLS
- * implementation's `free_context` (never the per-connection `cleanup`).
+ * `tls` is a context reference returned by the TLS implementation's
+ * `build_context` or `dup_context`. Ownership of `fd` and `tls` transfers to
+ * the reactor whether the call succeeds or fails - callers must not use or
+ * free either afterwards (`dup_context` first to keep a reference).
+ *
+ * On success, the IO owns the reference: `start` may replace it with
+ * per-connection state (`fio_io_tls_set`) that takes over the reference, and
+ * `cleanup` releases whatever `tls` the IO holds once it closes. On failure
+ * (allocation failure or the socket can't be made non-blocking) a valid `fd`
+ * is closed, `tls` is released with `free_context` and the protocol's
+ * `on_close` is scheduled.
  */
 SFUNC fio_io_s *fio_io_attach_fd(fio_socket_i fd,
                                  fio_io_protocol_s *protocol,
@@ -550,12 +588,45 @@ defer any `fd` related actions to later.
  * simply return -1. */
 
 struct fio_io_functions_s {
-  /** Helper that converts a `fio_io_tls_s` into the implementation's context.
+  /**
+   * Helper that converts a `fio_io_tls_s` into the implementation's context.
+   * `tls` is valid during this callback; retain a `fio_io_tls_dup` reference
+   * if the built context needs it afterward.
+   *
+   * When `tls` is non-NULL, these functions are a TLS variant (set by the
+   * user, or by the reactor's protocol validation when TLS is given), and
+   * returning NULL means the TLS context couldn't be built: `fio_io_listen` /
+   * `fio_io_connect` then fail (they never continue without TLS).
    */
   void *(*build_context)(fio_io_tls_s *tls, uint8_t is_client);
-  /** Helper to free the context built by build_context. */
+  /**
+   * Helper to free (release) a context reference returned by `build_context`
+   * or `dup_context`.
+   *
+   * May be called while connections started from the context are still
+   * active (e.g., a stopped listener). Implementations MUST keep any context
+   * state those connections use alive until their `cleanup` (e.g., by
+   * reference counting).
+   */
   void (*free_context)(void *context);
-  /** called when a new IO is first attached to a valid protocol. */
+  /**
+   * Returns a new reference to a context (`build_context` / `dup_context`
+   * result), released with `free_context`. May return NULL (e.g., for a NULL
+   * plaintext context, or when no reference can be shared).
+   *
+   * Listeners pass the result to every accepted connection as is
+   * (`fio_io_attach_fd` takes ownership); `start` handles a NULL context (the
+   * bundled TLS backends close such connections). Defaults to returning NULL.
+   */
+  void *(*dup_context)(void *context);
+  /**
+   * Called when a new IO is first attached to a valid protocol.
+   *
+   * The IO owns its `tls` context reference (see `fio_io_attach_fd`). If
+   * `start` replaces it (`fio_io_tls_set`), the new value takes over that
+   * reference (e.g., per-connection state keeping its parent context alive),
+   * or `start` releases it.
+   */
   void (*start)(fio_io_s *io);
   /** Called to perform a non-blocking `read`, same as the system call. */
   ssize_t (*read)(fio_socket_i fd, void *buf, size_t len, void *context);
@@ -587,7 +658,11 @@ struct fio_io_functions_s {
    * means all done.
    */
   int (*flush)(fio_socket_i fd, void *context);
-  /** Called when the IO object finished sending all data before closure. */
+  /**
+   * Called once on graceful closure, after `flush` returned `0` (all output
+   * sent). Output it adds (e.g., TLS close_notify) is flushed before the IO
+   * closes; the wait is bounded by the connection timeout.
+   */
   void (*finish)(fio_socket_i fd, void *context);
   /** Called after the IO object is closed, used to cleanup its `tls` object. */
   void (*cleanup)(void *context);
@@ -815,6 +890,13 @@ SFUNC void fio_io_tls_free(fio_io_tls_s *);
  * NOTE: Except for the `tls` and `server_name` arguments, all arguments might
  * be `NULL`, which a context builder (`fio_io_functions_s`) should
  * treat as a request for a self-signed certificate. It may be silently ignored.
+ *
+ * Servers with several certificates select one per handshake by the client's
+ * SNI: case-insensitive exact match, then a single-label wildcard
+ * (`*.example.com`). No SNI, an unknown or a malformed name selects the
+ * default: the certificate added with an empty / `NULL` server name, else the
+ * first one added. Names are stored lowercased (max 255 bytes); re-adding a
+ * name replaces its entry.
  */
 SFUNC fio_io_tls_s *fio_io_tls_cert_add(fio_io_tls_s *,
                                         const char *server_name,
@@ -894,6 +976,9 @@ SFUNC uintptr_t fio_io_tls_alpn_count(fio_io_tls_s *tls);
  *
  * This could be used when deciding if to disable peer verification or not.
  *
+ * A trust instruction that failed to store still counts (fail closed), and
+ * `fio_io_tls_each` then returns -1 when iterating trust entries.
+ *
  * If `fio_io_tls_trust_add` was never called, zero (0) is returned.
  */
 SFUNC uintptr_t fio_io_tls_trust_count(fio_io_tls_s *tls);
@@ -952,7 +1037,9 @@ struct fio_io_async_s {
   { 0 }
 
 /** Returns the current task queue associated with the IO Async Queue. */
-FIO_IFUNC fio_queue_s *fio_io_async_queue(fio_io_async_s *q) { return q->q; }
+FIO_IFUNC fio_queue_s *fio_io_async_queue(fio_io_async_s *q) {
+  return q->q; /* the IO thread re-routes it on start / stop */
+}
 
 /**
  * Attaches an IO Async Queue for use in multi-threaded (non IO) tasks.
@@ -967,7 +1054,8 @@ FIO_IFUNC fio_queue_s *fio_io_async_queue(fio_io_async_s *q) { return q->q; }
 SFUNC void fio_io_async_attach(fio_io_async_s *q, uint32_t threads);
 
 /** Pushes a task to an IO Async Queue (macro helper). */
-#define fio_io_async(q_, ...) fio_queue_push((q_)->q, __VA_ARGS__)
+#define fio_io_async(q_, ...)                                                  \
+  fio_queue_push(fio_io_async_queue(q_), __VA_ARGS__)
 
 /** Schedules a timer bound task for the async queue (`fio_timer_schedule`). */
 SFUNC void fio_io_async_every(fio_io_async_s *q, fio_timer_schedule_args_s);

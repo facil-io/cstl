@@ -28,7 +28,10 @@ Works with little endian uint64_t arrays or 64 bit numbers.
 /**
  * Multi-precision DIV for `len*64` bit long a, b.
  *
- * This is NOT constant time.
+ * This is NOT constant time - use only with public values.
+ *
+ * Supports up to 1024 words (65,536 bits); longer lengths, like division by
+ * zero, log an error and fill `dest` and `reminder` with `0xFF` bytes.
  *
  * The algorithm might be slow, as my math isn't that good and I couldn't
  * understand faster division algorithms (such as Newton–Raphson division)... so
@@ -40,19 +43,33 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
                             const uint64_t *b,
                             const size_t number_array_length);
 
-/** Multi-precision shift right for `len` word number `n`. */
+/**
+ * Multi-precision shift right for `len` word number `n`.
+ *
+ * `dest` and `n` must be the same buffer or not overlap. Shifts of `len * 64`
+ * bits or more zero `dest`.
+ */
 FIO_IFUNC void fio_math_shr(uint64_t *dest,
                             uint64_t *n,
                             const size_t right_shift_bits,
                             size_t number_array_length);
 
-/** Multi-precision shift left for `len*64` bit number `n`. */
+/**
+ * Multi-precision shift left for `len*64` bit number `n`.
+ *
+ * `dest` and `n` must be the same buffer or not overlap. Shifts of `len * 64`
+ * bits or more zero `dest`.
+ */
 FIO_IFUNC void fio_math_shl(uint64_t *dest,
                             uint64_t *n,
                             const size_t left_shift_bits,
                             const size_t number_array_length);
 
-/** Multi-precision Inverse for `len*64` bit number `n` (turn `1` into `-1`). */
+/**
+ * Multi-precision Inverse for `len*64` bit number `n` (turn `1` into `-1`).
+ *
+ * `dest` and `n` must be the same buffer or not overlap.
+ */
 FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
 
 /** Multi-precision - returns the index for the most significant bit or -1. */
@@ -65,12 +82,15 @@ FIO_MIFN size_t fio_math_lsb_index(uint64_t *n, const size_t len);
 Multi-precision, little endian helpers. Works with full uint64_t arrays.
 ***************************************************************************** */
 
+/** Maximum word count supported by `fio_math_div` (65,536 bit numbers). */
+#define FIO___MATH_DIV_MAX_WORDS 1024
+
 /** Multi-precision Inverse for `bits` number `n`. */
 FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, const size_t len) {
   uint64_t c = 1;
   for (size_t i = 0; i < len; ++i) {
-    uint64_t tmp = ~n[i] + c;
-    c = (tmp ^ n[i]) >> 63;
+    const uint64_t tmp = ~n[i] + c;
+    c &= (uint64_t)fio_ct_false(tmp); /* carry only past a zero result word */
     dest[i] = tmp;
   }
 }
@@ -79,30 +99,22 @@ FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, const size_t len) {
 FIO_IFUNC void fio_math_shr(uint64_t *dest,
                             uint64_t *n,
                             size_t bits,
-                            size_t len) {
-  const size_t offset = len - (bits >> 6);
-  bits &= 63;
-  // FIO_LOG_DEBUG("Shift Light of %zu bytes and %zu
-  // bits", len - offset, bits);
-  uint64_t c = 0, trash;
-  uint64_t *p_select[] = {dest + offset, &trash};
-  if (bits) {
-    while (len--) {
-      --p_select[0];
-      uint64_t ntmp = n[len];
-      uint64_t ctmp = (ntmp << (64 - bits));
-      dest[len] &= (uint64_t)0ULL - (len < offset);
-      p_select[p_select[0] < dest][0] = ((ntmp >> bits) | c);
-      c = ctmp;
-    }
+                            const size_t len) {
+  if (!len || !n || !dest)
     return;
+  const size_t offset = bits >> 6;
+  size_t i = 0;
+  if (offset < len) {
+    const size_t last = len - 1 - offset; /* last destination word with data */
+    bits &= 63;
+    /* ascending order: reads never trail writes, so `dest == n` is safe */
+    for (; i < last; ++i)
+      dest[i] =
+          (n[i + offset] >> bits) | ((n[i + offset + 1] << (63 - bits)) << 1);
+    dest[i++] = n[len - 1] >> bits;
   }
-  while (len--) {
-    --p_select[0];
-    uint64_t ntmp = n[len];
-    dest[len] &= (uint64_t)0ULL - (len < offset);
-    p_select[p_select[0] < dest][0] = ntmp;
-  }
+  for (; i < len; ++i)
+    dest[i] = 0;
 }
 
 /** Multi-precision shift left for `bits` number `n`. */
@@ -112,31 +124,18 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
                             const size_t len) {
   if (!len || !n || !dest)
     return;
-  /* Handle zero shift: just copy */
-  if (!bits) {
-    FIO_MEMCPY(dest, n, sizeof(uint64_t) * len);
-    return;
-  }
   const size_t offset = bits >> 6;
-  bits &= 63;
-  uint64_t c = 0, trash;
-  uint64_t *p_select[] = {dest + offset, &trash};
-  if (bits) {
-    for (size_t i = 0; i < len; (++i), ++p_select[0]) {
-      uint64_t ntmp = n[i];
-      uint64_t ctmp = (ntmp >> (64 - bits)) & ((uint64_t)0ULL - (!!bits));
-      ;
-      dest[i] &= (uint64_t)0ULL - (i >= offset);
-      p_select[p_select[0] >= (dest + len)][0] = ((ntmp << bits) | c);
-      c = ctmp;
-    }
-    return;
+  size_t i = len;
+  if (offset < len) {
+    bits &= 63;
+    /* descending order: reads never trail writes, so `dest == n` is safe */
+    for (i = len - 1; i > offset; --i)
+      dest[i] =
+          (n[i - offset] << bits) | ((n[i - offset - 1] >> (63 - bits)) >> 1);
+    dest[i] = n[0] << bits;
   }
-  for (size_t i = 0; i < len; (++i), ++p_select[0]) {
-    uint64_t ntmp = n[i];
-    dest[i] &= (uint64_t)0ULL - (i >= offset);
-    p_select[p_select[0] >= (dest + len)][0] = ntmp;
-  }
+  while (i--)
+    dest[i] = 0;
 }
 
 /** Multi-precision - returns the index for the most
@@ -185,10 +184,17 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
     return;
 
   /* Get MSB index of divisor (returns (size_t)-1 if zero) */
-  const size_t b_msb = fio_math_msb_index((uint64_t *)b, len);
+  const size_t b_msb = (len > FIO___MATH_DIV_MAX_WORDS)
+                           ? (size_t)-1
+                           : fio_math_msb_index((uint64_t *)b, len);
   if (b_msb == (size_t)-1) {
-    /* Division by zero */
-    FIO_LOG_ERROR("divide by zero!");
+    /* Division by zero or unsupported length (bounds stack scratch) */
+    if (len > FIO___MATH_DIV_MAX_WORDS)
+      FIO_LOG_ERROR("fio_math_div length %zu exceeds %zu words (65536 bits)",
+                    (size_t)len,
+                    (size_t)FIO___MATH_DIV_MAX_WORDS);
+    else
+      FIO_LOG_ERROR("divide by zero!");
     if (dest)
       FIO_MEMSET(dest, 0xFF, sizeof(uint64_t) * len);
     if (remainder)
@@ -201,12 +207,9 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
   uint64_t r[len];
   uint64_t q[len];
 #else
-  uint64_t t[1024];
-  uint64_t r[1024];
-  uint64_t q[1024];
-  FIO_ASSERT(
-      len <= 1024,
-      "Multi Precision DIV (fio_math_div) overflows at 32768 bit numbers");
+  uint64_t t[FIO___MATH_DIV_MAX_WORDS];
+  uint64_t r[FIO___MATH_DIV_MAX_WORDS];
+  uint64_t q[FIO___MATH_DIV_MAX_WORDS];
 #endif
 
   /* Initialize: r = a (remainder starts as dividend), q = 0 */
@@ -262,5 +265,6 @@ FIO_IFUNC void fio_math_div(uint64_t *dest,
 /* *****************************************************************************
 Math - cleanup
 ***************************************************************************** */
+#undef FIO___MATH_DIV_MAX_WORDS
 #endif /* FIO_MATH */
 #undef FIO_MATH

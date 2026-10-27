@@ -238,7 +238,7 @@ endef
 #   <folder>/<path/name>  - build and run a specific unit
 #   tmp/<folder>/<path/name> - the actual binary target
 define DEFINE_FOLDER
-$(1)_SOURCES := $(filter-out $(TEST_EXCLUDE),$(shell find $(1) -name "*.c" -type f 2>/dev/null | sort | sed 's/ /\\ /g'))
+$(1)_SOURCES := $(filter-out $(TEST_EXCLUDE),$(shell find $(1) -name "*.c" -type f ! -path "* *" 2>/dev/null | sort))
 $(1)_BINS    := $$($(1)_SOURCES:%.c=$(BUILD_DIR)/%)
 $(1)_RUNS    := $$($(1)_SOURCES:$(1)/%.c=$(1)/%)
 
@@ -293,7 +293,48 @@ ifneq ($(filter asan/% %/asan ub/% %/ub tsan/% %/tsan,$(MAKECMDGOALS)),)
 TEST_EXCLUDE += tests/openssl.c
 endif
 
-$(foreach folder,$(TEST_DIR) $(EXAMPLES_DIR) extras benchmarks stress tests-old ai-tmp,$(eval $(call DEFINE_FOLDER,$(folder))))
+# Code generators (not unit tests): build with `make tmp/tests/generators/<n>`
+# and run the binary directly; see each file's header comment.
+TEST_EXCLUDE += $(wildcard $(TEST_DIR)/generators/*.c)
+
+############################################################################-
+# Split FIO_EXTERN build: tests/extern-split/{impl,main}.c are two translation
+# units (implementation + declarations-only) linked into a single program.
+# Missing prototypes / implicit declarations are errors. Runs with `make tests`.
+############################################################################-
+
+EXTERN_SPLIT_DIR    := $(TEST_DIR)/extern-split
+EXTERN_SPLIT_SRC    := $(wildcard $(EXTERN_SPLIT_DIR)/*.c)
+EXTERN_SPLIT_OBJ    := $(EXTERN_SPLIT_SRC:%.c=$(BUILD_DIR)/%.o)
+EXTERN_SPLIT_BIN    := $(BUILD_DIR)/$(EXTERN_SPLIT_DIR)/extern-split
+EXTERN_SPLIT_CFLAGS := -Werror=missing-prototypes \
+                       -Werror=implicit-function-declaration
+TEST_EXCLUDE += $(EXTERN_SPLIT_SRC)
+
+.PHONY: $(EXTERN_SPLIT_DIR)
+
+$(BUILD_DIR)/$(EXTERN_SPLIT_DIR)/%.o: $(EXTERN_SPLIT_DIR)/%.c FORCE
+	@mkdir -p $(dir $@)
+	@echo "* Compiling $<"
+	@$(CC) $(CFLAGS) $(FLAGS) $(EXTERN_SPLIT_CFLAGS) -c -o $@ $<
+
+$(EXTERN_SPLIT_BIN): $(EXTERN_SPLIT_OBJ)
+	@echo "* Linking $@"
+	@$(CC) $(CFLAGS) $(FLAGS) -o $@ $^ $(LDFLAGS)
+
+$(EXTERN_SPLIT_DIR): $(EXTERN_SPLIT_BIN)
+	@echo "Running $@"
+	@echo "=================================="
+	@$(EXTERN_SPLIT_BIN)
+
+$(foreach folder,$(TEST_DIR) $(EXAMPLES_DIR) extras benchmarks stress tests-old,$(eval $(call DEFINE_FOLDER,$(folder))))
+# `ai-tmp` is large scratch space (snapshots, logs); scan it only when targeted
+ifneq ($(findstring ai-tmp,$(MAKECMDGOALS)),)
+$(eval $(call DEFINE_FOLDER,ai-tmp))
+endif
+
+# the folder rule only sees single-file units; add the split build to `tests`
+$(TEST_DIR): $(EXTERN_SPLIT_DIR)
 
 # `make test` is a convenience alias for `make tests`
 test: tests;

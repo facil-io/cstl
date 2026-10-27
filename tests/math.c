@@ -502,8 +502,8 @@ FIO_SFUNC int fio___test_math_helpers(void) {
                "fio_math_subc64(0ULL, ~(uint64_t)0ULL, "
                "1ULL, &c) failed "
                "(%llu, %llu)",
-               a,
-               c);
+               (unsigned long long)a,
+               (unsigned long long)c);
     a = fio_math_subc64(0ULL, 1ULL, 0ULL, &c);
     FIO_ASSERT(a == ~(uint64_t)0ULL && c == 1,
                "fio_math_subc64(0ULL, 1ULL, 0ULL, &c) failed");
@@ -538,6 +538,81 @@ FIO_SFUNC int fio___test_math_helpers(void) {
       }
     }
   }
+  { /* Shift / inverse: whole-word, oversized and exact in-place cases */
+    for (size_t len = 1; len <= 6; ++len) {
+      for (size_t bits = 0; bits <= len * 64 + 70; ++bits) {
+        uint64_t n[8], o1[8], o2[8], inplace[8];
+        for (size_t i = 0; i < len; ++i)
+          n[i] = fio_rand64() | 1 | ((uint64_t)1 << 63);
+        /* reference: bitwise */
+        for (int dir = 0; dir < 2; ++dir) {
+          FIO_MEMSET(o2, 0, sizeof(o2));
+          for (size_t b = 0; b < len * 64; ++b) {
+            size_t src = dir ? b - bits : b + bits; /* dir: 1 = shl */
+            if ((dir && b < bits) || (!dir && src >= len * 64))
+              continue;
+            o2[b >> 6] |= ((n[src >> 6] >> (src & 63)) & 1) << (b & 63);
+          }
+          FIO_MEMCPY(inplace, n, sizeof(n));
+          o1[len] = 0xA5A5A5A5A5A5A5A5ULL; /* canary */
+          if (dir) {
+            fio_math_shl(o1, n, bits, len);
+            fio_math_shl(inplace, inplace, bits, len);
+          } else {
+            fio_math_shr(o1, n, bits, len);
+            fio_math_shr(inplace, inplace, bits, len);
+          }
+          FIO_ASSERT(!memcmp(o1, o2, len * 8) && !memcmp(inplace, o2, len * 8),
+                     "fio_math_sh%c failed (len %zu, bits %zu)",
+                     (dir ? 'l' : 'r'),
+                     len,
+                     bits);
+          FIO_ASSERT(o1[len] == 0xA5A5A5A5A5A5A5A5ULL,
+                     "fio_math_sh%c overflowed (len %zu, bits %zu)",
+                     (dir ? 'l' : 'r'),
+                     len,
+                     bits);
+        }
+      }
+      { /* inverse: n + (-n) == 0, also in-place and with carry chains */
+        uint64_t n[8], neg[8], sum[8];
+        for (size_t k = 0; k < 4; ++k) {
+          for (size_t i = 0; i < len; ++i)
+            n[i] = (k & 1) ? fio_rand64() : 0;
+          n[len - 1] |= (k == 0); /* {0,...,0,1} */
+          if (k == 2)
+            n[0] = 1;
+          fio_math_inv(neg, n, len);
+          bool ignr_ = fio_math_add(sum, n, neg, len);
+          (void)ignr_;
+          for (size_t i = 0; i < len; ++i)
+            FIO_ASSERT(!sum[i], "fio_math_inv failed (len %zu, k %zu)", len, k);
+          fio_math_inv(n, n, len); /* in-place */
+          FIO_ASSERT(!memcmp(n, neg, len * 8),
+                     "fio_math_inv in-place failed (len %zu)",
+                     len);
+        }
+      }
+    }
+    { /* {1, 0} -> {-1, -1} */
+      uint64_t n[2] = {1, 0};
+      fio_math_inv(n, n, 2);
+      FIO_ASSERT(n[0] == UINT64_MAX && n[1] == UINT64_MAX,
+                 "fio_math_inv carry propagation failed");
+    }
+    { /* oversized division length is rejected before stack scratch use */
+      static uint64_t a[1025], b[1025], q[1025], r[1025];
+      a[0] = 7;
+      b[0] = 2;
+      fio_math_div(q, r, a, b, 1025);
+      FIO_ASSERT(q[0] == UINT64_MAX && q[1024] == UINT64_MAX &&
+                     r[0] == UINT64_MAX && r[1024] == UINT64_MAX,
+                 "fio_math_div should reject lengths above 1024 words");
+      fio_math_div(q, r, a, b, 1024);
+      FIO_ASSERT(q[0] == 3 && r[0] == 1 && !q[1023] && !r[1023],
+                 "fio_math_div 1024 words failed");
+    }
+  }
   { /* Test bit shifting */
     uint64_t a[] = {0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0};
     uint64_t b[] = {0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF, 1};
@@ -545,21 +620,21 @@ FIO_SFUNC int fio___test_math_helpers(void) {
     fio_math_shl(c, a, 1, 3);
     FIO_ASSERT(!memcmp(b, c, sizeof(c)),
                "left shift failed, %llX:%llX:%llX",
-               c[0],
-               c[1],
-               c[2]);
+               (unsigned long long)c[0],
+               (unsigned long long)c[1],
+               (unsigned long long)c[2]);
     fio_math_shr(c, c, 1, 3);
     FIO_ASSERT(!memcmp(a, c, sizeof(c)),
                "right shift failed, %llX:%llX:%llX",
-               c[0],
-               c[1],
-               c[2]);
+               (unsigned long long)c[0],
+               (unsigned long long)c[1],
+               (unsigned long long)c[2]);
     fio_math_shl(c, a, 128, 3);
     FIO_ASSERT(!c[0] && !c[1] && !(~c[2]),
                "left shift failed, %llX:%llX:%llX",
-               c[0],
-               c[1],
-               c[2]);
+               (unsigned long long)c[0],
+               (unsigned long long)c[1],
+               (unsigned long long)c[2]);
     FIO_ASSERT(fio_math_msb_index(a, 3) == 127,
                "fio_math_msb_index(a) failed %zu",
                fio_math_msb_index(a, 3));

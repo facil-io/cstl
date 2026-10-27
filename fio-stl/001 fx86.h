@@ -428,24 +428,17 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_srli_epi64(fio_fx86_m128i a, int imm8) {
 FIO_IFUNC fio_fx86_m128i fio_fx86_shuffle_epi32(fio_fx86_m128i a, int imm8) {
   uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE2__)
-  switch (n) {
-  case 0x0E: return _mm_shuffle_epi32(a, 0x0E);
-  case 0x1B: return _mm_shuffle_epi32(a, 0x1B);
-  case 0xAA: return _mm_shuffle_epi32(a, 0xAA);
-  case 0xB1: return _mm_shuffle_epi32(a, 0xB1);
-  case 0xFF: return _mm_shuffle_epi32(a, 0xFF);
-  default: {
-    uint32_t in[4], out[4];
-    fio_fx86_m128i r = {0};
-    fio_memcpy16(in, &a);
-    out[0] = in[(n >> 0) & 3];
-    out[1] = in[(n >> 2) & 3];
-    out[2] = in[(n >> 4) & 3];
-    out[3] = in[(n >> 6) & 3];
-    fio_memcpy16(&r, out);
-    return r;
-  }
-  }
+  /* No native dispatch: gcc 15 miscompiles immediate shuffles >= 0x80 picked
+   * by a switch (the inlined caller becomes unreachable). */
+  uint32_t in[4], out[4];
+  fio_fx86_m128i r = {0};
+  fio_memcpy16(in, &a);
+  out[0] = in[(n >> 0) & 3];
+  out[1] = in[(n >> 2) & 3];
+  out[2] = in[(n >> 4) & 3];
+  out[3] = in[(n >> 6) & 3];
+  fio_memcpy16(&r, out);
+  return r;
 #else
   fio_fx86_m128i r = {0};
   r.u32[0] = a.u32[(n >> 0) & 3];
@@ -666,19 +659,16 @@ FIO_IFUNC fio_fx86_m128i fio_fx86_blend_epi16(fio_fx86_m128i a,
                                               int imm8) {
   uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SSE4_1__)
-  switch (n) {
-  case 0xF0: return _mm_blend_epi16(a, b, 0xF0);
-  default: {
-    uint16_t va[8], vb[8], out[8];
-    fio_fx86_m128i r = {0};
-    fio_memcpy16(va, &a);
-    fio_memcpy16(vb, &b);
-    for (int i = 0; i < 8; ++i)
-      out[i] = ((n >> i) & 1U) ? vb[i] : va[i];
-    fio_memcpy16(&r, out);
-    return r;
-  }
-  }
+  /* No native dispatch: gcc 15 miscompiles immediate shuffles >= 0x80 picked
+   * by a switch (the inlined caller becomes unreachable). */
+  uint16_t va[8], vb[8], out[8];
+  fio_fx86_m128i r = {0};
+  fio_memcpy16(va, &a);
+  fio_memcpy16(vb, &b);
+  for (int i = 0; i < 8; ++i)
+    out[i] = ((n >> i) & 1U) ? vb[i] : va[i];
+  fio_memcpy16(&r, out);
+  return r;
 #else
   fio_u128 ua = fio___fx86_to_u128(a);
   fio_u128 ub = fio___fx86_to_u128(b);
@@ -1829,21 +1819,17 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_permute4x64_epi64(fio_fx86_m256i a,
                                                         int imm8) {
   uint8_t const n = (uint8_t)imm8;
 #if defined(FIO___HAS_X86_INTRIN) && defined(__AVX2__)
-  switch (n) {
-  case 0x4E: return _mm256_permute4x64_epi64(a, 0x4E);
-  case 0xD8: return _mm256_permute4x64_epi64(a, 0xD8);
-  default: {
-    uint64_t in[4], out[4];
-    fio_fx86_m256i r = {0};
-    fio_memcpy32(in, &a);
-    out[0] = in[(n >> 0) & 3];
-    out[1] = in[(n >> 2) & 3];
-    out[2] = in[(n >> 4) & 3];
-    out[3] = in[(n >> 6) & 3];
-    fio_memcpy32(&r, out);
-    return r;
-  }
-  }
+  /* No native dispatch: gcc 15 miscompiles immediate shuffles >= 0x80 picked
+   * by a switch (the inlined caller becomes unreachable). */
+  uint64_t in[4], out[4];
+  fio_fx86_m256i r = {0};
+  fio_memcpy32(in, &a);
+  out[0] = in[(n >> 0) & 3];
+  out[1] = in[(n >> 2) & 3];
+  out[2] = in[(n >> 4) & 3];
+  out[3] = in[(n >> 6) & 3];
+  fio_memcpy32(&r, out);
+  return r;
 #else
   fio_u256 ua = fio___fx86_to_u256(a);
   fio_u256 r = {0};
@@ -1944,23 +1930,22 @@ These operate on fio_fx86_m256i (4 x 64-bit lanes).
 /**
  * _mm256_sha512rnds2_epi64: perform 2 rounds of SHA-512.
  *
- * State layout: state0 = {a, b, c, d}, state1 = {e, f, g, h}
- * wk contains W[i]+K[i] in the low 128 bits (2 x 64-bit).
+ * dst holds {C,D,G,H}, src holds {A,B,E,F} (high to low lanes).
+ * wk contains W[i]+K[i] in its two 64-bit lanes.
  */
-FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i state1,
-                                                        fio_fx86_m256i state0,
-                                                        fio_fx86_m256i wk) {
+FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i dst,
+                                                        fio_fx86_m256i src,
+                                                        fio_fx86_m128i wk) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
-  return _mm256_sha512rnds2_epi64(state1, state0, wk);
+  return _mm256_sha512rnds2_epi64(dst, src, wk);
 #else
-  fio_u256 us0 = fio___fx86_to_u256(state0);
-  fio_u256 us1 = fio___fx86_to_u256(state1);
-  fio_u256 uwk = fio___fx86_to_u256(wk);
-  /* Extract state: state0 = {a, b, c, d}, state1 = {e, f, g, h} */
-  uint64_t a = us0.u64[3], b = us0.u64[2];
-  uint64_t c = us0.u64[1], d = us0.u64[0];
-  uint64_t e = us1.u64[3], f = us1.u64[2];
-  uint64_t g = us1.u64[1], h = us1.u64[0];
+  fio_u256 us0 = fio___fx86_to_u256(dst);
+  fio_u256 us1 = fio___fx86_to_u256(src);
+  fio_u128 uwk = fio___fx86_to_u128(wk);
+  uint64_t a = us1.u64[3], b = us1.u64[2];
+  uint64_t c = us0.u64[3], d = us0.u64[2];
+  uint64_t e = us1.u64[1], f = us1.u64[0];
+  uint64_t g = us0.u64[1], h = us0.u64[0];
 
   for (int i = 0; i < 2; ++i) {
     uint64_t wi = uwk.u64[i]; /* W[i] + K[i] already combined */
@@ -1989,12 +1974,12 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i state1,
     a = t1 + t2;
   }
 
-  /* Return updated state1 = {e, f, g, h} */
+  /* Return updated {A,B,E,F}. */
   fio_u256 r = {0};
-  r.u64[3] = e;
-  r.u64[2] = f;
-  r.u64[1] = g;
-  r.u64[0] = h;
+  r.u64[3] = a;
+  r.u64[2] = b;
+  r.u64[1] = e;
+  r.u64[0] = f;
   return fio___fx86_from_u256(r);
 #endif
 }
@@ -2008,12 +1993,12 @@ FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i state1,
  * where the sigma0 inputs come from {w0[1], w0[2], w0[3], w1[0]}.
  */
 FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512msg1_epi64(fio_fx86_m256i w0,
-                                                       fio_fx86_m256i w1) {
+                                                       fio_fx86_m128i w1) {
 #if defined(FIO___HAS_X86_INTRIN) && defined(__SHA512__)
   return _mm256_sha512msg1_epi64(w0, w1);
 #else
   fio_u256 uw0 = fio___fx86_to_u256(w0);
-  fio_u256 uw1 = fio___fx86_to_u256(w1);
+  fio_u128 uw1 = fio___fx86_to_u128(w1);
   fio_u256 r = {0};
   /* sigma0 inputs: {w0[1], w0[2], w0[3], w1[0]} */
   uint64_t src[4] = {uw0.u64[1], uw0.u64[2], uw0.u64[3], uw1.u64[0]};

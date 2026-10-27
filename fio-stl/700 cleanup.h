@@ -65,7 +65,9 @@ Recursive inclusion / cleanup
 /* recursive include statement */
 #undef FIO___INCLUDE_AGAIN
 #include FIO_INCLUDE_FILE
-#else
+#elif !defined(FIO___RECURSIVE_INCLUDE)
+/* final (outermost) pass only: a nested type include must not drop the
+ * temporary FIO_EXTERN / FIO_EXTERN_COMPLETE for the rest of the TU */
 #ifdef FIO_EVERYTHING___REMOVE_EXTERN
 #undef FIO_EXTERN
 #undef FIO_EVERYTHING___REMOVE_EXTERN

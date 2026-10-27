@@ -103,8 +103,9 @@ thread pool for CPU-heavy or blocking work that must not block the IO loop.
 **Docs:** [./405 openssl.md](./405 openssl.md) · [./405 tls13.md](./405 tls13.md) *(planned)*
 
 TLS is plugged into the reactor through `fio_io_functions_s` — a set of
-transport callbacks (`build_context`, `free_context`, `start`, `read`, `write`,
-`flush`, `finish`, `cleanup`) that replace the default socket calls.
+transport callbacks (`build_context`, `free_context`, `dup_context`, `start`,
+`read`, `write`, `flush`, `finish`, `cleanup`) that replace the default socket
+calls.
 
 The `fio_io_tls_s` context carries certificates, ALPN negotiation entries, and
 trusted CA chains. It is built from `fio_io_tls_new()` / `fio_io_tls_cert_add()`
@@ -114,6 +115,12 @@ URL query string:
 ```c
 fio_io_listen(.url = "0.0.0.0:443/?tls=./certs/", .protocol = &my_proto);
 ```
+
+Ownership moves with the data: `fio_io_listen` / `fio_io_connect` take (and
+free) the `.tls` object they are given (`fio_io_tls_dup` to keep one), and
+`fio_io_attach_fd` takes its built `tls` context reference, on success or
+failure. A listener passes each accepted connection its own
+`dup_context` reference.
 
 Two backends are available — OpenSSL 3.x (`fio_openssl_io_functions()`) and
 the native TLS 1.3 engine (`fio_tls13_io_functions()`). The default is

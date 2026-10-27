@@ -83,7 +83,25 @@ static void test_upload(FIOBJ up,
              "upload headers mismatch");
 }
 
+static void test_json_spilled_body(void) {
+  static const char *const tokens[] = {"12345678901234567", "1.25", "0x123", "0b101", "-42"};
+  for (size_t i = 0; i < sizeof(tokens) / sizeof(*tokens); ++i) {
+    fio_http_s *h = test_make(NULL, "application/json", NULL, 0);
+    fio_data_init(&h->body, 1); /* force a file-backed, exact-length body */
+    size_t len = strlen(tokens[i]);
+    fio_http_body_write(h, tokens[i], len);
+    FIO_ASSERT(fio_data_fd(&h->body) != -1, "body must spill");
+    fio_http_params_parse_result_s r = fio___http_body_parse_json(
+        h, &FIO___HTTP_FIOBJ_CALLBACKS, NULL);
+    FIO_ASSERT(!r.err && r.consumed == len && r.result,
+               "spilled JSON numeric root failed");
+    fiobj_free((FIOBJ)r.result);
+    fio_http_free(h);
+  }
+}
+
 int main(void) {
+  test_json_spilled_body();
   fprintf(stderr, "Testing HTTP params => FIOBJ bridge:\n");
   fprintf(stderr, "  * query values are Strings\n");
   test_expect("query",

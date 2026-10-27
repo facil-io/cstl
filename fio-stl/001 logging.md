@@ -30,6 +30,8 @@ Heap-allocation-free logging macros and assertion utilities. `FIO_LOG2STDERR` an
 
 Sets the application-wide logging level. Returns the new level.
 
+**Note**: the level is a plain shared `int` (`FIO_LOG_LEVEL`), not an atomic variable. Set it before starting logging threads, or externally synchronize changes with all readers, including log macro calls. Concurrent logging with an unchanged level does not require a level lock. The setter does not coordinate threads or guarantee which messages a runtime level change will include.
+
 ### `FIO_LOG_LEVEL_GET`
 
 ```c
@@ -63,11 +65,14 @@ Output destination for all logging. Define it before including `./fio-stl.h` to 
 #define FIO_LOG_LENGTH_LIMIT 1024
 ```
 
-Log buffer size. Keep this above `128`.
+Compile-time stack-buffer budget; default `1024`. Values below `3` or above `INT_MAX - 66` are rejected. Keep the value small enough for each logging thread's stack; the upper check prevents arithmetic overflow, not stack exhaustion. Values above `128` are recommended.
 
-- When `FIO_LOG_LENGTH_LIMIT > 128`, the formatted message is limited to `FIO_LOG_LENGTH_LIMIT - 34` bytes, followed by a 32-byte truncation warning.
-- When `FIO_LOG_LENGTH_LIMIT <= 128`, `vsnprintf` is capped at `FIO_LOG_LENGTH_LIMIT - 2` bytes; the truncation warning is appended afterward.
-- Values `<= 2` are dangerous: the `vsnprintf` size argument underflows/overflows.
+`vsnprintf` receives a capacity of `FIO_LOG_LENGTH_LIMIT - 2`, including its terminating NUL. A message requiring at least that many bytes is truncated:
+
+- Above `128`, keep the first `FIO_LOG_LENGTH_LIMIT - 34` message bytes and append a 32-byte truncation warning.
+- From `3` through `128`, keep the first `FIO_LOG_LENGTH_LIMIT - 3` message bytes and append the same warning, without a gap or embedded formatter NUL.
+
+Shorter messages remain intact. Every successful formatting result ends with an added newline, including an empty message. The stack buffer occupies `FIO_LOG_LENGTH_LIMIT + 32` bytes above `128`, or `FIO_LOG_LENGTH_LIMIT + 66` bytes otherwise.
 
 ## Core Logging Function
 
@@ -77,7 +82,13 @@ Log buffer size. Keep this above `128`.
 void FIO_LOG2STDERR(const char *format, ...);
 ```
 
-`printf`-style output to `FIO_STDERR_FILE` using only stack-allocated memory. Truncation follows the two `FIO_LOG_LENGTH_LIMIT` paths described above. In `./fio-stl/001 logging.h` the name is `#undef`-ed before the `static` function definition, so a pre-include macro is removed and a post-inclusion function definition would conflict. Override it after inclusion only by defining `FIO_LOG2STDERR` as a macro.
+`printf`-style output to `FIO_STDERR_FILE` using only stack-allocated memory. Truncation follows the two `FIO_LOG_LENGTH_LIMIT` paths described above. The function returns no status and preserves entry `errno`, including when formatting or output fails. A negative formatter result attempts to print `ERROR: log formatting error.` instead.
+
+Output is best-effort: the function makes one `fwrite` attempt per call, does not retry short or failed writes, and does not flush the stream. The stream owner can inspect `ferror(FIO_STDERR_FILE)` and check `fflush` when delivery matters. This is a diagnostic logger, not a durable audit-record API. Keep the destination stream alive and synchronize any replacement with writers.
+
+**Note**: this is a raw formatted-byte sink. It preserves deliberate newlines and ANSI styling. Use trusted format strings and matching `printf` arguments; pass untrusted text as data, never as the format. Escape untrusted fields at the caller boundary when they must not contain terminal controls or forge log records. `%s` alone does not escape them.
+
+In `./fio-stl/001 logging.h` the name is `#undef`-ed before the `static` function definition, so a pre-include macro is removed and a post-inclusion function definition would conflict. Override it after inclusion only by defining `FIO_LOG2STDERR` as a macro.
 
 ## Log Macros
 

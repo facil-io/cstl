@@ -17,7 +17,7 @@ A thread-safe task queue built from linked ring buffers, plus a timer queue that
 #define FIO_QUEUE_TASKS_PER_ALLOC 168 /* 338 on 32-bit */
 ```
 
-Tasks per ring-buffer chunk. Default is chosen so `fio_queue_s` fits in one page. Must not exceed 65535.
+Tasks per ring-buffer chunk. The default sizes each heap-allocated chunk to fit a 4 KiB page (4048 bytes on 64-bit, 4068 on 32-bit systems). `fio_queue_s` embeds one chunk plus its own fields, so it is somewhat larger than a page. Must not exceed 65535.
 
 ---
 
@@ -277,6 +277,8 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
 ```
 
 Moves all due timer events into `queue`. Pass `0` for `now_in_milliseconds` to use `fio_time_milli()`.
+
+If `queue` cannot grow (no memory), the remaining due events stay scheduled and are moved by a later call; none is dropped.
 
 **Returns:** number of timers pushed.
 

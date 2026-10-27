@@ -232,6 +232,58 @@ FIO_SFUNC void FIO_NAME_TEST(stl, lyra2_null_out)(void) {
   FIO_ASSERT(rc == -1, "fio_lyra2_hash should reject NULL output buffer");
 }
 
+/* Security regressions: inputs longer than the matrix and 32-bit narrowing. */
+FIO_SFUNC void FIO_NAME_TEST(stl, lyra2_limits)(void) {
+  static char pwd[320];
+  uint8_t out[3][32 + 8];
+  uint8_t zero[64] = {0};
+  FIO_MEMSET(pwd, 'a', sizeof(pwd));
+  /* 3x1 matrix = 288 bytes; padded input fits up to 231 bytes, 232+ doesn't */
+  const size_t lens[3] = {231, 232, 300};
+  for (size_t i = 0; i < 3; ++i) {
+    uint8_t again[32];
+    FIO_MEMSET(out[i], 0xA5, sizeof(out[i]));
+    FIO_ASSERT(!fio_lyra2_hash(out[i],
+                               .password = FIO_BUF_INFO2(pwd, lens[i]),
+                               .m_cost = 3,
+                               .n_cols = 1),
+               "Lyra2 should accept input longer than the matrix (%zu)",
+               lens[i]);
+    for (size_t j = 32; j < sizeof(out[i]); ++j)
+      FIO_ASSERT(out[i][j] == 0xA5, "Lyra2 wrote past outlen");
+    FIO_ASSERT(!fio_lyra2_hash(again,
+                               .password = FIO_BUF_INFO2(pwd, lens[i]),
+                               .m_cost = 3,
+                               .n_cols = 1),
+               "Lyra2 long input repeat failed");
+    FIO_ASSERT(!FIO_MEMCMP(again, out[i], 32),
+               "Lyra2 long input should be deterministic");
+  }
+  FIO_ASSERT(FIO_MEMCMP(out[0], out[1], 32) && FIO_MEMCMP(out[1], out[2], 32),
+             "Lyra2 long inputs should differ");
+
+  /* values above 2^32-1 are rejected (never truncated); out left untouched */
+  uint8_t o[64] = {0};
+  const uint64_t big = (uint64_t)1 << 32;
+  FIO_ASSERT(fio_lyra2_hash(o, .m_cost = big) == -1, "m_cost 2^32 accepted");
+  FIO_ASSERT(fio_lyra2_hash(o, .t_cost = big) == -1, "t_cost 2^32 accepted");
+  FIO_ASSERT(fio_lyra2_hash(o, .m_cost = 0xFFFFFFFFULL, .n_cols = 0xFFFFFFFFUL) ==
+                 -1,
+             "Lyra2 matrix beyond the address space accepted");
+  if ((size_t)-1 > 0xFFFFFFFFUL) { /* size_t fields: 64-bit only */
+    const size_t sbig = (size_t)big;
+    FIO_ASSERT(fio_lyra2_hash(o, .n_cols = sbig) == -1, "n_cols 2^32 accepted");
+    FIO_ASSERT(fio_lyra2_hash(o, .outlen = sbig) == -1, "outlen 2^32 accepted");
+    FIO_ASSERT(fio_lyra2_hash(o, .password = FIO_BUF_INFO2(pwd, sbig)) == -1,
+               "password length 2^32 accepted");
+    FIO_ASSERT(fio_lyra2_hash(o, .salt = FIO_BUF_INFO2(pwd, sbig)) == -1,
+               "salt length 2^32 accepted");
+  }
+  FIO_ASSERT(!FIO_MEMCMP(o, zero, 64), "Lyra2 wrote output on error");
+  fio_u512 r = fio_lyra2(.m_cost = (uint64_t)1 << 40);
+  FIO_ASSERT(!FIO_MEMCMP(r.u8, zero, 64), "fio_lyra2 error should be zeros");
+}
+
 int main(void) {
   FIO_NAME_TEST(stl, lyra2_basic)();
   FIO_NAME_TEST(stl, lyra2_determinism)();
@@ -242,5 +294,6 @@ int main(void) {
   FIO_NAME_TEST(stl, lyra2_long_output_determinism)();
   FIO_NAME_TEST(stl, lyra2_empty_pwd_salt)();
   FIO_NAME_TEST(stl, lyra2_null_out)();
+  FIO_NAME_TEST(stl, lyra2_limits)();
   return 0;
 }

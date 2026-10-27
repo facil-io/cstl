@@ -865,6 +865,51 @@ static void test_table_header_only(void) {
               g_event_count);
 }
 
+static void test_table_column_limit(void) {
+  fprintf(stderr, "test_table_column_limit\n");
+  const size_t counts[] = {
+      FIO_GFM_MAX_TABLE_COLUMNS, FIO_GFM_MAX_TABLE_COLUMNS + 1, 4096};
+  for (size_t t = 0; t < sizeof(counts) / sizeof(*counts); ++t) {
+    const size_t columns = counts[t];
+    const size_t len = columns * 4 + 2;
+    char *src = malloc(len);
+    TEST_ASSERT(src != NULL, "column-limit input allocation");
+    if (!src)
+      return;
+    size_t n = 0;
+    for (size_t i = 0; i < columns; ++i) {
+      src[n++] = 'x';
+      src[n++] = '|';
+    }
+    src[n++] = '\n';
+    for (size_t i = 0; i < columns; ++i) {
+      src[n++] = '-';
+      src[n++] = '|';
+    }
+    src[n++] = '\n';
+    reset_events();
+    size_t consumed = fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2(src, len));
+    TEST_ASSERT(consumed == len,
+                "%zu columns consumed fully, got %zu/%zu",
+                columns,
+                consumed,
+                len);
+    TEST_ASSERT(g_event_count > 0, "%zu columns emitted events", columns);
+    if (g_event_count > 0) {
+      const uint8_t expected = columns <= FIO_GFM_MAX_TABLE_COLUMNS
+                                   ? FIO_GFM_TABLE
+                                   : FIO_GFM_PARAGRAPH;
+      TEST_ASSERT(g_events[0].kind == 0 && g_events[0].type == expected,
+                  "%zu columns start with event type %d, got kind %d type %d",
+                  columns,
+                  expected,
+                  g_events[0].kind,
+                  g_events[0].type);
+    }
+    free(src);
+  }
+}
+
 /* ── slice 9: references ── */
 
 static void test_ref_def_basic(void) {
@@ -1091,6 +1136,48 @@ static void test_inline_nested_emphasis(void) {
   TEST_ASSERT(found_em && found_strong, "*** = emphasis + strong");
 }
 
+static void test_entity_exact_windows(void) {
+  fprintf(stderr, "test_entity_exact_windows\n");
+  static const struct {
+    const char *src;
+    const char *expected;
+  } cases[] = {{"&#1", "&#1"},
+               {"&#x", "&#x"},
+               {"&#x0", "&#x0"},
+               {"&#x41", "&#x41"},
+               {"&#1_", "&#1_"},
+               {"&#65;", "A"},
+               {"&#x41;", "A"},
+               {"&FrAc14;", "\xC2\xBC"},
+               {"&#6_0;", "&#6_0;"},
+               {"&#x0x3c;", "&#x0x3c;"},
+               {"&#55296;", "\xEF\xBF\xBD"}};
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    size_t len = strlen(cases[i].src);
+    char *exact = malloc(len);
+    FIO_ASSERT(exact, "exact entity input allocation failed");
+    FIO_MEMCPY(exact, cases[i].src, len);
+    reset_events();
+    size_t consumed = fio_gfm_parse(&test_cb, NULL, FIO_BUF_INFO2(exact, len));
+    TEST_ASSERT(consumed == len, "entity source fully consumed");
+    char text[64] = {0};
+    size_t written = 0;
+    for (int j = 0; j < g_event_count; ++j) {
+      if (g_events[j].kind != 1 || g_events[j].type != FIO_GFM_TEXT)
+        continue;
+      size_t n = g_events[j].text_len;
+      FIO_ASSERT(n < sizeof(text) - written, "unexpected entity event size");
+      FIO_MEMCPY(text + written, g_events[j].text_buf, n);
+      written += n;
+    }
+    TEST_ASSERT(written == strlen(cases[i].expected) &&
+                    !memcmp(text, cases[i].expected, written),
+                "exact entity text mismatch for %s",
+                cases[i].src);
+    free(exact);
+  }
+}
+
 /* ── main ── */
 
 int main(void) {
@@ -1143,6 +1230,7 @@ int main(void) {
   test_table_closes_on_blank();
   test_table_breaks_on_blockquote();
   test_table_header_only();
+  test_table_column_limit();
   test_ref_def_basic();
   test_ref_def_case_insensitive();
   test_ref_def_unicode_case_insensitive();
@@ -1159,6 +1247,7 @@ int main(void) {
   test_inline_autolink();
   test_inline_strikethrough();
   test_inline_nested_emphasis();
+  test_entity_exact_windows();
   fprintf(stderr, "\n%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

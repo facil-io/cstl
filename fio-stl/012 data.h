@@ -68,6 +68,10 @@ typedef struct {
   size_t limit;
   /** Once spilled: bytes mapped (if `map == 1`) or read buffer capacity. */
   size_t capa;
+  /** Heap read buffer window: file offset of the bytes held in `buf`. */
+  size_t woff;
+  /** Heap read buffer window: file bytes held in `buf` (0 = none). */
+  size_t wlen;
   /** Temporary file descriptor (-1 while the data is in RAM). */
   int fd;
   /** Sticky error flag (set when a write fails; cleared by destroy). */
@@ -79,8 +83,8 @@ typedef struct {
 /** Initializes a `fio_data_s` using the default RAM limit. */
 #define FIO_DATA_INIT                                                          \
   {                                                                            \
-    .buf = NULL, .len = 0, .pos = 0, .limit = 0, .capa = 0, .fd = -1,          \
-    .err = 0, .map = 0                                                         \
+    .buf = NULL, .len = 0, .pos = 0, .limit = 0, .capa = 0, .woff = 0,         \
+    .wlen = 0, .fd = -1, .err = 0, .map = 0                                    \
   }
 
 /* *****************************************************************************
@@ -140,7 +144,8 @@ SFUNC size_t fio_data_seek(fio_data_s *d, ssize_t pos);
  *
  * Use `(size_t)-1` to read all the remaining data. Once spilled, data is read
  * through a memory mapping of the temporary file; if mapping isn't available,
- * through a heap buffer of the requested size.
+ * through a heap buffer of (at least) the requested size, which remembers the
+ * file range it holds: overlapping reads only read the bytes not yet held.
  *
  * If that buffer can't be allocated, or the file returns fewer bytes than
  * requested (a short read: an I/O error or a file truncated by someone else;
@@ -173,8 +178,9 @@ SFUNC fio_str_info_s fio_data_read_until(fio_data_s *d,
  * Prepares for `len` more bytes: reserves RAM, or moves the data to a
  * temporary file early if the expected size crosses the RAM limit.
  *
- * This is only a hint: if no temporary file can be created, the data stays in
- * RAM (no error state is set; a later write past the limit will fail).
+ * This is only a hint: if RAM can't be reserved or no temporary file can be
+ * created, the data stays intact and no error state is set. A later write
+ * retries the allocation or spill and reports failure if it can't proceed.
  */
 SFUNC void fio_data_expect(fio_data_s *d, size_t len);
 
@@ -182,10 +188,11 @@ SFUNC void fio_data_expect(fio_data_s *d, size_t len);
  * Appends `len` bytes from `data`, spilling to a temporary file once the RAM
  * limit would be exceeded.
  *
- * Returns 0 on success or -1 on error. Failed file writes are retried for as
- * long as they make progress; after two consecutive attempts that store
- * nothing, the store enters a (sticky) error state: only the data actually
- * stored is kept (`fio_data_len`) and all later writes fail (see
+ * Returns 0 on success or -1 on error. RAM allocation failure keeps the
+ * previous data intact and enters the sticky error state. Failed file writes
+ * are retried while they make progress; after two consecutive attempts that
+ * store nothing, the store enters a (sticky) error state: only the data
+ * actually stored is kept (`fio_data_len`) and all later writes fail (see
  * `fio_data_is_error`). RAM never grows past the RAM limit.
  */
 SFUNC int fio_data_write(fio_data_s *d, const void *data, size_t len);
@@ -260,17 +267,22 @@ FIO_IFUNC size_t fio___data_limit(fio_data_s *d) {
  * its content.
  *
  * Grows geometrically, up to `max` bytes. `total` MUST NOT exceed
- * `FIO___DATA_RAM_MAX`. Aborts on allocation failure.
+ * `FIO___DATA_RAM_MAX`. Returns -1 on allocation failure, keeping the
+ * original buffer and any shared references intact.
  */
-FIO_SFUNC void fio___data_reserve(fio_data_s *d, size_t total, size_t max) {
+FIO_SFUNC int fio___data_reserve(fio_data_s *d, size_t total, size_t max) {
   fio_str_info_s i = fio_bstr_info(d->buf);
   if (d->buf && total < i.capa) /* (a shared buffer reports capa 1: COW) */
-    return;
+    return 0;
   size_t grow = i.capa + (i.capa >> 1);
   if (grow > total && grow <= max)
     total = grow;
-  FIO_ASSERT_ALLOC(!fio_bstr_reallocate(&i, total) ? i.buf : NULL);
+  if (fio_bstr_reallocate(&i, total)) {
+    errno = ENOMEM;
+    return -1;
+  }
   d->buf = fio_bstr_len_set(i.buf, i.len);
+  return 0;
 }
 
 /** Enters the (sticky) error state. Always returns -1. */
@@ -281,6 +293,7 @@ FIO_SFUNC int fio___data_set_error(fio_data_s *d, const char *what) {
                 errno,
                 strerror(errno),
                 d->len);
+  (void)what; /* logging may be compiled out */
   return -1;
 }
 
@@ -322,13 +335,15 @@ FIO_SFUNC void fio___data_release_view(fio_data_s *d) {
     FIO_MEM_FREE_(d->buf, d->capa);
   d->buf = NULL;
   d->capa = 0;
+  d->wlen = 0;
   d->map = FIO___DATA_MAP_NONE;
 }
 
-/** Invalidates the mapping (if any) before a write changes the file. */
+/** Invalidates the mapping / read window before a write changes the file. */
 FIO_IFUNC void fio___data_unmap(fio_data_s *d) {
   if (d->map == FIO___DATA_MAP_ON)
     fio___data_release_view(d);
+  d->wlen = 0; /* (conservative: appends don't change buffered bytes) */
   d->map = FIO___DATA_MAP_NONE; /* a write gives mapping another chance */
 }
 
@@ -375,6 +390,7 @@ FIO_SFUNC int fio___data_heap_reserve(fio_data_s *d, size_t want, size_t keep) {
     FIO_MEM_FREE_(d->buf, d->capa);
     d->buf = NULL;
     d->capa = 0;
+    d->wlen = 0;
   }
   void *tmp = FIO___DATA_REALLOC(d->buf, d->capa, want, keep);
   if (!tmp) {
@@ -418,6 +434,40 @@ FIO_SFUNC int fio___data_fd_read(fio_data_s *d,
 }
 
 /**
+ * Loads the file bytes [at, at + len) to the heap read buffer, returning a
+ * pointer to them (NULL on error, see `fio___data_heap_reserve` and
+ * `fio___data_fd_read`). `at + len` MUST NOT exceed `d->len`.
+ *
+ * The buffer remembers the file range it holds (`woff`, `wlen`): bytes
+ * already held are reused, never read again. If the range is held, a pointer
+ * into the buffer is returned; otherwise any held bytes at `at` are moved to
+ * the buffer's start and only the missing bytes are read. If the buffer must
+ * grow, it grows to `grow` (`>= len`) bytes. On error the window stays valid.
+ */
+FIO_SFUNC char *fio___data_heap_load(fio_data_s *d,
+                                     size_t at,
+                                     size_t len,
+                                     size_t grow) {
+  size_t keep = 0;
+  if (at >= d->woff && at - d->woff < d->wlen) {
+    size_t ofs = at - d->woff;
+    keep = d->wlen - ofs;
+    if (keep >= len)
+      return d->buf + ofs;
+    if (ofs)
+      FIO_MEMMOVE(d->buf, d->buf + ofs, keep);
+  }
+  d->woff = at;
+  d->wlen = keep;
+  if (d->capa < len && fio___data_heap_reserve(d, grow, keep))
+    return NULL;
+  if (fio___data_fd_read(d, d->buf + keep, len - keep, at + keep))
+    return NULL;
+  d->wlen = len;
+  return d->buf;
+}
+
+/**
  * Reads up to `len` bytes at `at` (`at < d->len`) to the heap read buffer.
  *
  * Returns an empty result if the buffer can't be allocated or on a short read.
@@ -428,10 +478,9 @@ FIO_SFUNC fio_str_info_s fio___data_heap_read(fio_data_s *d,
   fio_str_info_s r = {0};
   if (len > d->len - at)
     len = d->len - at;
-  if (fio___data_heap_reserve(d, len, 0) ||
-      fio___data_fd_read(d, d->buf, len, at))
-    return r;
-  r = FIO_STR_INFO2(d->buf, len);
+  char *p = fio___data_heap_load(d, at, len, len);
+  if (p)
+    r = FIO_STR_INFO2(p, len);
   return r;
 }
 
@@ -456,7 +505,7 @@ FIO_SFUNC int fio___data_move2fd(fio_data_s *d) {
   }
   fio_bstr_free(d->buf);
   d->buf = NULL;
-  d->capa = 0;
+  d->capa = d->wlen = 0;
   d->map = FIO___DATA_MAP_NONE;
   d->fd = fd;
   return 0;
@@ -488,7 +537,7 @@ SFUNC void fio_data_destroy(fio_data_s *d) {
     close(d->fd);
   }
   d->buf = NULL;
-  d->len = d->pos = d->capa = 0;
+  d->len = d->pos = d->capa = d->woff = d->wlen = 0;
   d->fd = -1;
   d->err = 0;
   d->map = FIO___DATA_MAP_NONE;
@@ -533,32 +582,38 @@ SFUNC fio_str_info_s fio_data_read_until(fio_data_s *d,
     char *end = (char *)FIO_MEMCHR(r.buf, token, limit);
     if (end)
       r.len = (size_t)(end + 1 - r.buf);
-  } else { /* heap: single pass, read blocks, scan each new block once */
+  } else { /* heap: load blocks (reusing the window), scan new bytes once */
+    size_t scanned = 0;
     for (;;) {
-      size_t want = limit - r.len;
-      if (want > (size_t)FIO_DATA_READ_BLOCK)
-        want = (size_t)FIO_DATA_READ_BLOCK;
-      if (d->capa < r.len + want) {
-        size_t grow = d->capa + (d->capa >> 1);
-        if (grow < r.len + want)
-          grow = r.len + want;
-        if (grow > limit)
-          grow = limit;
-        if (fio___data_heap_reserve(d, grow, r.len))
-          return (fio_str_info_s){0}; /* `pos` unchanged */
-      }
-      if (fio___data_fd_read(d, d->buf + r.len, want, d->pos + r.len))
+      size_t need = limit - scanned;
+      if (need > (size_t)FIO_DATA_READ_BLOCK)
+        need = (size_t)FIO_DATA_READ_BLOCK;
+      need += scanned;
+      if (d->pos >= d->woff && d->pos - d->woff < d->wlen &&
+          d->woff + d->wlen - d->pos > scanned) /* scan held bytes first */
+        need = d->woff + d->wlen - d->pos;
+      if (need > limit)
+        need = limit;
+      size_t grow = d->capa + (d->capa >> 1);
+      if (grow < need)
+        grow = need;
+      if (grow > limit)
+        grow = limit;
+      r.buf = fio___data_heap_load(d, d->pos, need, grow);
+      if (!r.buf)
         return (fio_str_info_s){0}; /* `pos` unchanged, errno kept */
-      char *end = (char *)FIO_MEMCHR(d->buf + r.len, token, want);
+      size_t have = d->woff + d->wlen - d->pos; /* all held bytes */
+      if (have > limit)
+        have = limit;
+      char *end = (char *)FIO_MEMCHR(r.buf + scanned, token, have - scanned);
       if (end) {
-        r.len = (size_t)(end + 1 - d->buf);
+        r.len = (size_t)(end + 1 - r.buf);
         break;
       }
-      r.len += want;
+      scanned = r.len = have;
       if (r.len >= limit)
         break;
     }
-    r.buf = d->buf;
   }
   d->pos += r.len;
   if (!r.len)
@@ -588,7 +643,8 @@ SFUNC int fio_data_write(fio_data_s *d, const void *data, size_t len) {
   if (d->fd == -1) {
     const size_t limit = fio___data_limit(d);
     if (d->len <= limit && len <= limit - d->len) { /* fits in RAM */
-      fio___data_reserve(d, d->len + len, limit);
+      if (fio___data_reserve(d, d->len + len, limit))
+        return fio___data_set_error(d, "couldn't grow RAM storage");
       FIO_MEMCPY(d->buf + d->len, data, len);
       d->len += len;
       d->buf = fio_bstr_len_set(d->buf, d->len);

@@ -64,10 +64,10 @@ SFUNC int fio_filename_is_unsafe_url(const char *path);
  *
  * The file is created in the folder named by the `TMPDIR`, `TMP` or `TEMP`
  * environment variables (or `P_tmpdir`, or the current folder) and is
- * anonymous: it has no name once this function returns (`O_TMPFILE`, or
- * unlinked right after it is opened on POSIX systems; delete-on-close
- * `O_TEMPORARY` on Windows). The file is removed when `fd` is closed (or the
- * process exits), so no temporary files are left behind.
+ * anonymous on POSIX when creation succeeds (`O_TMPFILE`, or unlinked right
+ * after opening). If unlink fails, closes the descriptor and returns -1 with
+ * the unlink error; the empty named file may remain. Windows uses delete-on-
+ * close `O_TEMPORARY` (the name may remain until close / process exit).
  */
 SFUNC int fio_filename_tmp(void);
 
@@ -90,10 +90,15 @@ typedef struct {
  *   content (like `rm -r`). If `path` isn't a folder, the `recursive` flag
  *   is ignored and `path` is removed as a file / link.
  *
- * Links are removed, never followed into.
+ * Links at the final component and within the removed tree are removed, never
+ * followed into, including paths with trailing separators. Parent components
+ * use normal OS path resolution: this is not a path confinement API. Concurrent
+ * renames may cause failure; callers must control the containing directory if
+ * they require the entry itself to remain fixed.
  *
- * Uses a fixed size stack buffer (zero allocations); over-long paths fail
- * with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
+ * Uses a fixed size path buffer; over-long paths fail with
+ * `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`). Directory enumeration
+ * uses OS resources per depth (including libc's directory-stream buffers).
  *
  * Returns 0 on success and -1 on error. Recursive removal stops on the first
  * error (some content may remain).
@@ -136,11 +141,15 @@ SFUNC int fio_filename_make_path(fio_filename_make_path_args_s args);
  * The data is written to a new sibling file in the target's folder
  * (`<filename>.fio-tmp-<random>`, created with `O_CREAT | O_EXCL`, mode `0666`
  * minus the `umask`), flushed to storage (`fsync`) and renamed over
- * `filename` (`MoveFileExA` on Windows). Exactly one `fsync` (the file, not
- * the folder): a crash right after saving may leave the previous version.
+ * `filename` (`MoveFileExA` on Windows). Existing ownership, permissions, ACLs
+ * and extended attributes are not preserved; use only where new-file metadata
+ * is appropriate (including inherited permissions / ACLs).
+ * Exactly one `fsync` (the file, not the folder): a crash right after saving
+ * may leave the previous version.
  *
  * Returns -1 on error or 0 on success. On error, any existing `filename` is
- * left untouched, the sibling file is removed and `errno` is preserved.
+ * left untouched and `errno` is preserved from the primary error. Sibling
+ * cleanup is attempted; a filesystem or permission error can leave it behind.
  *
  * Uses fixed size stack buffers (zero allocations); over-long paths fail with
  * `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
@@ -548,7 +557,8 @@ SFUNC int fio_filename_tmp(void) {
     FIO_MEMCPY(name_template, tmp, len);
     len -= (tmp[len - 1] == sep || tmp[len - 1] == '/');
   } else {
-    /* use current folder */
+    /* use current folder (discard an overlong environment path length) */
+    len = 0;
     name_template[len++] = '.';
   }
 #ifdef O_TMPFILE
@@ -573,11 +583,16 @@ SFUNC int fio_filename_tmp(void) {
   } while (fd == -1 && errno == EEXIST);
 #if !FIO_OS_WIN
   /* POSIX: remove the name, the data lives until `fd` is closed. */
-  if (fd != -1 && unlink(name_template))
+  if (fd != -1 && unlink(name_template)) {
+    const int e = errno;
+    close(fd); /* never retry close (even EINTR may mean fd was released) */
     FIO_LOG_WARNING("fio_filename_tmp couldn't unlink %s (%d) %s",
                     name_template,
-                    errno,
-                    strerror(errno));
+                    e,
+                    strerror(e));
+    errno = e;
+    return -1;
+  }
 #endif
   return fd;
   (void)tmp;
@@ -588,20 +603,14 @@ Filename Removal Implementation
 ***************************************************************************** */
 
 #if FIO_OS_WIN
+FIO_SFUNC int fio___filename_win2errno(DWORD err);
+
 /** Removes a file / link (no flags) or an empty folder (`folder` flag). */
 FIO_SFUNC int fio___filename_remove_simple(const char *path, int folder) {
   if (folder)
     return RemoveDirectoryA(path) ? 0 : -1;
   return DeleteFileA(path) ? 0 : -1;
 }
-#else
-/** Removes a file / link (no flags) or an empty folder (`folder` flag). */
-FIO_SFUNC int fio___filename_remove_simple(const char *path, int folder) {
-  if (folder)
-    return rmdir(path);
-  return unlink(path);
-}
-#endif
 
 /**
  * Removes all content within the folder at `path` (not the folder itself).
@@ -612,9 +621,36 @@ FIO_SFUNC int fio___filename_remove_content(char *path,
                                             size_t len,
                                             size_t capa) {
   int r = -1;
-#if FIO_OS_WIN
   if (len + 3 >= capa) {
     errno = ENAMETOOLONG;
+    return -1;
+  }
+  /* Open the directory itself, not a reparse target. Deny write/delete
+   * sharing so it cannot become a reparse point or be replaced during descent.
+   */
+  HANDLE directory =
+      CreateFileA(path,
+                  FILE_READ_ATTRIBUTES,
+                  FILE_SHARE_READ,
+                  NULL,
+                  OPEN_EXISTING,
+                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                  NULL);
+  if (directory == INVALID_HANDLE_VALUE) {
+    errno = fio___filename_win2errno(GetLastError());
+    return -1;
+  }
+  BY_HANDLE_FILE_INFORMATION info;
+  if (!GetFileInformationByHandle(directory, &info)) {
+    int e = fio___filename_win2errno(GetLastError());
+    CloseHandle(directory);
+    errno = e;
+    return -1;
+  }
+  if (!(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ||
+      (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+    CloseHandle(directory);
+    errno = EACCES;
     return -1;
   }
   path[len] = FIO_FOLDER_SEPARATOR;
@@ -622,8 +658,13 @@ FIO_SFUNC int fio___filename_remove_content(char *path,
   path[len + 2] = 0;
   WIN32_FIND_DATAA fdata;
   HANDLE h = FindFirstFileA(path, &fdata);
-  if (h == INVALID_HANDLE_VALUE)
+  if (h == INVALID_HANDLE_VALUE) {
+    int e = fio___filename_win2errno(GetLastError());
+    CloseHandle(directory);
+    path[len] = 0;
+    errno = e;
     return -1;
+  }
   do {
     if (fdata.cFileName[0] == '.' &&
         (!fdata.cFileName[1] ||
@@ -641,56 +682,106 @@ FIO_SFUNC int fio___filename_remove_content(char *path,
       if (fio___filename_remove_content(path, len + 1 + name_len, capa))
         goto done;
       path[len + 1 + name_len] = 0;
-      if (!RemoveDirectoryA(path))
+      if (!RemoveDirectoryA(path)) {
+        errno = fio___filename_win2errno(GetLastError());
         goto done;
+      }
     } else if ((fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
                    ? !RemoveDirectoryA(
                          path) /* links are removed, not followed */
                    : !DeleteFileA(path)) {
+      errno = fio___filename_win2errno(GetLastError());
       goto done;
     }
   } while (FindNextFileA(h, &fdata));
+  if (GetLastError() != ERROR_NO_MORE_FILES) {
+    errno = fio___filename_win2errno(GetLastError());
+    goto done;
+  }
   r = 0;
-done:
+done:;
+  int e = errno;
   FindClose(h);
+  CloseHandle(directory);
   path[len] = 0;
+  errno = e;
   return r;
-#else
-  DIR *d = opendir(path);
-  if (!d)
+}
+#else /* POSIX: resolve each child relative to its held parent directory. */
+/** Removes one entry without following a link at that entry. */
+FIO_SFUNC int fio___filename_remove_at(int parent,
+                                       const char *name,
+                                       int folder,
+                                       int recursive,
+                                       size_t len) {
+  if (!folder && !recursive)
+    return unlinkat(parent, name, 0);
+  struct stat st;
+  if (fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW))
     return -1;
-  struct dirent *ent;
-  while ((ent = readdir(d))) {
+  if (!S_ISDIR(st.st_mode))
+    return unlinkat(parent, name, 0);
+  if (!recursive)
+    return unlinkat(parent, name, AT_REMOVEDIR);
+  int fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  if (fd == -1)
+    return -1;
+  DIR *d = fdopendir(fd); /* takes ownership of fd on success */
+  if (!d) {
+    int e = errno;
+    close(fd);
+    errno = e;
+    return -1;
+  }
+  int r = -1;
+  struct stat opened;
+  /* Reject a different directory substituted between the stat and open. */
+  if (fstat(fd, &opened))
+    goto done;
+  if (st.st_dev != opened.st_dev || st.st_ino != opened.st_ino) {
+    errno = EAGAIN;
+    goto done;
+  }
+  for (;;) {
+    errno = 0;
+    struct dirent *ent = readdir(d);
+    if (!ent) {
+      r = errno ? -1 : 0;
+      break;
+    }
     if (ent->d_name[0] == '.' &&
         (!ent->d_name[1] || (ent->d_name[1] == '.' && !ent->d_name[2])))
       continue;
-    const size_t name_len = FIO_STRLEN(ent->d_name);
-    if (len + 1 + name_len + 1 >= capa) {
+    const size_t n = FIO_STRLEN(ent->d_name);
+    if (len + 1 + n + 1 >= FIO_FILENAME_PATH_CAPA) {
       errno = ENAMETOOLONG;
       goto done;
     }
-    path[len] = FIO_FOLDER_SEPARATOR;
-    FIO_MEMCPY(path + len + 1, ent->d_name, name_len + 1);
-    struct stat stt;
-    if (lstat(path, &stt))
-      goto done;
-    if (S_ISDIR(stt.st_mode)) {
-      if (fio___filename_remove_content(path, len + 1 + name_len, capa))
+#if defined(DT_DIR) && defined(DT_UNKNOWN)
+    /* A type hint can skip metadata for leaves. unlinkat never descends, so
+     * replacement with a directory fails safely even if the hint is stale. */
+    if (ent->d_type != DT_DIR && ent->d_type != DT_UNKNOWN) {
+      if (unlinkat(fd, ent->d_name, 0))
         goto done;
-      path[len + 1 + name_len] = 0;
-      if (rmdir(path))
-        goto done;
-    } else if (unlink(path)) {
-      goto done;
+      continue;
     }
-  }
-  r = 0;
-done:
-  closedir(d);
-  path[len] = 0;
-  return r;
 #endif
+    if (fio___filename_remove_at(fd, ent->d_name, 1, 1, len + 1 + n))
+      goto done;
+  }
+done:;
+  int e = errno;
+  if (closedir(d) && !r) {
+    r = -1;
+    e = errno;
+  }
+  if (r) {
+    errno = e;
+    return -1;
+  }
+  return unlinkat(parent, name, AT_REMOVEDIR);
 }
+#endif /* FIO_OS_WIN */
 
 void fio_filename_remove___(void); /* IDE Marker */
 /** Removes the file / link or folder at `path` (see flags for details). */
@@ -699,40 +790,79 @@ SFUNC int fio_filename_remove FIO_NOOP(fio_filename_remove_args_s args) {
     errno = ENOENT;
     return -1;
   }
-  if (!args.recursive)
-    return fio___filename_remove_simple(args.path, (int)args.folder);
-  /* recursive removal (`rm -r` like) */
-  FIO_STR_INFO_TMP_VAR(buf, FIO_FILENAME_PATH_CAPA);
   size_t len = FIO_STRLEN(args.path);
-#if FIO_OS_WIN
-  DWORD attr = GetFileAttributesA(args.path);
-  if (attr == INVALID_FILE_ATTRIBUTES)
-    return -1;
-  if (!(attr & FILE_ATTRIBUTE_DIRECTORY) ||
-      (attr & FILE_ATTRIBUTE_REPARSE_POINT))
-    /* files and links (reparse points) are removed, never followed into */
-    return fio___filename_remove_simple(
-        args.path,
-        (int)(!!(attr & FILE_ATTRIBUTE_DIRECTORY)));
-#else
-  struct stat stt;
-  if (lstat(args.path, &stt))
-    return -1;
-  if (!S_ISDIR(stt.st_mode))
-    return fio___filename_remove_simple(args.path, 0);
+#if !FIO_OS_WIN
+  /* Ordinary unlink needs neither a path copy nor directory descriptors. */
+  if (!args.recursive && !args.folder && args.path[len - 1] != '/')
+    return unlink(args.path);
 #endif
-  /* trim trailing separators, so sub-paths use exactly one separator */
-  while (len > 1 && fio___filename_is_sep(args.path[len - 1]))
+  FIO_STR_INFO_TMP_VAR(buf, FIO_FILENAME_PATH_CAPA);
+  /* Normalize before any OS operation: lstat("link/") follows the link. */
+  while (len > 1 && fio___filename_is_sep(args.path[len - 1])) {
+#if FIO_OS_WIN
+    if (len == 3 && args.path[1] == ':')
+      break; /* preserve a drive root ("C:\\" is not "C:") */
+#endif
     --len;
+  }
   if (len + 3 >= buf.capa) {
     errno = ENAMETOOLONG;
     return -1;
   }
   FIO_MEMCPY(buf.buf, args.path, len);
   buf.buf[len] = 0;
+#if FIO_OS_WIN
+  DWORD attr = GetFileAttributesA(buf.buf);
+  if (attr == INVALID_FILE_ATTRIBUTES)
+    return -1;
+  if (!(attr & FILE_ATTRIBUTE_DIRECTORY) ||
+      (attr & FILE_ATTRIBUTE_REPARSE_POINT))
+    return fio___filename_remove_simple(
+        buf.buf,
+        (int)(!!(attr & FILE_ATTRIBUTE_DIRECTORY)));
+  if (!args.recursive)
+    return fio___filename_remove_simple(buf.buf, (int)args.folder);
   if (fio___filename_remove_content(buf.buf, len, buf.capa))
     return -1;
-  return fio___filename_remove_simple(args.path, 1);
+  return fio___filename_remove_simple(buf.buf, 1);
+#else
+  if (!args.recursive) {
+    if (!args.folder)
+      return unlink(buf.buf);
+    struct stat st;
+    if (lstat(buf.buf, &st))
+      return -1;
+    return S_ISLNK(st.st_mode) ? unlink(buf.buf) : rmdir(buf.buf);
+  }
+  /* Hold the parent even if its pathname is renamed during traversal. Parent
+   * components use normal OS resolution; this API is not a path sandbox. */
+  char *name = strrchr(buf.buf, '/');
+  const char *parent_path = ".";
+  if (name && name[1]) {
+    *name++ = 0;
+    parent_path = buf.buf[0] ? buf.buf : "/";
+  } else {
+    name = buf.buf; /* includes the root path "/" */
+  }
+#if defined(O_SEARCH)
+  int parent = open(parent_path, O_SEARCH | O_DIRECTORY);
+#elif defined(O_PATH)
+  int parent = open(parent_path, O_PATH | O_DIRECTORY);
+#else
+  int parent = open(parent_path, O_RDONLY | O_DIRECTORY);
+#endif
+  if (parent == -1)
+    return -1;
+  int r =
+      fio___filename_remove_at(parent, name, args.folder, args.recursive, len);
+  int e = errno;
+  if (close(parent) && !r) {
+    r = -1;
+    e = errno;
+  }
+  errno = e;
+  return r;
+#endif
 }
 
 #if FIO_OS_WIN
@@ -811,7 +941,7 @@ SFUNC int fio_filename_make_path FIO_NOOP(fio_filename_make_path_args_s args) {
   }
 #else
   while (start < len && fio___filename_is_sep(buf.buf[start]))
-    ++start; /* skip root separator(s) */
+    ++start;             /* skip root separator(s) */
 #endif
   if (start >= len)
     start = len - 1; /* nothing beyond the prefix: create / verify whole */
@@ -885,8 +1015,8 @@ FIO_SFUNC int fio___filename_copy_fd(int out, int in, size_t len) {
     size_t want = len - done;
     if (want > ((size_t)1 << 30))
       want = ((size_t)1 << 30);
-    ssize_t c = (ssize_t)
-        FIO___FILENAME_COPY_RANGE(in, &at_in, out, &at_out, want);
+    ssize_t c =
+        (ssize_t)FIO___FILENAME_COPY_RANGE(in, &at_in, out, &at_out, want);
     if (c > 0) {
       done += ((size_t)c > want) ? want : (size_t)c;
       continue;
@@ -955,9 +1085,10 @@ FIO_SFUNC int fio___filename_save(const char *filename,
 #endif
   int fd = -1;
   for (size_t i = 0; fd == -1 && i < 16; ++i) {
-    sibling.buf[rpos + fio_ltoa(sibling.buf + rpos,
-                                (int64_t)(fio_rand64() >> 1),
-                                32)] = 0;
+    sibling
+        .buf[rpos +
+             fio_ltoa(sibling.buf + rpos, (int64_t)(fio_rand64() >> 1), 32)] =
+        0;
     fd = open(sibling.buf, flags, mode);
     if (fd == -1 && errno != EEXIST)
       return -1;
@@ -987,7 +1118,11 @@ FIO_SFUNC int fio___filename_save(const char *filename,
   }
 #endif
   if (r) {
-    unlink(sibling.buf);
+    if (unlink(sibling.buf))
+      FIO_LOG_WARNING("file save couldn't remove sibling %s (%d) %s",
+                      sibling.buf,
+                      errno,
+                      strerror(errno));
     errno = e;
   }
   return r;
@@ -1011,7 +1146,7 @@ SFUNC int fio_fd_save(int fd, const char *filename, size_t len) {
 
 /** Parses a file name to folder, base name and extension (zero-copy). */
 SFUNC fio_filename_s fio_filename_parse(const char *filename) {
-  fio_filename_s r = {{0}};
+  fio_filename_s r = {.folder = {0}};
   if (!filename || !filename[0])
     return r;
   const char *pos = filename;
@@ -1059,8 +1194,8 @@ SFUNC fio_filename_s fio_filename_parse(const char *filename) {
 
 /** Parses a file name to folder, base name and extension (zero-copy). */
 SFUNC fio_filename_s fio_filename_parse2(const char *filename, size_t len) {
-  fio_filename_s r = {{0}};
-  if (!filename || !filename[0])
+  fio_filename_s r = {.folder = {0}};
+  if (!filename || !len || !filename[0])
     return r;
   const char *pos = filename;
   const char *end = filename + len;

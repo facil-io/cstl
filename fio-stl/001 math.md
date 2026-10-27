@@ -23,13 +23,13 @@ Each fits in the named unsigned type and has about half of its bits set (`3`–`
 uint64_t fio_math_mod_mul64(uint64_t a, uint64_t b, uint64_t mod);
 ```
 
-Computes `(a * b) % mod` without overflowing 64 bits. Uses `__uint128_t` when available; otherwise falls back to a double-and-add loop.
+Computes `(a * b) % mod` without overflowing 64 bits. Uses `__uint128_t` when available; otherwise falls back to an overflow-safe double-and-add loop. Returns `0` when `mod` is `0`.
 
 ```c
 uint64_t fio_math_mod_expo64(uint64_t base, uint64_t exp, uint64_t mod);
 ```
 
-Right-to-left binary modular exponentiation. Calls `fio_math_mod_mul64` for each set bit of `exp`.
+Right-to-left binary modular exponentiation. Calls `fio_math_mod_mul64` for each set bit of `exp`. Returns `0` when `mod` is `0` or `1`.
 
 ## Primality tests
 
@@ -38,7 +38,7 @@ bool fio_math_is_uprime(uint64_t n);
 bool fio_math_is_iprime(int64_t n);
 ```
 
-`fio_math_is_uprime` tests whether `n` is probably prime. `fio_math_is_iprime` tests the absolute value of `n`.
+`fio_math_is_uprime` tests whether `n` is probably prime. `fio_math_is_iprime` tests the absolute value of `n` (`INT64_MIN` is handled as `2^63`).
 
 For `n < FIO_PRIME_TABLE_LIMIT` (default `1024`) the test is deterministic using a small sieve. Larger values use Miller–Rabin with `10` rounds. Internal helpers `fio___is_prime_table` and `fio___is_prime_maybe` implement the two paths.
 
@@ -97,9 +97,10 @@ For large numbers:
 
 ```c
 #define FIO___MATH_KARATSUBA_THRESHOLD 32
+#define FIO___MATH_KARATSUBA_LIMIT     256
 ```
 
-When `len` is at least this threshold and even, `fio_math_mul` calls `fio___math_mul_karatsuba`.
+When `len` is even and between these bounds (inclusive), `fio_math_mul` calls `fio___math_mul_karatsuba`. Longer inputs use schoolbook multiplication, keeping stack use bounded. A zero `len` writes nothing.
 
 ```c
 void fio___math_mul_karatsuba(uint64_t *restrict dest,
@@ -108,7 +109,7 @@ void fio___math_mul_karatsuba(uint64_t *restrict dest,
                               size_t len);
 ```
 
-`fio___math_mul_karatsuba` splits `a` and `b` into low/high halves, computes `z0`, `z1`, and `z2`, then combines them as `z2*B^2 + z1*B + z0`. It uses `fio___math_mul_norecurse` for the three half-sized sub-products and allocates scratch buffers on the stack. `len` must be even; on MSVC or pre-C++14 the stack buffers are fixed at 256 words, so inputs are limited accordingly.
+`fio___math_mul_karatsuba` splits `a` and `b` into low/high halves, computes `z0`, `z1`, and `z2`, then combines them as `z2*B^2 + z1*B + z0`. It uses `fio___math_mul_norecurse` for the three half-sized sub-products and allocates scratch buffers on the stack. `len` must be even and no larger than `FIO___MATH_KARATSUBA_LIMIT`; on MSVC or pre-C++14 the stack buffers are fixed at that limit.
 
 ## See also
 

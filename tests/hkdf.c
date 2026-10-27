@@ -3,7 +3,10 @@ Test for 152 sha2z hkdf.h
 
 Coverage: HKDF-Extract, HKDF-Expand, and combined HKDF against RFC 5869 test
 vectors for SHA-256; SHA-384 vectors (RFC 5869 parameter sets, OpenSSL
-oracle); incremental output length boundaries; and salt/info sensitivity.
+oracle); incremental output length boundaries; salt/info sensitivity; Expand
+vs. a naive per-block HMAC reference up to 255 blocks with long PRKs; and
+invalid-argument rejection (over-limit / short PRK / NULL pairs) without
+writing OKM.
 Performance loops are intentionally omitted.
 ***************************************************************************** */
 #include "test-helpers.h"
@@ -312,6 +315,155 @@ static void fio___test_hkdf_sensitivity(void) {
   FIO_ASSERT(!FIO_MEMCMP(okm1, okm2, 32), "HKDF not deterministic");
 }
 
+/* *****************************************************************************
+HKDF-Expand vs. Naive RFC 5869 Reference (per-block HMAC calls)
+
+Cross-checks the keyed-state Expand for every block count up to the maximum
+(block 255), long PRKs (hashed HMAC keys) and info lengths around block sizes.
+***************************************************************************** */
+
+static void fio___test_hkdf_ref_expand(uint8_t *okm,
+                                       size_t okm_len,
+                                       const uint8_t *prk,
+                                       size_t prk_len,
+                                       const uint8_t *info,
+                                       size_t info_len,
+                                       int use_sha384) {
+  static uint8_t buf[48 + 300 + 1];
+  const size_t hash_len = use_sha384 ? 48 : 32;
+  size_t t_len = 0;
+  uint8_t counter = 1;
+  FIO_ASSERT(info_len <= 300, "reference HKDF info too long");
+  while (okm_len) {
+    size_t n = okm_len < hash_len ? okm_len : hash_len;
+    if (info_len)
+      FIO_MEMCPY(buf + t_len, info, info_len);
+    buf[t_len + info_len] = counter++;
+    fio_u512 t = {0};
+    if (use_sha384)
+      t = fio_sha384_hmac(prk, prk_len, buf, t_len + info_len + 1);
+    else
+      t.u256[0] = fio_sha256_hmac(prk, prk_len, buf, t_len + info_len + 1);
+    FIO_MEMCPY(buf, t.u8, hash_len);
+    t_len = hash_len;
+    FIO_MEMCPY(okm, t.u8, n);
+    okm += n;
+    okm_len -= n;
+  }
+}
+
+static void fio___test_hkdf_vs_reference(void) {
+  static uint8_t got[255 * 48 + 16], want[255 * 48 + 16];
+  uint8_t prk[200], info[300];
+  for (size_t i = 0; i < sizeof(prk); ++i)
+    prk[i] = (uint8_t)(i * 7 + 1);
+  for (size_t i = 0; i < sizeof(info); ++i)
+    info[i] = (uint8_t)(i * 13 + 5);
+  for (int sha384 = 0; sha384 < 2; ++sha384) {
+    const size_t hl = sha384 ? 48 : 32;
+    const size_t prk_lens[] = {hl, hl + 1, 64, 65, 128, 129, 200};
+    const size_t info_lens[] = {0, 1, 13, 63, 64, 65, 127, 128, 129, 300};
+    const size_t okm_lens[] = {1, hl - 1, hl, hl + 1, 3 * hl + 7, 255 * hl};
+    for (size_t p = 0; p < sizeof(prk_lens) / sizeof(prk_lens[0]); ++p)
+      for (size_t f = 0; f < sizeof(info_lens) / sizeof(info_lens[0]); ++f)
+        for (size_t o = 0; o < sizeof(okm_lens) / sizeof(okm_lens[0]); ++o) {
+          const size_t len = okm_lens[o];
+          FIO_MEMSET(got, 0xA5, sizeof(got));
+          fio___test_hkdf_ref_expand(want,
+                                     len,
+                                     prk,
+                                     prk_lens[p],
+                                     info,
+                                     info_lens[f],
+                                     sha384);
+          FIO_ASSERT(!fio_hkdf_expand(got,
+                                      len,
+                                      prk,
+                                      prk_lens[p],
+                                      info,
+                                      info_lens[f],
+                                      sha384),
+                     "HKDF-Expand failed (sha384=%d, len=%zu)",
+                     sha384,
+                     len);
+          FIO_ASSERT(!FIO_MEMCMP(got, want, len),
+                     "HKDF-Expand != reference (sha384=%d prk=%zu info=%zu "
+                     "len=%zu)",
+                     sha384,
+                     prk_lens[p],
+                     info_lens[f],
+                     len);
+          for (size_t i = len; i < len + 16; ++i)
+            FIO_ASSERT(got[i] == 0xA5, "HKDF-Expand wrote past okm_len");
+        }
+  }
+}
+
+/* *****************************************************************************
+HKDF Invalid Arguments (rejected before any output is written)
+***************************************************************************** */
+
+static void fio___test_hkdf_invalid_args(void) {
+  static const uint8_t ikm[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13};
+  static uint8_t okm[255 * 48 + 1];
+  uint8_t prk[48], a[64], b[64];
+  for (size_t i = 0; i < sizeof(prk); ++i)
+    prk[i] = (uint8_t)(i + 1);
+  for (int sha384 = 0; sha384 < 2; ++sha384) {
+    const size_t hl = sha384 ? 48 : 32;
+    /* over-limit output lengths: rejected, OKM untouched */
+    const size_t bad_lens[] = {255 * hl + 1, (size_t)-1};
+    for (size_t i = 0; i < 2; ++i) {
+      FIO_MEMSET(okm, 0xA5, sizeof(okm));
+      FIO_ASSERT(fio_hkdf_expand(okm, bad_lens[i], prk, hl, NULL, 0, sha384),
+                 "HKDF-Expand accepted over-limit length");
+      FIO_ASSERT(fio_hkdf(okm,
+                          bad_lens[i],
+                          NULL,
+                          0,
+                          ikm,
+                          sizeof(ikm),
+                          NULL,
+                          0,
+                          sha384),
+                 "HKDF accepted over-limit length");
+      for (size_t j = 0; j < sizeof(okm); ++j)
+        FIO_ASSERT(okm[j] == 0xA5, "HKDF wrote OKM on rejection");
+    }
+    /* huge info length must not wrap anything (NULL info == empty info) */
+    FIO_ASSERT(!fio_hkdf_expand(a, hl, prk, hl, NULL, (size_t)-1, sha384),
+               "HKDF-Expand rejected NULL info");
+    FIO_ASSERT(!fio_hkdf_expand(b, hl, prk, hl, "", 0, sha384),
+               "HKDF-Expand rejected empty info");
+    FIO_ASSERT(!FIO_MEMCMP(a, b, hl), "HKDF NULL info != empty info");
+    /* short / empty PRK: rejected */
+    FIO_MEMSET(a, 0xA5, sizeof(a));
+    FIO_ASSERT(fio_hkdf_expand(a, hl, prk, hl - 1, NULL, 0, sha384) &&
+                   fio_hkdf_expand(a, hl, prk, 0, NULL, 0, sha384) &&
+                   fio_hkdf_expand(a, hl, NULL, hl, NULL, 0, sha384),
+               "HKDF-Expand accepted short / NULL PRK");
+    for (size_t j = 0; j < sizeof(a); ++j)
+      FIO_ASSERT(a[j] == 0xA5, "HKDF-Expand wrote OKM on PRK rejection");
+    /* full-length output is accepted */
+    FIO_ASSERT(!fio_hkdf(okm, 255 * hl, NULL, 0, ikm, 16, NULL, 0, sha384),
+               "HKDF rejected maximum output length");
+    /* NULL IKM: only valid when empty (then equals "" IKM) */
+    FIO_ASSERT(fio_hkdf_extract(a, NULL, 0, NULL, 1, sha384) &&
+                   fio_hkdf(a, hl, NULL, 0, NULL, 1, NULL, 0, sha384),
+               "HKDF accepted NULL IKM with a length");
+    FIO_ASSERT(!fio_hkdf_extract(a, NULL, 0, NULL, 0, sha384) &&
+                   !fio_hkdf_extract(b, "", 0, "", 0, sha384) &&
+                   !FIO_MEMCMP(a, b, hl),
+               "HKDF-Extract NULL/empty IKM mismatch");
+    FIO_ASSERT(fio_hkdf_extract(NULL, NULL, 0, ikm, 16, sha384),
+               "HKDF-Extract accepted NULL PRK");
+    /* zero-length output is a successful no-op */
+    FIO_ASSERT(!fio_hkdf_expand(NULL, 0, prk, hl, NULL, 0, sha384) &&
+                   fio_hkdf_expand(NULL, 1, prk, hl, NULL, 0, sha384),
+               "HKDF-Expand NULL OKM handling");
+  }
+}
+
 int main(void) {
   fio___test_hkdf_rfc5869_case1();
   fio___test_hkdf_rfc5869_case2();
@@ -320,5 +472,7 @@ int main(void) {
   fio___test_hkdf_sha384_case3();
   fio___test_hkdf_edge_cases();
   fio___test_hkdf_sensitivity();
+  fio___test_hkdf_vs_reference();
+  fio___test_hkdf_invalid_args();
   return 0;
 }

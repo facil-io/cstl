@@ -90,6 +90,9 @@ SFUNC int fio_state_callback_remove(fio_state_event_type_e,
                                     void (*func)(void *),
                                     void *arg);
 
+/** Clears all the existing callbacks for the event. */
+SFUNC void fio_state_callback_clear(fio_state_event_type_e);
+
 /**
  * Forces all the existing callbacks to run, as if the event occurred.
  *
@@ -173,11 +176,21 @@ State Callback Global State and Locks
 /* use `weak` instead of `static` to make sure state callbacks are global. */
 FIO_WEAK_VAR fio___state_map_s FIO___STATE_TASKS_ARRAY[FIO_CALL_NEVER + 1];
 FIO_WEAK_VAR fio_lock_i FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER + 1];
+/* The initialize queue lock protects this state and the deferred task list.
+ * 0: not started, 1: preparing snapshot, 2: dispatching, 3: complete. */
+typedef struct fio___state_pending_s {
+  struct fio___state_pending_s *next;
+  fio___state_task_s task;
+} fio___state_pending_s;
+FIO_WEAK_VAR unsigned fio___state_init_phase;
+FIO_WEAK_VAR fio___state_pending_s *fio___state_init_pending_head;
+FIO_WEAK_VAR fio___state_pending_s *fio___state_init_pending_tail;
 
 FIO_IFUNC void fio_state_callback_clear_all(void) {
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
+    fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + i);
     fio___state_map_destroy(FIO___STATE_TASKS_ARRAY + i);
-    FIO___STATE_TASKS_ARRAY[i] = (fio___state_map_s){0};
+    fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + i);
   }
   FIO_LOG_DEBUG2("(%d) fio_state_callback maps have been cleared.",
                  fio_getpid());
@@ -192,17 +205,30 @@ FIO_SFUNC void fio___state_cleanup_task_at_exit(void *ignr_) {
 SFUNC void fio_state_callback_add(fio_state_event_type_e e,
                                   void (*func)(void *),
                                   void *arg) {
-  if ((uintptr_t)e >= FIO_CALL_NEVER)
+  if ((uintptr_t)e >= FIO_CALL_NEVER || !func)
     return;
   fio___state_task_s t = {.func = func, .arg = arg};
+  unsigned phase = 0;
   fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
+  if (e == FIO_CALL_ON_INITIALIZE)
+    phase = fio___state_init_phase;
+  if (phase == 2) {
+    /* The current snapshot has already been taken. Defer until its callbacks
+     * finish, even if an initialization callback registers another callback. */
+    fio___state_pending_s *p =
+        (fio___state_pending_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*p), 0);
+    FIO_ASSERT_ALLOC(p);
+    *p = (fio___state_pending_s){.task = t};
+    if (fio___state_init_pending_tail)
+      fio___state_init_pending_tail->next = p;
+    else
+      fio___state_init_pending_head = p;
+    fio___state_init_pending_tail = p;
+  }
   fio___state_map_set(FIO___STATE_TASKS_ARRAY + (uintptr_t)e, t, 0);
   fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
-  if (e == FIO_CALL_ON_INITIALIZE &&
-      FIO___STATE_TASKS_ARRAY_LOCK[FIO_CALL_NEVER]) {
-    /* initialization tasks already performed, perform this without delay */
+  if (phase == 3)
     func(arg);
-  }
 }
 
 /** Removes a callback from the list of callbacks to be called for the event. */
@@ -255,7 +281,7 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
       FIO___STATE_TASKS_ARRAY_LOCK[i] = FIO_LOCK_INIT;
     }
-    fio_rand_reseed(); /* re-seed random state in child processes */
+    fio_rand_on_fork(NULL); /* re-seed, so child and parent streams diverge */
   }
   if (e == FIO_CALL_AFTER_FORK) {
     fio_rand_reseed(); /* re-seed shifted random state */
@@ -268,9 +294,15 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
     if (fio_trylock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_NEVER))
       return;
     /* State initialization that should run only once */
+    fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_ON_INITIALIZE);
+    fio___state_init_phase = 1;
+    fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_ON_INITIALIZE);
     for (size_t i = 0; i < FIO_CALL_NEVER; ++i)
-      if (i != FIO_CALL_ON_INITIALIZE)
+      if (i != FIO_CALL_ON_INITIALIZE) {
+        fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + i);
         fio___state_map_reserve(FIO___STATE_TASKS_ARRAY + i, 32);
+        fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + i);
+      }
     fio_state_callback_add(FIO_CALL_AFTER_EXIT,
                            fio___state_cleanup_task_at_exit,
                            NULL);
@@ -292,8 +324,10 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
       ary[len++] = FIO___STATE_TASKS_ARRAY[e].ary[i];
     }
   }
+  if (e == FIO_CALL_ON_INITIALIZE)
+    fio___state_init_phase = 2;
   fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + (uintptr_t)e);
-  if (!len)
+  if (!len && e != FIO_CALL_ON_INITIALIZE)
     return;
 
   /* perform copied tasks in correct order */
@@ -308,6 +342,26 @@ SFUNC void fio_state_callback_force(fio_state_event_type_e e) {
   }
   /* cleanup */
   FIO_MEM_FREE(ary, ary_capa);
+  if (e == FIO_CALL_ON_INITIALIZE) {
+    /* Drain registrations made while the snapshot was executing. The lock is
+     * never held while invoking a callback (callbacks may register callbacks).
+     */
+    for (;;) {
+      fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_ON_INITIALIZE);
+      fio___state_pending_s *p = fio___state_init_pending_head;
+      if (!p) {
+        fio___state_init_phase = 3;
+        fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_ON_INITIALIZE);
+        break;
+      }
+      fio___state_init_pending_head = p->next;
+      if (!p->next)
+        fio___state_init_pending_tail = NULL;
+      fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + FIO_CALL_ON_INITIALIZE);
+      p->task.func(p->task.arg);
+      FIO_MEM_FREE(p, sizeof(*p));
+    }
+  }
 
   (void)FIO___STATE_TASKS_NAMES; /* if unused */
 }
@@ -319,11 +373,15 @@ Debug Helpers
 FIO_IFUNC void fio_state_callback_print_state(void) {
   FIO_LOG2STDERR("DEBUG:    fio_state_callback maps state:");
   for (size_t i = 0; i < FIO_CALL_NEVER; ++i) {
+    fio_lock(FIO___STATE_TASKS_ARRAY_LOCK + i);
+    const size_t count = FIO___STATE_TASKS_ARRAY[i].count;
+    const size_t capa = fio___state_map_capa(FIO___STATE_TASKS_ARRAY + i);
+    fio_unlock(FIO___STATE_TASKS_ARRAY_LOCK + i);
     fprintf(stderr,
             "\t%-32s %-4zu out of %-4zu\n",
             FIO___STATE_TASKS_NAMES[i],
-            (size_t)FIO___STATE_TASKS_ARRAY[i].count,
-            fio___state_map_capa(FIO___STATE_TASKS_ARRAY + i));
+            count,
+            capa);
   }
 }
 

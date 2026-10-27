@@ -228,7 +228,7 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, destroy)(FIO_STR_PTR s);
 FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s);
 
 /** Frees the pointer returned by `detach`. */
-FIO_IFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
+SFUNC void FIO_NAME(FIO_STR_NAME, dealloc)(void *ptr);
 
 /* *****************************************************************************
 String API - String state (data pointers, length, capacity, etc')
@@ -385,7 +385,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s,
 /** Writes data at the end of the String. See `fio_string_write2`. */
 SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               __write2)(FIO_STR_PTR s,
-                                        const fio_string_write_s srcs[]);
+                                        fio_string_write_s srcs[]);
 
 #ifndef FIO_STR_WRITE2
 #define FIO_STR_WRITE2(str_name, dest, ...)                                    \
@@ -687,6 +687,24 @@ FIO_IFUNC fio_string_realloc_fn FIO_NAME(FIO_STR_NAME,
   return options[FIO_STR_IS_SMALL(s) | !FIO_STR_BIG_IS_DYNAMIC(s)];
 }
 
+/* Detach borrowed storage before any operation capable of writing to it. */
+FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
+                                  __mutable_info)(FIO_STR_PTR s_) {
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  if (!i.buf || !i.capa)
+    return i;
+  FIO_NAME(FIO_STR_NAME, s) *s =
+      FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
+  if (!FIO_STR_IS_SMALL(s) && !FIO_STR_BIG_IS_DYNAMIC(s)) {
+    if (FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&i, i.len)) {
+      i.capa = 0;
+      return i;
+    }
+    FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  }
+  return i;
+}
+
 /* *****************************************************************************
 String Constructors (inline)
 ***************************************************************************** */
@@ -695,7 +713,9 @@ String Constructors (inline)
 /** Allocates a new String object on the heap. */
 FIO_IFUNC FIO_STR_PTR FIO_NAME(FIO_STR_NAME, new)(void) {
   FIO_NAME(FIO_STR_NAME, s) *const s = FIO_NAME(FIO_STR_NAME, __object_new)();
-  if (!FIO_MEM_REALLOC_IS_SAFE_ && s) {
+  if (!s)
+    return (FIO_STR_PTR)FIO_PTR_TAG(s);
+  if (!FIO_MEM_REALLOC_IS_SAFE_) {
     *s = (FIO_NAME(FIO_STR_NAME, s))FIO_STR_INIT;
   }
 #ifdef DEBUG
@@ -756,7 +776,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
     if (FIO_STR_SMALL_LEN(s)) { /* keep these ifs apart */
       fio_str_info_s cpy =
           FIO_STR_INFO2(FIO_STR_SMALL_DATA(s), FIO_STR_SMALL_LEN(s));
-      FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
+      if (FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len))
+        return NULL;
       data = cpy.buf;
     }
   } else {
@@ -765,7 +786,8 @@ FIO_IFUNC char *FIO_NAME(FIO_STR_NAME, detach)(FIO_STR_PTR s_) {
     } else if (FIO_STR_BIG_LEN(s)) {
       fio_str_info_s cpy =
           FIO_STR_INFO2(FIO_STR_BIG_DATA(s), FIO_STR_BIG_LEN(s));
-      FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len);
+      if (FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&cpy, cpy.len))
+        return NULL;
       data = cpy.buf;
     }
   }
@@ -792,8 +814,11 @@ FIO_IFUNC void FIO_NAME(FIO_STR_NAME, compact)(FIO_STR_PTR s_) {
     return;
   FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
   fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
-  FIO_NAME(FIO_STR_NAME, init_copy)
-  ((FIO_STR_PTR)FIO_PTR_TAG(&tmp), i.buf, i.len);
+  fio_str_info_s copied =
+      FIO_NAME(FIO_STR_NAME,
+               init_copy)((FIO_STR_PTR)FIO_PTR_TAG(&tmp), i.buf, i.len);
+  if (!copied.buf)
+    return;
   FIO_NAME(FIO_STR_NAME, destroy)(s_);
   *s = tmp;
 #endif
@@ -861,7 +886,10 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, init_copy)(FIO_STR_PTR s_,
     return i;
   }
   i = FIO_STR_INFO2((char *)str, len);
-  FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&i, len);
+  if (FIO_NAME(FIO_STR_NAME, __default_copy_and_reallocate)(&i, len)) {
+    i = (fio_str_info_s){0};
+    return i;
+  }
   FIO_STR_BIG_CAPA_SET(s, i.capa);
   FIO_STR_BIG_DATA(s) = i.buf;
   FIO_STR_BIG_LEN_SET(s, len);
@@ -925,18 +953,23 @@ FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, resize)(FIO_STR_PTR s_,
   fio_str_info_s i = {0};
   FIO_PTR_TAG_VALID_OR_RETURN(s_, i);
   i = FIO_NAME(FIO_STR_NAME, info)(s_);
-  if (!i.capa) {
+  if (!i.capa || size == i.len || size >= 0x7FFFFFFFULL)
     return i;
-  }
+  i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
+  if (!i.capa)
+    return i;
   /* resize may be used to reserve memory in advance while setting size  */
-  if (i.capa > size) {
+  if (size < i.capa && size <= i.len) {
     i.len = size;
-    i.buf[i.len] = 0;
-  } else {
-    fio_string_write(&i,
-                     FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
-                     NULL,
-                     size - i.len);
+    i.buf[size] = 0;
+  } else if (size > i.len) {
+    /* Unlike reserve, resize publishes the extended bytes to readers. */
+    size_t old_len = i.len;
+    if (size >= i.capa && FIO_NAME(FIO_STR_NAME, __realloc_func)(s_)(&i, size))
+      return FIO_NAME(FIO_STR_NAME, info)(s_);
+    FIO_MEMSET(i.buf + old_len, 0, size - old_len);
+    i.len = size;
+    i.buf[size] = 0;
   }
   FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
 
@@ -1004,7 +1037,7 @@ String API - Content Manipulation and Review (inline)
 FIO_IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write)(FIO_STR_PTR s_,
                                                        const void *src,
                                                        size_t len) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), src, len);
@@ -1084,8 +1117,11 @@ SFUNC void FIO_NAME(FIO_STR_NAME, __default_free)(void *ptr, size_t capa) {
   FIO_MEM_FREE_(ptr, capa);
   (void)capa; /* if unused */
 }
-SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop)(void *str) { (void)str; }
-SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop2)(fio_str_info_s str) {
+FIO_SFUNC void FIO_NAME(FIO_STR_NAME, __default_free_noop)(void *str) {
+  (void)str;
+}
+FIO_SFUNC void FIO_NAME(FIO_STR_NAME,
+                        __default_free_noop2)(fio_str_info_s str) {
   (void)str;
 }
 
@@ -1114,22 +1150,31 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
   FIO_NAME(FIO_STR_NAME, s) *const s =
       FIO_PTR_TAG_GET_UNTAGGED(FIO_NAME(FIO_STR_NAME, s), s_);
   state = FIO_NAME(FIO_STR_NAME, info)(s_);
-  if (FIO_STR_IS_FROZEN(s))
+  if (FIO_STR_IS_FROZEN(s) || amount > SIZE_MAX - state.len)
     return state;
   amount += state.len;
+  if (amount >= 0x7FFFFFFFULL)
+    return state;
+  state = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
+  if (!state.capa)
+    return state;
   if (state.capa <= amount) {
-    FIO_NAME(FIO_STR_NAME, __realloc_func)(s_)(&state, amount);
+    if (FIO_NAME(FIO_STR_NAME, __realloc_func)(s_)(&state, amount))
+      return state;
     state.buf[state.len] = 0;
     FIO_NAME(FIO_STR_NAME, __info_update)(s_, state);
   } else if (state.capa > FIO_STR_SMALL_CAPA(s) &&
              amount <= FIO_STR_SMALL_CAPA(s) &&
              state.len <= FIO_STR_SMALL_CAPA(s)) {
-    FIO_NAME(FIO_STR_NAME, s) tmp;
-    state = FIO_NAME(FIO_STR_NAME, init_copy)((FIO_STR_PTR)FIO_PTR_TAG(&tmp),
-                                              state.buf,
-                                              state.len);
+    FIO_NAME(FIO_STR_NAME, s) tmp = FIO_STR_INIT;
+    fio_str_info_s copied = FIO_NAME(
+        FIO_STR_NAME,
+        init_copy)((FIO_STR_PTR)FIO_PTR_TAG(&tmp), state.buf, state.len);
+    if (!copied.buf)
+      return state;
     FIO_NAME(FIO_STR_NAME, destroy)(s_);
     *s = tmp;
+    state = FIO_NAME(FIO_STR_NAME, info)(s_);
   }
   return state;
 }
@@ -1181,7 +1226,7 @@ String Implementation - Content Manipulation and Review
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s_,
                                                      int64_t num) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_i(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), num);
@@ -1194,7 +1239,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_i)(FIO_STR_PTR s_,
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_hex)(FIO_STR_PTR s_,
                                                        int64_t num) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_hex(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), num);
@@ -1207,7 +1252,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_hex)(FIO_STR_PTR s_,
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_bin)(FIO_STR_PTR s_,
                                                        int64_t num) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_bin(&i, FIO_NAME(FIO_STR_NAME, __realloc_func)(s_), num);
@@ -1222,7 +1267,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_bin)(FIO_STR_PTR s_,
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, concat)(FIO_STR_PTR dest_,
                                                     FIO_STR_PTR const src_) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(dest_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(dest_);
   if (!i.capa)
     return i;
   FIO_PTR_TAG_VALID_OR_RETURN(src_, i);
@@ -1254,7 +1299,7 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
                                                      size_t old_len,
                                                      const void *src,
                                                      size_t src_len) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_replace(&i,
@@ -1272,8 +1317,8 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, replace)(FIO_STR_PTR s_,
  */
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               __write2)(FIO_STR_PTR s_,
-                                        const fio_string_write_s srcs[]) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+                                        fio_string_write_s srcs[]) {
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write2 FIO_NOOP(&i,
@@ -1291,7 +1336,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
 SFUNC fio_str_info_s FIO___PRINTF_STYLE(2, 0)
     FIO_NAME(FIO_STR_NAME,
              vprintf)(FIO_STR_PTR s_, const char *format, va_list argv) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_vprintf(&i,
@@ -1329,7 +1374,7 @@ String API - C / JSON escaping
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s_,
                                                           const void *src,
                                                           size_t len) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_escape(&i,
@@ -1346,7 +1391,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_escape)(FIO_STR_PTR s_,
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_unescape)(FIO_STR_PTR s_,
                                                             const void *src,
                                                             size_t len) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_unescape(&i,
@@ -1370,7 +1415,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                                                const void *data,
                                                size_t len,
                                                uint8_t url_encoded) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_base64enc(&i,
@@ -1389,7 +1434,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               write_base64dec)(FIO_STR_PTR s_,
                                                const void *encoded_,
                                                size_t len) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_base64dec(&i,
@@ -1408,7 +1453,7 @@ String API - HTML escaping support
 IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, write_html_escape)(FIO_STR_PTR s_,
                                                                const void *data,
                                                                size_t len) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_html_escape(&i,
@@ -1424,7 +1469,7 @@ IFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME,
                               write_html_unescape)(FIO_STR_PTR s_,
                                                    const void *data,
                                                    size_t len) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
   fio_string_write_html_unescape(&i,
@@ -1453,15 +1498,17 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfd)(FIO_STR_PTR s_,
                                                     int fd,
                                                     intptr_t start_at,
                                                     intptr_t limit) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
-  fio_string_readfd(&i,
-                    FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
-                    fd,
-                    start_at,
-                    limit);
+  int rc = fio_string_readfd(&i,
+                             FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                             fd,
+                             start_at,
+                             limit);
   FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  if (rc)
+    i.buf = NULL; /* content, including any partial read, remains in s_. */
   return i;
 }
 
@@ -1477,15 +1524,17 @@ SFUNC fio_str_info_s FIO_NAME(FIO_STR_NAME, readfile)(FIO_STR_PTR s_,
                                                       const char *filename,
                                                       intptr_t start_at,
                                                       intptr_t limit) {
-  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, info)(s_);
+  fio_str_info_s i = FIO_NAME(FIO_STR_NAME, __mutable_info)(s_);
   if (!i.capa)
     return i;
-  fio_string_readfile(&i,
-                      FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
-                      filename,
-                      start_at,
-                      limit);
+  int rc = fio_string_readfile(&i,
+                               FIO_NAME(FIO_STR_NAME, __realloc_func)(s_),
+                               filename,
+                               start_at,
+                               limit);
   FIO_NAME(FIO_STR_NAME, __info_update)(s_, i);
+  if (rc)
+    i.buf = NULL; /* content, including any partial read, remains in s_. */
   return i;
 }
 

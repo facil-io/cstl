@@ -212,21 +212,22 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
   uses `*pos > 31` to avoid control characters and whitespace...
   ... but allow single space and UTF-8 characters
   */
+  fio_url_s r = {0};
+  if (!len)
+    return r;
   const char *end = url + len;
   const char *pos = url;
-  fio_url_s r = {.scheme = {.buf = (char *)url}};
-  if (len == 0) {
-    goto finish;
-  }
+  r.scheme.buf = (char *)url;
 
   if (*pos == '/') /* start at path */
     goto start_path;
 
-  while (pos < end && pos[0] > 31 && *pos != ':' && *pos != '/' &&
-         *pos != '@' && *pos != '#' && *pos != '?' && *pos != '[')
+  while (pos < end && (unsigned char)pos[0] > 31 && *pos != ':' &&
+         *pos != '/' && *pos != '@' && *pos != '#' && *pos != '?' &&
+         *pos != '[')
     ++pos;
 
-  if (pos == end || pos[0] < 32) {
+  if (pos == end || (unsigned char)pos[0] < 32) {
     /* was only host (path starts with '/') */
     r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
     goto finish;
@@ -253,7 +254,7 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
     ++pos;
     goto start_target;
   case ':':
-    if (pos + 2 < end && pos[1] == '/' && pos[2] == '/') {
+    if ((size_t)(end - pos) > 2 && pos[1] == '/' && pos[2] == '/') {
       /* scheme:// */
       r.scheme.len = (size_t)(pos - url);
       pos += 3;
@@ -268,11 +269,12 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
   /* start_username: */
   url = pos;
-  while (pos < end && pos[0] > 31 && *pos != ':' && *pos != '/' &&
-         *pos != '@' && *pos != '#' && *pos != '?' && *pos != '[')
+  while (pos < end && (unsigned char)pos[0] > 31 && *pos != ':' &&
+         *pos != '/' && *pos != '@' && *pos != '#' && *pos != '?' &&
+         *pos != '[')
     ++pos;
 
-  if (pos >= end || pos[0] < 32) { /* scheme://host */
+  if (pos >= end || (unsigned char)pos[0] < 32) { /* scheme://host */
     r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
     goto finish;
   }
@@ -307,10 +309,11 @@ SFUNC fio_url_s fio_url_parse(const char *url, size_t len) {
 
 start_password:
   url = pos;
-  while (pos < end && pos[0] > 31 && *pos != '/' && *pos != '@' && *pos != '?')
+  while (pos < end && (unsigned char)pos[0] > 31 && *pos != '/' &&
+         *pos != '@' && *pos != '?')
     ++pos;
 
-  if (pos >= end || pos[0] < 32) {
+  if (pos >= end || (unsigned char)pos[0] < 32) {
     /* was host:port */
     r.port = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
     r.host = r.user;
@@ -335,16 +338,16 @@ start_host:
   url = pos;
   if (pos < end && pos[0] == '[') {
     ++pos;
-    while (pos < end && pos[0] > 31 && *pos != ']')
+    while (pos < end && (unsigned char)pos[0] > 31 && *pos != ']')
       ++pos;
-    pos += (pos < end && pos[0] > 31); /* consume closing `]` */
+    pos += (pos < end && (unsigned char)pos[0] > 31); /* consume closing `]` */
   }
-  while (pos < end && pos[0] > 31 && *pos != '/' && *pos != ':' &&
-         *pos != '#' && *pos != '?')
+  while (pos < end && (unsigned char)pos[0] > 31 && *pos != '/' &&
+         *pos != ':' && *pos != '#' && *pos != '?')
     ++pos;
 
   r.host = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
-  if (pos >= end || pos[0] < 32) {
+  if (pos >= end || (unsigned char)pos[0] < 32) {
     goto finish;
   }
   switch (*pos) {
@@ -366,12 +369,13 @@ start_host:
 
   // start_port:
   url = pos;
-  while (pos < end && pos[0] > 31 && *pos != '/' && *pos != '#' && *pos != '?')
+  while (pos < end && (unsigned char)pos[0] > 31 && *pos != '/' &&
+         *pos != '#' && *pos != '?')
     ++pos;
 
   r.port = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
 
-  if (pos >= end || pos[0] < 32) {
+  if (pos >= end || (unsigned char)pos[0] < 32) {
     /* scheme://[...@]host:port */
     goto finish;
   }
@@ -390,12 +394,12 @@ start_host:
 
 start_path:
   url = pos;
-  while (pos < end && pos[0] > 31 && *pos != '#' && *pos != '?')
+  while (pos < end && (unsigned char)pos[0] > 31 && *pos != '#' && *pos != '?')
     ++pos;
 
   r.path = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
 
-  if (pos >= end || pos[0] < 32) {
+  if (pos >= end || (unsigned char)pos[0] < 32) {
     goto finish;
   }
   ++pos;
@@ -404,13 +408,14 @@ start_path:
 
 start_query:
   url = pos;
-  while (pos < end && pos[0] > 31 && *pos != '#')
+  while (pos < end && (unsigned char)pos[0] > 31 && *pos != '#')
     ++pos;
 
   r.query = FIO_BUF_INFO2((char *)url, (size_t)(pos - url));
-  ++pos;
-
-  if (pos >= end || pos[0] < 32)
+  if (pos == end || (unsigned char)pos[0] < 32)
+    goto finish;
+  ++pos; /* consume '#' */
+  if (pos < end && (unsigned char)pos[0] < 32)
     goto finish;
 
 start_target:
@@ -435,7 +440,7 @@ finish:
         r.path.len = (size_t)(r.target.buf - (r.path.buf + 1));
       r.user.len = r.password.len = r.port.len = r.host.len = 0;
     }
-  } else if (!r.scheme.len && r.host.buf && r.host.buf[0] == '.') {
+  } else if (!r.scheme.len && r.host.len && r.host.buf[0] == '.') {
     r.path.len = (size_t)(end - r.host.buf);
     r.path.buf = r.host.buf;
     r.query.len = r.target.len = r.host.len = 0;
@@ -474,9 +479,9 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
   switch (u.scheme.len) {
   case 3: /* wss || tls || ssl */
     r.tls =
-        ((fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("wss:") ||
-         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("tls:") ||
-         (fio_buf2u32u(u.scheme.buf) | 0x20202020) == fio_buf2u32u("ssl:"));
+        ((fio_buf2u24_le(u.scheme.buf) | 0x202020U) == fio_buf2u24_le("wss") ||
+         (fio_buf2u24_le(u.scheme.buf) | 0x202020U) == fio_buf2u24_le("tls") ||
+         (fio_buf2u24_le(u.scheme.buf) | 0x202020U) == fio_buf2u24_le("ssl"));
 
     break;
   case 4: /* ssse || sses || tcps || stcp || udps || sudp */
@@ -499,9 +504,9 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
     fio_buf_info_s trust = {0};
     fio_buf_info_s pass = {0};
     uint32_t name;
-    const uint32_t wrd_key = fio_buf2u32u("key="); /* keyword's value */
-    const uint32_t wrd_tls = fio_buf2u32u("tls=");
-    const uint32_t wrd_ssl = fio_buf2u32u("ssl=");
+    const uint32_t wrd_key = fio_buf2u24_le("key"); /* keyword's value */
+    const uint32_t wrd_tls = fio_buf2u24_le("tls");
+    const uint32_t wrd_ssl = fio_buf2u24_le("ssl");
     const uint32_t wrd_cert = fio_buf2u32u("cert");
     const uint32_t wrd_true = fio_buf2u32u("true");
     const uint32_t wrd_trust = fio_buf2u32u("trus");
@@ -514,9 +519,7 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
           pass = i.value;
         break;
       case 3:
-        name = fio_buf2u32u(i.name.buf) | 0x20202020UL; /* '=' stays the same */
-        name &= fio_buf2u32u("\xFF\xFF\xFF\x00");
-        name |= fio_buf2u32u("\x00\x00\x00="); /* in case there was no = sign */
+        name = fio_buf2u24_le(i.name.buf) | 0x202020U;
         if (name == wrd_key) {
           if (i.value.len)
             key = i.value;
@@ -553,17 +556,13 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
       r.tls = 1;
     }
   }
-  FIO_LOG_DDEBUG2("URL TLS detection:\n\t%s\n\tkey: %.*s\n\tcert: "
-                  "%.*s\n\ttrust: %.*s\n\tpass: %.*s",
-                  (r.tls ? "Secure" : "plaintext"),
-                  (int)r.key.len,
-                  r.key.buf,
-                  (int)r.cert.len,
-                  r.cert.buf,
-                  (int)r.trust.len,
-                  r.trust.buf,
-                  (int)r.pass.len,
-                  r.pass.buf);
+  FIO_LOG_DDEBUG2(
+      "URL TLS detection: %s (key: %u, cert: %u, trust: %u, pass: %u)",
+      (r.tls ? "Secure" : "plaintext"),
+      (unsigned)!!r.key.len,
+      (unsigned)!!r.cert.len,
+      (unsigned)!!r.trust.len,
+      (unsigned)!!r.pass.len);
   return r;
 }
 /* *****************************************************************************

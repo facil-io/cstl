@@ -182,7 +182,7 @@ For streaming parsers with intermediate states.
 
 | Function | Return Values | File |
 |----------|---------------|------|
-| `fio_multipart_parser_feed()` | 0=need-more, 1=done, -1=error | `004 multipart.h` |
+| `fio_multipart_parse()` | `.consumed` + `.err`: `!consumed && !err`=need-more, `err`=error (opaque callback errors pass through) | `004 multipart.h` |
 | `fio_resp3_parser_feed()` | 0=need-more, 1=done, -1=error | `004 resp3.h` |
 
 **F. No error path**

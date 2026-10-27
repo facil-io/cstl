@@ -59,6 +59,7 @@ static size_t value_find(struct value_s *map, fio_buf_info_s key) {
   return SIZE_MAX;
 }
 static int merge_mode;
+static int no_reuse;
 static int conflict_error_code;
 /* Takes `value` even on error; returns a replaced value unless merging. */
 static fio_json_obj_result_s cb_map_push(void *udata, void *ctx,
@@ -107,7 +108,8 @@ static fio_json_push_result_s cb_container(void *udata, void *ctx,
   struct value_s *parent = ctx;
   if (parent && key.buf) {
     size_t i = value_find(parent, key);
-    if (i != SIZE_MAX && parent->items[i] && parent->items[i]->kind == kind) {
+    if (!no_reuse && i != SIZE_MAX && parent->items[i] &&
+        parent->items[i]->kind == kind) {
       r.obj = parent->items[i];
       return r;
     }
@@ -523,7 +525,66 @@ static void test_validate(void) {
   value_free(map);
 }
 
+/* Incomplete escapes must never advance the reported cursor past input. */
+static void test_truncated_escapes(void) {
+  static const char *const inputs[] = {"\"\\", "{\"a\\", "{a\\"};
+  const int saved_level = FIO_LOG_LEVEL;
+  FIO_LOG_LEVEL = FIO_LOG_LEVEL_DEBUG;
+  for (size_t i = 0; i < sizeof(inputs) / sizeof(*inputs); ++i) {
+    size_t len = strlen(inputs[i]);
+    char *buf = malloc(len);
+    FIO_ASSERT(buf, "allocation failed");
+    /* These nonnumeric scanners don't require the numeric guard byte. */
+    memcpy(buf, inputs[i], len);
+    fio_json_result_s r = fio_json_parse(&callbacks, NULL, NULL, buf, len);
+    FIO_ASSERT(r.err && r.stop_pos <= len,
+               "terminal escape cursor %zu exceeds %zu", r.stop_pos, len);
+    value_free(r.ctx);
+    free(buf);
+  }
+  FIO_LOG_LEVEL = saved_level;
+  static const char *const infinity[] = {"i", "in", "inf", "infi", "infin", "infini", "infinit", "infinity"};
+  for (size_t i = 0; i < sizeof(infinity) / sizeof(*infinity); ++i) {
+    size_t len = strlen(infinity[i]);
+    char *buf = malloc(len);
+    FIO_ASSERT(buf, "allocation failed");
+    memcpy(buf, infinity[i], len);
+    fio_json_result_s r = fio_json_parse(&callbacks, NULL, NULL, buf, len);
+    FIO_ASSERT(r.stop_pos <= len && (!!r.err == (len < 3)),
+               "short infinity parsing failed");
+    value_free(r.ctx);
+    free(buf);
+  }
+  fio_json_result_s r = fio_json_parse(&callbacks, NULL, NULL, "\xEF\xBB\xBF", 3);
+  FIO_ASSERT(!r.err && !r.ctx && r.stop_pos == 3, "BOM must be consumed");
+}
+
+static void test_conflict_depth(void) {
+  for (size_t array = 0; array < 2; ++array) {
+    size_t count = FIO_JSON_MAX_DEPTH + 32;
+    char *json = calloc(count * 7 + 16, 1);
+    FIO_ASSERT(json, "allocation failed");
+    char *p = json;
+    *p++ = '{';
+    for (size_t i = 0; i < count; ++i) {
+      memcpy(p, "\"a\":{},", 7);
+      p += 7;
+    }
+    const char *last = array ? "\"a\":[]}" : "\"a\":0}";
+    strcpy(p, last);
+    no_reuse = 1;
+    fio_json_result_s r = fio_json_parse(&callbacks, NULL, NULL, json, strlen(json));
+    no_reuse = 0;
+    FIO_ASSERT(r.err == FIO_JSON_ERROR_NESTING,
+               "flat conflict chain must be bounded, got %d", r.err);
+    value_free(r.ctx);
+    free(json);
+  }
+}
+
 static void run_all(void) {
+  test_conflict_depth();
+  test_truncated_escapes();
   test_helpers();
   test_parse();
   test_root_reuse();

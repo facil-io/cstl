@@ -15,6 +15,7 @@ No external processes are spawned; OpenSSL is used through libcrypto only.
 #define FIO_P256
 #include "tests/test-helpers.h"
 
+#if HAVE_OPENSSL
 #include <openssl/ec.h>
 #include <openssl/bn.h>
 #include <openssl/obj_mac.h>
@@ -125,3 +126,9 @@ int main(void) {
   fprintf(stderr, "P-256 keypair debug stress passed\n");
   return 0;
 }
+#else
+int main(void) {
+  fprintf(stderr, "OpenSSL not available, skipping P-256 keypair comparison.\n");
+  return 0;
+}
+#endif /* HAVE_OPENSSL */

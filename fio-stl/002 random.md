@@ -7,7 +7,7 @@
 
 A non-cryptographic pseudo-random generator plus RiskyHash and Stable Hash. The PRNG is seeded from system jitter (`getrusage`, clocks) and hashed with RiskyHash. It is faster and more random than typical `rand()` implementations, but **do not use it for cryptography** — use `fio_rand_bytes_secure` for that.
 
-RiskyHash is an ephemeral, non-cryptographic hash family that may change between releases. Stable Hash is frozen and safe for persistent data. RiskyHash 256/512 and HMAC variants are also provided.
+RiskyHash is an ephemeral, non-cryptographic hash family that may change between releases. Stable Hash is frozen and safe for persistent data. RiskyHash 256/512 come with keyed and HMAC variants.
 
 ### Pseudo-Random Functions
 
@@ -53,7 +53,23 @@ Use this for keys, nonces, and anything security-sensitive.
 SFUNC void fio_rand_reseed(void);
 ```
 
-Rotates the PRNG state with fresh entropy. Call after `fork` to avoid duplicated sequences.
+Rotates the PRNG state with fresh entropy. The PRNG also reseeds itself periodically.
+
+#### `fio_rand_on_fork`
+
+```c
+SFUNC void fio_rand_on_fork(void *is_null);
+```
+
+Reseeds the PRNG in a forked child, so it doesn't repeat the parent's sequence. The `FIO_CALL_IN_CHILD` state callback calls it automatically; call it yourself only when forking without facil.io's fork helpers.
+
+#### `fio_rand_reset`
+
+```c
+SFUNC void fio_rand_reset(void);
+```
+
+Resets the PRNG state to its default seed. Intended for tests; never use it for anything security-sensitive.
 
 ### Risky / Stable Hash
 
@@ -114,7 +130,9 @@ Writes a 128-bit Stable Hash into `dest` (16 bytes).
 SFUNC fio_u256 fio_risky256(const void *data, uint64_t len);
 ```
 
-256-bit RiskyHash. Based on the A3 (Zero-Copy ILP) design: two 512-bit states, 128 bytes per iteration, multiply-fold with cross-lane mixing. Returns a `fio_u256`.
+256-bit RiskyHash. Two 512-bit lanes, 128 bytes per iteration, multiply-fold rounds with round constants and cross-lane mixing. Each 64-byte block is absorbed with feed-forward (`v = round(v ^ block) + v`), so a chosen block can't erase earlier input. Returns a `fio_u256`.
+
+The hash has no seed: anyone can compute it, so it doesn't protect against chosen inputs (for example, hash flooding). Use `fio_risky256_keyed` with a secret key for attacker-influenced data. Outputs may change between versions; use Stable Hash for stored values.
 
 #### `fio_risky512`
 
@@ -123,6 +141,30 @@ SFUNC fio_u512 fio_risky512(const void *data, uint64_t len);
 ```
 
 512-bit RiskyHash. The first 256 bits are identical to `fio_risky256`; the rest come from an extra squeeze round.
+
+#### `fio_risky256_keyed`
+
+```c
+SFUNC fio_u256 fio_risky256_keyed(const void *key,
+                                  uint64_t key_len,
+                                  const void *data,
+                                  uint64_t len);
+```
+
+Keyed 256-bit RiskyHash. The key seeds all 16 state words (both lanes), together with the key length and the data length. Keys of up to 64 bytes are used as-is; longer keys are first hashed with `fio_risky512`. Single pass: it costs about one `fio_risky256` call plus one round.
+
+Use a key with at least 128 bits of secret entropy. Fit for fast keyed hashing and key derivation where the output stays private; it is not a vetted cryptographic primitive.
+
+#### `fio_risky512_keyed`
+
+```c
+SFUNC fio_u512 fio_risky512_keyed(const void *key,
+                                  uint64_t key_len,
+                                  const void *data,
+                                  uint64_t len);
+```
+
+Keyed 512-bit RiskyHash. The first 256 bits are identical to `fio_risky256_keyed` for the same key and data.
 
 #### `fio_risky256_hmac`
 
@@ -133,9 +175,15 @@ SFUNC fio_u256 fio_risky256_hmac(const void *key,
                                  uint64_t msg_len);
 ```
 
-RFC 2104 HMAC using `fio_risky256` as the hash, 64-byte block size. Keys longer than 64 bytes are hashed first. Securely zeros intermediates.
+Keyed MAC with a 32-byte tag, built as a nested keyed hash:
 
-**Note:** the underlying hash is non-cryptographic; standard HMAC security proofs do not apply. Use Blake2 for cryptographic HMAC.
+```
+tag = Keyed(key, outer, Keyed(key, inner, msg))
+```
+
+`inner` and `outer` are domain separation values, so the tag differs from `fio_risky256_keyed`. This is not RFC 2104 HMAC: both passes key both lanes, and the inner digest is never exposed. Key material, state and the inner digest are wiped before returning.
+
+**Note:** the underlying hash is non-cryptographic and unvetted. Use Blake2 or Poly1305 when a cryptographic MAC is required.
 
 #### `fio_risky512_hmac`
 
@@ -146,7 +194,7 @@ SFUNC fio_u512 fio_risky512_hmac(const void *key,
                                  uint64_t msg_len);
 ```
 
-Same construction as `fio_risky256_hmac`, but with `fio_risky512` and a 64-byte digest.
+Same construction as `fio_risky256_hmac`, with 512-bit inner and outer digests (64-byte tag).
 
 ### Example
 

@@ -106,6 +106,41 @@ FIO_SFUNC void FIO_NAME_TEST(stl, secret_long_input)(void) {
              "long secret should hash to a non-zero value");
 }
 
+FIO_SFUNC void FIO_NAME_TEST(stl, secret_mask_stability)(void) {
+  /* Values stored earlier must survive later setter calls. */
+  fio_u512 a, b, a_expected;
+  fio_secret_set_at(&a, (char *)"secret-a", 8);
+  a_expected = fio_secret_at(&a);
+  fio_secret_set((char *)"global-secret", 13, 0);
+  fio_u512 g = fio_secret();
+  fio_secret_set_at(&b, (char *)"secret-b", 8);
+  fio_u512 a_later = fio_secret_at(&a);
+  FIO_ASSERT(fio_u512_is_eq(&a_expected, &a_later),
+             "fio_secret_at value changed after another setter call");
+  fio_u512 g_later = fio_secret();
+  FIO_ASSERT(fio_u512_is_eq(&g, &g_later),
+             "global secret changed after an unrelated fio_secret_set_at");
+  /* the stored hash must equal an independent SHA-512 of the input */
+  fio_u512 h = fio_sha512("secret-a", 8);
+  FIO_ASSERT(fio_u512_is_eq(&h, &a_later), "secret hash should be SHA-512");
+  fio_u512 n = fio_secret_at(NULL);
+  FIO_ASSERT(fio_u512_is_eq(&n, &(fio_u512){0}), "NULL secret should be zero");
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, secret_whitespace_is_random)(void) {
+  const char *ws[] = {" ", "   ", " \t\r\n ", "\n"};
+  for (size_t i = 0; i < sizeof(ws) / sizeof(ws[0]); ++i) {
+    fio_secret_set((char *)"known-secret", 12, 0);
+    FIO_ASSERT(!fio_secret_is_random(), "known secret should not be random");
+    fio_secret_set((char *)ws[i], strlen(ws[i]), 0);
+    FIO_ASSERT(fio_secret_is_random(),
+               "whitespace-only secret %zu should be marked random", i);
+  }
+  /* mixed whitespace + hex is a configured secret */
+  fio_secret_set((char *)" de ad ", 7, 0);
+  FIO_ASSERT(!fio_secret_is_random(), "hex secret should not be random");
+}
+
 int main(void) {
   FIO_NAME_TEST(stl, secret_basic)();
   FIO_NAME_TEST(stl, secret_set_at)();
@@ -113,5 +148,7 @@ int main(void) {
   FIO_NAME_TEST(stl, secret_hex_variations)();
   FIO_NAME_TEST(stl, secret_empty_becomes_random)();
   FIO_NAME_TEST(stl, secret_long_input)();
+  FIO_NAME_TEST(stl, secret_mask_stability)();
+  FIO_NAME_TEST(stl, secret_whitespace_is_random)();
   return 0;
 }

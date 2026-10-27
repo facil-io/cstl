@@ -115,10 +115,12 @@ fio_string_write2(&str, my_realloc,
 #define FIO_STRING_WRITE_UNUM(num)    /* unsigned integer */
 #define FIO_STRING_WRITE_HEX(num)     /* hex representation */
 #define FIO_STRING_WRITE_BIN(num)     /* binary representation */
-#define FIO_STRING_WRITE_FLOAT(num)   /* double */
+#define FIO_STRING_WRITE_FLOAT(num)   /* double, written using fio_ftoa */
 ```
 
 Helper macros that build `fio_string_write_s` items for `fio_string_write2`.
+
+Floats are written by `fio_ftoa(dest, num, 10)`: `%g` style (6 significant digits), with `.0` appended to integral values (`42.0`).
 
 ---
 
@@ -265,7 +267,9 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
                                      size_t encoded_len);
 ```
 
-Base32 encode / decode.
+RFC 4648 Base32 encode / decode. Encoding always pads with `=` to a multiple of 8 characters.
+
+Decoding is case insensitive, ignores whitespace (` \t\n\v\f\r\b`), accepts any amount of trailing `=` padding (including none) and ignores non-zero trailing bits. Empty, whitespace-only or padding-only input is a successful empty decode. Invalid characters, data after padding or 1, 3 or 6 trailing symbols (bits that can't form a byte) return `-1` and leave `dest` unchanged.
 
 #### `fio_string_write_base64enc` / `fio_string_write_base64dec`
 
@@ -282,6 +286,8 @@ SFUNC int fio_string_write_base64dec(fio_str_info_s *dest,
 ```
 
 Base64 encode / decode. Pass `url_encoded = 1` to use URL-safe alphabet.
+
+Decoding accepts both the standard and URL-safe alphabets, ignores whitespace (` \t\n\v\f\r\b`), accepts any amount of trailing `=` padding (including none) and ignores non-zero trailing bits. Empty, whitespace-only or padding-only input is a successful empty decode. Invalid characters, data after padding or a single trailing symbol (bits that can't form a byte) return `-1` and leave `dest` unchanged.
 
 #### `fio_string_write_url_enc` / `fio_string_write_url_dec` / `fio_string_write_path_dec`
 
@@ -331,7 +337,7 @@ SFUNC int fio_string_readfd(fio_str_info_s *dest,
                             size_t limit);
 ```
 
-Reads up to `limit` bytes from seekable file descriptor `fd` starting at `start_at`. Negative `start_at` counts from EOF. `limit == 0` reads to EOF.
+Reads up to `limit` bytes from seekable file descriptor `fd` starting at `start_at`. Negative `start_at` counts from EOF. `limit == 0` reads to EOF. Returns -1 on error, truncation, or a short read.
 
 #### `fio_string_readfile`
 
@@ -399,6 +405,14 @@ Returns a 16-byte-aligned capacity for `new_len`.
 
 Convenience macros pointing to the default callbacks.
 
+#### `fio_string_sys_reallocate`
+
+```c
+SFUNC int fio_string_sys_reallocate(fio_str_info_s *dst, size_t len);
+```
+
+Grows `dst` using libc `realloc` (for memory owned by the system allocator). Returns `0` on success or `-1` on failure (`dst` is unchanged).
+
 #### `fio_string_default_reallocate`
 
 ```c
@@ -426,6 +440,8 @@ Frees a buffer allocated with the default callbacks.
 ---
 
 ## UTF-8 Helpers
+
+These helpers never read past the given length (`str.len` or `buf_len`), so the input does not need to be NUL-terminated. A multi-byte sequence cut off by the end of the buffer counts as invalid. Validation is strict (RFC 3629), see [`fio_utf8_char_len`](./001%20utf8.md).
 
 #### `fio_string_utf8_valid`
 
@@ -600,7 +616,7 @@ FIO_SFUNC fio_keystr_s fio_keystr_init(fio_str_info_s str,
                                        void *(*alloc_func)(size_t len));
 ```
 
-Copies `str` into a persistent key. Strings short enough are embedded; otherwise `alloc_func` is used. Pass `capa == FIO_KEYSTR_CONST` to store a borrowed pointer.
+Copies `str` into a persistent key. Strings short enough are embedded; otherwise `alloc_func` is used. Pass `capa == FIO_KEYSTR_CONST` to store a borrowed pointer. If allocation fails, an empty key is returned.
 
 #### `fio_keystr_destroy`
 

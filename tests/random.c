@@ -4,6 +4,7 @@ Covers deterministic API edge cases from ./tests-old/random.c without the old
 statistical speed harness.
 ***************************************************************************** */
 #define FIO_RAND
+#define FIO_THREADS
 #include "test-helpers.h"
 
 static void fio___test_random_edge_cases(void) {
@@ -194,9 +195,93 @@ static void fio___test_random_uncorrelated(void) {
              d);
 }
 
+/* Concurrent fio_rand64 callers: every call advances the shared state and
+ * mixes in its atomic counter, so racing callers must never repeat a value
+ * (the old shared u128 cache repeated 14-22% of values and returned zeros).
+ * A true duplicate among 2^18 values is ~2^-29. */
+#define FIO___TEST_RAND_THREADS 8
+#define FIO___TEST_RAND_PER     (1U << 15)
+static uint64_t fio___test_rand_mt_out[FIO___TEST_RAND_THREADS *
+                                       FIO___TEST_RAND_PER];
+static int fio___test_rand_mt_go;
+
+static void *fio___test_rand_mt_task(void *p) {
+  uint64_t *out = fio___test_rand_mt_out + (uintptr_t)p * FIO___TEST_RAND_PER;
+  while (!fio_atomic_or(&fio___test_rand_mt_go, 0))
+    FIO_THREAD_RESCHEDULE();
+  for (size_t i = 0; i < FIO___TEST_RAND_PER; ++i)
+    out[i] = fio_rand64();
+  return NULL;
+}
+
+static int fio___test_rand_mt_cmp(const void *a, const void *b) {
+  const uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+  return (x > y) - (x < y);
+}
+
+static void fio___test_random_concurrent64(void) {
+  const size_t total = FIO___TEST_RAND_THREADS * FIO___TEST_RAND_PER;
+  fio_thread_t threads[FIO___TEST_RAND_THREADS];
+  for (uintptr_t i = 0; i < FIO___TEST_RAND_THREADS; ++i)
+    FIO_ASSERT(!fio_thread_create(threads + i,
+                                  fio___test_rand_mt_task,
+                                  (void *)i),
+               "fio_thread_create failed");
+  fio_atomic_or(&fio___test_rand_mt_go, 1);
+  for (size_t i = 0; i < FIO___TEST_RAND_THREADS; ++i)
+    fio_thread_join(threads + i);
+  qsort(fio___test_rand_mt_out,
+        total,
+        sizeof(uint64_t),
+        fio___test_rand_mt_cmp);
+  size_t dups = 0;
+  for (size_t i = 0; i < total; ++i) {
+    FIO_ASSERT(fio___test_rand_mt_out[i], "concurrent fio_rand64 returned 0");
+    dups += (i && fio___test_rand_mt_out[i] == fio___test_rand_mt_out[i - 1]);
+  }
+  FIO_ASSERT(!dups,
+             "concurrent fio_rand64 repeated %zu of %zu values",
+             dups,
+             total);
+}
+
+/* name##64 is name##128().u64[0]; with reseed_log 0 the stream is fixed, so
+ * reset replays it while reseed and on_fork must leave it. */
+static void fio___test_random_det_stream(void) {
+  uint64_t a[48];
+  fio___test_rng_det_reset();
+  for (size_t i = 0; i < 48; ++i)
+    a[i] = fio___test_rng_det64();
+  fio___test_rng_det_reset();
+  for (size_t i = 0; i < 48; ++i) {
+    const uint64_t v = fio___test_rng_det128().u64[0];
+    FIO_ASSERT(v && v == a[i], "name##64 should replay name##128 after reset");
+  }
+  for (size_t round = 0; round < 2; ++round) {
+    fio___test_rng_det_reset();
+    for (size_t i = 0; i < 32; ++i)
+      (void)fio___test_rng_det64();
+    if (round)
+      fio___test_rng_det_on_fork(NULL);
+    else
+      fio___test_rng_det_reseed();
+    for (size_t i = 0; i < 16; ++i) {
+      const uint64_t v = fio___test_rng_det64();
+      FIO_ASSERT(v, "name##64 returned 0 after %s", round ? "fork" : "reseed");
+      for (size_t j = 32; j < 48; ++j)
+        FIO_ASSERT(v != a[j],
+                   "name##64 replayed the parent stream after %s",
+                   round ? "on_fork" : "reseed");
+    }
+  }
+  fio___test_rng_det_reset();
+}
+
 int main(void) {
   fio___test_random_edge_cases();
   fio___test_random_secure();
   fio___test_random_uncorrelated();
+  fio___test_random_concurrent64();
+  fio___test_random_det_stream();
   return 0;
 }
