@@ -25,13 +25,13 @@ The crypto slice is a small, zero-dependency toolbox for code that needs to hash
 The core header defines two function pointer types:
 
 ```c
-typedef void(fio_crypto_enc_fn)(void *restrict mac,
-                                void *restrict data,
-                                size_t len,
-                                const void *ad,
-                                size_t adlen,
-                                const void *key,
-                                const void *nonce);
+typedef int(fio_crypto_enc_fn)(void *restrict mac,
+                               void *restrict data,
+                               size_t len,
+                               const void *ad,
+                               size_t adlen,
+                               const void *key,
+                               const void *nonce);
 
 typedef int(fio_crypto_dec_fn)(void *restrict mac,
                                void *restrict data,
@@ -51,7 +51,7 @@ Current AEAD implementations that match this shape include:
 
 These functions encrypt or decrypt `data` in place. `ad` is authenticated but not encrypted. `mac` is the authentication tag buffer; the current AEAD modules use 16-byte tags. Key and nonce sizes belong to the selected cipher, not to the function pointer type.
 
-Decryption returns `0` when authentication succeeds and `-1` when it fails. Treat any failure as “message not trusted”; do not parse, log in detail, or partially use the plaintext.
+Encryption returns `0` on success and `-1` when input exceeds the cipher's limits (the block counter would wrap); on failure `data` and `mac` are zeroed, so no keystream is reused and no plaintext or valid tag is left behind. Decryption returns `0` when authentication succeeds and `-1` when it fails (or input exceeds the cipher's limits). Neither aborts the process on bad input. Treat any failure as “message not trusted”; do not parse, log in detail, or partially use the plaintext.
 
 ## Safe Use, Plainly
 

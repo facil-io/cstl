@@ -31,6 +31,52 @@ FIO_SFUNC int FIO_NAME_TEST(stl, fiobj_task)(fiobj_each_s *e) {
   return 0;
 }
 
+typedef struct fiobj_each_test_state_s {
+  unsigned first;
+  unsigned second;
+  struct fiobj_each_test_state_s *next;
+} fiobj_each_test_state_s;
+
+FIO_SFUNC int fiobj_each_test_second(fiobj_each_s *e) {
+  fiobj_each_test_state_s *state = (fiobj_each_test_state_s *)e->udata;
+  ++state->second;
+  FIO_ASSERT(e->key == FIOBJ_INVALID ||
+                 FIOBJ_TYPE(e->key) == FIOBJ_T_STRING,
+             "each1 key invalid for array/hash");
+  return -1;
+}
+
+FIO_SFUNC int fiobj_each_test_first(fiobj_each_s *e) {
+  fiobj_each_test_state_s *state = (fiobj_each_test_state_s *)e->udata;
+  ++state->first;
+  e->task = fiobj_each_test_second;
+  e->udata = state->next;
+  return 0;
+}
+
+FIO_SFUNC void fiobj_each_test_adapters(void) {
+  FIOBJ a = fiobj_array_new();
+  FIOBJ h = fiobj_hash_new();
+  fiobj_each_test_state_s replacement = {0};
+  fiobj_each_test_state_s state = {.next = &replacement};
+  for (int i = 0; i < 3; ++i) {
+    fiobj_array_push(a, fiobj_num_new(i));
+  }
+  fiobj_hash_set2(h, "a", 1, fiobj_num_new(1));
+  fiobj_hash_set2(h, "b", 1, fiobj_num_new(2));
+  fiobj_hash_set2(h, "c", 1, fiobj_num_new(3));
+  FIO_ASSERT(fiobj_each1(a, fiobj_each_test_first, &state, 0) == 2 &&
+                 state.first == 1 && replacement.second == 1,
+             "array task replacement/stop position");
+  state = (fiobj_each_test_state_s){.next = &replacement};
+  replacement = (fiobj_each_test_state_s){0};
+  FIO_ASSERT(fiobj_each1(h, fiobj_each_test_first, &state, 0) == 2 &&
+                 state.first == 1 && replacement.second == 1,
+             "hash task replacement/stop position");
+  fiobj_free(a);
+  fiobj_free(h);
+}
+
 /* FIOBJ_T_DATA: a fio_data_s store spilling to a temporary file */
 FIO_SFUNC void FIO_NAME_TEST(stl, fiobj_data)(void) {
   fprintf(stderr, "* Testing FIOBJ Data (FIOBJ_T_DATA)\n");
@@ -179,7 +225,113 @@ FIO_SFUNC void FIO_NAME_TEST(stl, fiobj_data_large)(void) {
   free(src);
 }
 
+static void test_json_exact_input(void) {
+  size_t bom_used = 0;
+  FIOBJ bom = fiobj_json_parse2("\xEF\xBB\xBF", 3, &bom_used);
+  FIO_ASSERT(bom == FIOBJ_INVALID && bom_used == 3,
+             "BOM-only FIOBJ input must report progress without a root");
+  static const char *const numbers[] = {"12345678901234567", "1.25", "0x123", "0b101", "-42"};
+  for (size_t i = 0; i < sizeof(numbers) / sizeof(*numbers); ++i) {
+    size_t len = strlen(numbers[i]);
+    /* A readable numeric suffix is outside the supplied input slice. */
+    char *buf = malloc(len + 9);
+    FIO_ASSERT(buf, "allocation failed");
+    memcpy(buf, numbers[i], len);
+    memcpy(buf + len, "77777777", 9);
+    size_t consumed = 0;
+    FIOBJ obj = fiobj_json_parse(FIO_STR_INFO2(buf, len), &consumed);
+    FIO_ASSERT(obj != FIOBJ_INVALID && consumed == len,
+               "JSON read outside input: %zu != %zu", consumed, len);
+    fiobj_free(obj);
+    free(buf);
+    buf = malloc(len);
+    FIO_ASSERT(buf, "allocation failed");
+    memcpy(buf, numbers[i], len);
+    obj = fiobj_json_parse(FIO_STR_INFO2(buf, len), &consumed);
+    FIO_ASSERT(obj != FIOBJ_INVALID && consumed == len,
+               "exact JSON input failed");
+    fiobj_free(obj);
+    free(buf);
+  }
+}
+
 int main(void) {
+  test_json_exact_input();
+  {
+    FIOBJ s = fiobj_str_new_cstr("abcdef", 6);
+    FIOBJ out = fiobj2json(s, s, 1);
+    FIO_ASSERT(out == s && !memcmp(fiobj2cstr(s).buf + 6, "\"abcdef\"", 8),
+               "JSON destination aliases source");
+    fiobj_free(s);
+    FIOBJ h = fiobj_hash_new();
+    FIOBJ input = fiobj_str_new_cstr("{\"a\":1,\"tail\":2}", 16);
+    fiobj_hash_set2(h, "a", 1, input);
+    size_t consumed = fiobj_hash_update_json(h, fiobj2cstr(input));
+    FIO_ASSERT(consumed == 16 && fiobj2i(fiobj_hash_get2(h, "tail", 4)) == 2,
+               "JSON update must retain aliased input through overwrite");
+    fiobj_free(h);
+    char digit = '7';
+    FIOBJ_STR_TEMP_VAR_STATIC(view, &digit, 1);
+    FIO_ASSERT(fiobj2i(view) == 7 && fiobj2f(view) == 7,
+               "exact-sized numeric view");
+    FIOBJ_STR_TEMP_DESTROY(view);
+    FIOBJ base = fiobj_object_new();
+    FIO_ASSERT(base, "base constructor");
+    fiobj_free(base);
+    FIOBJ boxed = fiobj_num_new(INTPTR_MAX);
+    FIO_ASSERT(boxed && fiobj_each1(boxed, NULL, NULL, 0) == 0,
+               "boxed number generic iteration");
+    fiobj_free(boxed);
+    FIOBJ array = fiobj_array_new();
+    fiobj_array_push(array, fiobj_dup(array));
+    (void)fiobj2hash(array);
+    /* Break the cycle before releasing the array. */
+    FIOBJ child = FIOBJ_INVALID;
+    fiobj_array_pop(array, &child);
+    fiobj_free(child);
+    fiobj_free(array);
+  }
+  {
+    FIOBJ f = fiobj_float_new(NAN);
+    FIO_ASSERT(f && fiobj_float2i(f) == 0, "NaN integer conversion");
+    fiobj_free(f);
+    f = fiobj_float_new(INFINITY);
+    FIO_ASSERT(f && fiobj_float2i(f) == INTPTR_MAX,
+               "positive infinity integer conversion");
+    fiobj_free(f);
+    f = fiobj_float_new(-INFINITY);
+    FIO_ASSERT(f && fiobj_float2i(f) == INTPTR_MIN,
+               "negative infinity integer conversion");
+    fiobj_free(f);
+    f = fiobj_float_new((double)INTPTR_MIN);
+    FIO_ASSERT(f && fiobj_float2i(f) == INTPTR_MIN,
+               "minimum integer float conversion");
+    fiobj_free(f);
+    f = fiobj_float_new(-((double)INTPTR_MIN));
+    FIO_ASSERT(f && fiobj_float2i(f) == INTPTR_MAX,
+               "upper bound integer float conversion");
+    fiobj_free(f);
+    FIOBJ a = fiobj_float_new(1.0);
+    FIOBJ b = fiobj_float_new(nextafter(1.0, 2.0));
+    FIO_ASSERT(a && b && !fiobj_is_eq(a, b),
+               "adjacent float keys cannot compare approximately equal");
+    fiobj_free(a);
+    fiobj_free(b);
+    a = fiobj_float_new(0.42);
+    b = fiobj_float_new(0.42);
+    FIO_ASSERT(a && b && fiobj_is_eq(a, b) && fiobj2hash(a) == fiobj2hash(b),
+               "equal boxed floats must have matching hashes");
+    fiobj_free(a);
+    fiobj_free(b);
+    a = fiobj_float_new(0.0);
+    b = fiobj_float_new(-0.0);
+    FIO_ASSERT(a && b && !fiobj_is_eq(a, b),
+               "signed zero equality must match bitwise hashing");
+    fiobj_free(a);
+    fiobj_free(b);
+    FIO_ASSERT(fiobj_str_new_buf(SIZE_MAX) == FIOBJ_INVALID,
+               "oversized string capacity must fail");
+  }
   FIOBJ o = FIOBJ_INVALID;
   FIO_NAME_TEST(stl, fiobj_data)();
   FIO_NAME_TEST(stl, fiobj_data_large)();
@@ -279,6 +431,7 @@ int main(void) {
                "no bits are allocated / no allocations optimized away (%d)",
                (int)allocation_flags);
   }
+  fiobj_each_test_adapters();
   {
     FIOBJ a = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();
     o = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), new)();

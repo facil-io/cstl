@@ -101,7 +101,7 @@ The callback picks the strategy (for example a lookup, or a "set if missing"). R
 
 **NULL values:** a native NULL `obj` / `old` means "nothing". A value callback may return NULL as a value (for example, from `on_null`), and the parser stores it: `map_push` and `array_push` receive it. A key with no value (`{"a":}`) also stores NULL, while the empty slot after a trailing comma (`[1,]`) adds nothing. A replaced NULL never triggers conflict resolution. To resolve null conflicts by the rules, return a dedicated null object (FIOBJ uses `fiobj_null()`).
 
-**Errors:** any non-zero `err` (or `array_push` return value) stops the parse and is returned unchanged in `fio_json_result_s.err`.
+**Errors:** any non-zero `err` (or `array_push` return value) stops the parse and is returned unchanged in `fio_json_result_s.err`. Conflict helpers descend iteratively through at most `FIO_JSON_MAX_DEPTH` containers per call. Longer conflict chains return `FIO_JSON_ERROR_NESTING`, even when duplicate keys kept the input nesting shallow.
 
 **Conflict rules:** when a callback hands a replaced value back (in `old`, or in the `obj` of `map_push`), the parser applies these rules (an upload or any other non-map, non-array object counts as a scalar):
 

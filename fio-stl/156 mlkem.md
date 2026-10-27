@@ -51,6 +51,8 @@ SFUNC int fio_mlkem768_encaps(uint8_t ct[1088],
 
 Creates a ciphertext and shared secret for the holder of `pk`. Randomness comes from the system CSPRNG. Send `ct`; keep `ss` as the shared secret input to your KDF or protocol.
 
+Returns `-1` (without writing `ct`/`ss`) if `pk` fails the FIPS 203 modulus check (any encoded coefficient `>= q`); treat this as a malformed peer key.
+
 ### `fio_mlkem768_encaps_derand`
 
 ```c
@@ -75,6 +77,8 @@ Recovers the shared secret from a ciphertext and secret key.
 ML-KEM uses implicit rejection: invalid ciphertexts produce a pseudorandom shared secret derived from the secret key and ciphertext instead of a loud failure. That prevents chosen-ciphertext games from turning your error path into an oracle.
 
 Returns `0` for well-formed inputs.
+
+`sk` is trusted: it must come from `fio_mlkem768_keypair*` (or be validated on import). The FIPS 203 decapsulation-key hash check is not repeated per call.
 
 ## X25519MLKEM768 Hybrid
 

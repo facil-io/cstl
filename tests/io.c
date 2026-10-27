@@ -110,6 +110,10 @@ static void test_io_noop_and_protocol_set_init(void) {
     FIO_ASSERT(plain_pr.io_functions.start == fio_io_noop &&
                    plain_pr.io_functions.read == fio___io_func_default_read,
                "plaintext use should keep plaintext IO defaults");
+    FIO_ASSERT(plain_pr.io_functions.dup_context ==
+                       fio___io_func_default_dup_context &&
+                   !plain_pr.io_functions.dup_context(NULL),
+               "missing dup_context should default to a fail-closed stub");
   }
 
   fio_io_noop(NULL);
@@ -258,6 +262,13 @@ static void fio___test_io_env_on_close(void *udata) {
   (void)udata;
 }
 
+/* re-enters the environment from `on_close` (must not self-deadlock) */
+static void fio___test_io_env_on_close_reenter(void *udata) {
+  ++fio___test_io_env_close_count;
+  (void)fio_io_env_get(NULL, .name = FIO_BUF_INFO1((char *)"rep"), .type = 1);
+  (void)udata;
+}
+
 static void test_io_env_global(void) {
   fio___test_io_env_close_count = 0;
 
@@ -317,6 +328,22 @@ static void test_io_env_global(void) {
                             .type = 1) == (void *)0xBBBB,
              "replaced value should be visible");
   fio_io_env_remove(NULL, .name = FIO_BUF_INFO1((char *)"rep"), .type = 1);
+
+  /* reentrant `on_close` on replace and remove */
+  fio___test_io_env_close_count = 0;
+  fio_io_env_set(NULL,
+                 .name = FIO_BUF_INFO1((char *)"rep"),
+                 .type = 1,
+                 .udata = (void *)0xAAAA,
+                 .on_close = fio___test_io_env_on_close_reenter);
+  fio_io_env_set(NULL,
+                 .name = FIO_BUF_INFO1((char *)"rep"),
+                 .type = 1,
+                 .udata = (void *)0xBBBB,
+                 .on_close = fio___test_io_env_on_close_reenter);
+  fio_io_env_remove(NULL, .name = FIO_BUF_INFO1((char *)"rep"), .type = 1);
+  FIO_ASSERT(fio___test_io_env_close_count == 2,
+             "reentrant on_close should run on replace and remove");
 
   fprintf(stderr, "* global env set/get/unset/remove: OK\n");
 }
@@ -444,19 +471,19 @@ static void test_io_tls_helpers(void) {
     size_t expect_trust_each;
     const char *expect_trust_name;
   } url_tests[] = {
-      {"http://example.com", 0},
-      {"https://example.com", 1},
-      {"tcp://example.com", 0},
-      {"tcps://example.com", 1},
-      {"tls://example.com", 1},
-      {"ws://example.com", 0},
-      {"wss://example.com", 1},
-      {"udp://example.com", 0},
-      {"udps://example.com", 1},
+      {"http://example.com", .expect_tls = 0},
+      {"https://example.com", .expect_tls = 1},
+      {"tcp://example.com", .expect_tls = 0},
+      {"tcps://example.com", .expect_tls = 1},
+      {"tls://example.com", .expect_tls = 1},
+      {"ws://example.com", .expect_tls = 0},
+      {"wss://example.com", .expect_tls = 1},
+      {"udp://example.com", .expect_tls = 0},
+      {"udps://example.com", .expect_tls = 1},
       {"http://example.com?trust=ca.pem", 1, 1, 1, "ca.pem"},
       {"http://example.com?trust=sys", 1, 0, 1, NULL},
       {"http://example.com?trust=system", 1, 0, 1, NULL},
-      {NULL, 0},
+      {NULL, .expect_tls = 0},
   };
   for (size_t i = 0; url_tests[i].url; ++i) {
     fio_url_s u = fio_url_parse(url_tests[i].url, FIO_STRLEN(url_tests[i].url));
@@ -491,6 +518,26 @@ static void test_io_tls_helpers(void) {
         url_tests[i].expect_trust_name ? url_tests[i].expect_trust_name
                                        : "system",
         trust_state.name ? trust_state.name : "system");
+    fio_io_tls_free(t);
+  }
+
+  /* an overlong URL trust value must fail closed (never "no verification") */
+  {
+    char url[256];
+    size_t len =
+        (size_t)snprintf(url, sizeof(url), "https://example.com?trust=");
+    FIO_MEMSET(url + len, 'a', 130);
+    url[len + 130] = 0;
+    fio_url_s u = fio_url_parse(url, len + 130);
+    fio_io_tls_s *t = fio_io_tls_from_url(NULL, u);
+    FIO_ASSERT(t, "overlong trust URL should still create a TLS object");
+    FIO_ASSERT(fio_io_tls_trust_count(t),
+               "failed trust instruction must keep verification required");
+    fio___test_io_tls_trust_state_s trust_state = {0};
+    FIO_ASSERT(fio_io_tls_each(t,
+                               .udata2 = &trust_state,
+                               .each_trust = fio___test_io_tls_capture_trust),
+               "trust iteration must fail for an incomplete trust config");
     fio_io_tls_free(t);
   }
 
@@ -597,6 +644,348 @@ static void test_io_connect_invalid_host(void) {
           "* invalid-host connect (on_failed=1, application callbacks=0, "
           "IO allocations=0): OK\n");
 }
+
+/* *****************************************************************************
+Unit test - fio_io_connect `.verify` trust policy (connect-time only)
+
+A failing TLS variant stands in for a real backend (this unit links none): its
+`build_context` returns NULL, meaning the TLS context couldn't be built, so a
+TLS connect fails before any socket exists. The trust policy is applied to the
+caller's TLS object before the build, so it stays observable (no network peer
+required). Without a TLS object, `build_context(NULL)` is a plain no-context
+result and the variant behaves like plain sockets.
+***************************************************************************** */
+static void *fio___test_io_tls_fail_build(fio_io_tls_s *tls,
+                                          uint8_t is_client) {
+  (void)tls, (void)is_client;
+  return NULL;
+}
+static ssize_t fio___test_io_tls_fail_read(fio_socket_i fd,
+                                           void *buf,
+                                           size_t len,
+                                           void *ctx) {
+  (void)ctx;
+  return fio_sock_read(fd, buf, len);
+}
+static void fio___test_io_tls_fail_free(void *ctx) { (void)ctx; }
+
+/* Retain one observation reference: each call must consume only its dup. */
+static void test_io_tls_settings_transfer(void) {
+  fio_io_protocol_s pr = {
+      .io_functions = {.build_context = fio___test_io_tls_fail_build,
+                       .free_context = fio___test_io_tls_fail_free,
+                       .read = fio___test_io_tls_fail_read},
+  };
+  fio_io_tls_s *tls = fio_io_tls_new();
+  char long_url[2026];
+  FIO_MEMSET(long_url, 'a', sizeof(long_url) - 1);
+  long_url[sizeof(long_url) - 1] = 0;
+  int log_level = FIO_LOG_LEVEL_GET();
+  FIO_LOG_LEVEL_SET(FIO_LOG_LEVEL_FATAL);
+  FIO_ASSERT(!fio_io_listen(.tls = fio_io_tls_dup(tls)),
+             "listen without a protocol must fail");
+  FIO_ASSERT(fio_io_tls_references(tls) == 1,
+             "invalid listen must release its TLS settings reference");
+  FIO_ASSERT(!fio_io_listen(.url = long_url,
+                            .protocol = &pr,
+                            .tls = fio_io_tls_dup(tls)),
+             "overlong listen URL must fail");
+  FIO_ASSERT(fio_io_tls_references(tls) == 1,
+             "overlong listen must release its TLS settings reference");
+  FIO_ASSERT(!fio_io_connect("tcp://127.0.0.1:9",
+                             .tls = fio_io_tls_dup(tls)),
+             "connect without a protocol must fail");
+  FIO_ASSERT(fio_io_tls_references(tls) == 1,
+             "invalid connect must release its TLS settings reference");
+  FIO_ASSERT(!fio_io_connect(NULL, .protocol = &pr, .tls = fio_io_tls_dup(tls)),
+             "connect without a URL must fail");
+  FIO_ASSERT(fio_io_tls_references(tls) == 1,
+             "missing URL must release its TLS settings reference");
+  FIO_ASSERT(!fio_io_listen(.url = "tcp://127.0.0.1:0",
+                            .protocol = &pr,
+                            .tls = fio_io_tls_dup(tls)),
+             "failed TLS build must fail listen");
+  FIO_ASSERT(fio_io_tls_references(tls) == 1,
+             "failed listen build must release its TLS settings reference");
+  FIO_ASSERT(!fio_io_connect("tcp://127.0.0.1:9",
+                             .protocol = &pr,
+                             .tls = fio_io_tls_dup(tls)),
+             "failed TLS build must fail connect");
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio_io_tls_references(tls) == 1,
+             "failed connect build must release its TLS settings reference");
+  FIO_LOG_LEVEL_SET(log_level);
+  fio_io_tls_free(tls);
+  fprintf(stderr, "* TLS settings transfer on failed listen / connect: OK\n");
+}
+
+static void test_io_connect_verify(void) {
+  static fio_io_protocol_s pr;
+  pr = (fio_io_protocol_s){
+      .timeout = 100,
+      .io_functions = {.build_context = fio___test_io_tls_fail_build,
+                       .free_context = fio___test_io_tls_fail_free,
+                       .read = fio___test_io_tls_fail_read},
+  };
+  struct {
+    const char *url;
+    const char *trust; /* explicit trust entry, or NULL */
+    uint8_t verify;
+    uint8_t expect_sys;
+    uintptr_t expect_count;
+    const char *desc;
+  } cases[] = {
+      {"tls://fio-io-test.invalid:19876", NULL, 1, 1, 0, "no trust + verify"},
+      {"tls://fio-io-test.invalid:19876", NULL, 0, 0, 0, "default (no verify)"},
+      {"tls://fio-io-test.invalid:19876", "ca.pem", 1, 0, 1, "explicit trust"},
+      {"tls://fio-io-test.invalid:19876?trust=ca.pem",
+       NULL,
+       1,
+       0,
+       1,
+       "URL trust"},
+      {"tls://fio-io-test.invalid:19876?trust=sys", NULL, 0, 1, 0, "trust=sys"},
+  };
+  int log_level = FIO_LOG_LEVEL_GET();
+  FIO_LOG_LEVEL_SET(FIO_LOG_LEVEL_FATAL); /* expected TLS build errors */
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    fio_io_tls_s *tls = fio_io_tls_new();
+    if (cases[i].trust)
+      fio_io_tls_trust_add(tls, cases[i].trust);
+    fio_io_s *io = fio_io_connect(cases[i].url,
+                                  .protocol = &pr,
+                                  .tls = fio_io_tls_dup(tls), /* inspected */
+                                  .timeout = 100,
+                                  .verify = cases[i].verify);
+    FIO_ASSERT(!io,
+               "verify (%s): failed TLS build should fail connect",
+               cases[i].desc);
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(tls->trust_sys == cases[i].expect_sys,
+               "verify (%s): system trust should be %d",
+               cases[i].desc,
+               (int)cases[i].expect_sys);
+    FIO_ASSERT(fio_io_tls_trust_count(tls) == cases[i].expect_count,
+               "verify (%s): explicit trust count should be %zu",
+               cases[i].desc,
+               (size_t)cases[i].expect_count);
+    fio_io_tls_free(tls);
+  }
+  /* a plain (non-TLS) URL ignores `.verify` (must not create state/leak) */
+  fio_io_s *io = fio_io_connect("tcp://fio-io-test.invalid:19876",
+                                .protocol = &pr,
+                                .timeout = 100,
+                                .verify = 1);
+  FIO_ASSERT(!io, "verify (plain): invalid host should fail");
+  fio_queue_perform_all(fio_io_queue());
+  FIO_LOG_LEVEL_SET(log_level);
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io_connecting_s),
+             "verify: connecting state should be cleaned up");
+  fprintf(stderr, "* fio_io_connect .verify trust policy: OK\n");
+}
+
+/* *****************************************************************************
+Unit test - TLS requested => TLS is a must (failing TLS variant, no reactor)
+
+With a TLS object in effect, `build_context` returning NULL means the TLS
+context couldn't be built: listen / connect fail (`on_stop` / `on_failed` run
+once). Without a TLS object the same functions get `tls == NULL`, nothing TLS
+is requested, and listen / connect proceed.
+***************************************************************************** */
+static size_t fio___test_io_must_stopped;
+static size_t fio___test_io_must_failed;
+static void fio___test_io_must_on_stop(fio_io_protocol_s *p, void *u) {
+  ++fio___test_io_must_stopped;
+  (void)p, (void)u;
+}
+static void fio___test_io_must_on_failed(fio_io_protocol_s *p, void *u) {
+  ++fio___test_io_must_failed;
+  (void)p, (void)u;
+}
+
+static void test_io_tls_must(void) {
+  static fio_io_protocol_s pr;
+  pr = (fio_io_protocol_s){
+      .timeout = 100,
+      .io_functions = {.build_context = fio___test_io_tls_fail_build,
+                       .free_context = fio___test_io_tls_fail_free,
+                       .read = fio___test_io_tls_fail_read},
+  };
+  int log_level = FIO_LOG_LEVEL_GET();
+  FIO_LOG_LEVEL_SET(FIO_LOG_LEVEL_FATAL); /* expected TLS build errors */
+  /* TLS requested (scheme), NULL context: listen fails, on_stop runs once */
+  fio_io_listener_s *l = fio_io_listen(.url = "tls://127.0.0.1:0",
+                                       .protocol = &pr,
+                                       .on_stop = fio___test_io_must_on_stop,
+                                       .hide_from_log = 1);
+  FIO_ASSERT(!l, "TLS listen with a NULL context must fail");
+  FIO_ASSERT(fio___test_io_must_stopped == 1, "failed TLS listen: on_stop");
+  /* TLS requested (object), NULL context: connect fails, on_failed once */
+  fio_io_tls_s *tls = fio_io_tls_new();
+  fio_io_s *io = fio_io_connect("tcp://127.0.0.1:9",
+                                .protocol = &pr,
+                                .on_failed = fio___test_io_must_on_failed,
+                                .tls = tls); /* the call owns `tls` */
+  FIO_ASSERT(!io, "TLS connect with a NULL context must fail");
+  FIO_ASSERT(!fio___test_io_must_failed, "on_failed runs on the IO queue");
+  fio_queue_perform_all(fio_io_queue());
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_io_must_failed == 1, "TLS connect: on_failed once");
+  FIO_LOG_LEVEL_SET(log_level);
+
+  /* no TLS object: `build_context(NULL)` yields no context, not a failure */
+  fio___test_io_must_stopped = 0;
+  l = fio_io_listen(.url = "tcp://127.0.0.1:0",
+                    .protocol = &pr,
+                    .on_stop = fio___test_io_must_on_stop,
+                    .hide_from_log = 1);
+  FIO_ASSERT(l && !fio_io_listener_is_tls(l), "non-TLS listen should work");
+  FIO_ASSERT(!fio___test_io_must_stopped, "non-TLS listen: early on_stop");
+  fio_io_listen_stop(l);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_io_must_stopped == 1, "non-TLS listen: on_stop");
+#if FIO_OS_POSIX
+  fio_socket_i srv =
+      fio_sock_open2("tcp://127.0.0.1:0", FIO_SOCK_SERVER | FIO_SOCK_TCP);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(srv), "tls-must listener failed");
+  struct sockaddr_in a = {0};
+  socklen_t alen = sizeof(a);
+  FIO_ASSERT(!getsockname(srv, (struct sockaddr *)&a, &alen), "getsockname");
+  char url[64];
+  snprintf(url, sizeof(url), "tcp://127.0.0.1:%u", (unsigned)ntohs(a.sin_port));
+  fio___test_io_must_failed = 0;
+  io = fio_io_connect(url,
+                      .protocol = &pr,
+                      .on_failed = fio___test_io_must_on_failed);
+  FIO_ASSERT(io, "non-TLS connect with a NULL context should work");
+  fio_io_dup(io);
+  fio_queue_perform_all(fio_io_queue()); /* attach */
+  fio_io_close_now(io);
+  fio_io_free(io);
+  fio_queue_perform_all(fio_io_queue());
+  fio_sock_close(srv);
+  FIO_ASSERT(fio___test_io_must_failed <= 1, "non-TLS connect: on_failed");
+#endif
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io_connecting_s),
+             "tls-must: connecting state leaked");
+  fprintf(stderr, "* TLS requested => listen / connect fail on NULL: OK\n");
+}
+
+/* *****************************************************************************
+Regression - readable client before connection promotion
+
+The temporary connecting protocol used to default `on_data` to
+`fio_io_suspend`. If server input arrived before the writable event promoted
+the client, the suspension survived promotion and prevented all future reads.
+Drive the actual temporary handler directly to make that ordering deterministic.
+***************************************************************************** */
+#if FIO_OS_POSIX
+static struct {
+  fio_io_protocol_s protocol;
+  int attached;
+  int data_calls;
+  int closed;
+  int failed;
+  size_t received_len;
+  char received[8];
+} fio___test_io_early;
+
+static void fio___test_io_early_on_attach(fio_io_s *io) {
+  ++fio___test_io_early.attached;
+  FIO_ASSERT(fio_io_protocol(io) == &fio___test_io_early.protocol,
+             "early-read client attached the wrong protocol");
+  FIO_ASSERT(!fio_io_is_suspended(io),
+             "early-read promotion must not preserve temporary suspension");
+}
+
+static void fio___test_io_early_on_data(fio_io_s *io) {
+  ++fio___test_io_early.data_calls;
+  fio___test_io_early.received_len =
+      fio_io_read(io,
+                  fio___test_io_early.received,
+                  sizeof(fio___test_io_early.received));
+}
+
+static void fio___test_io_early_on_close(void *buffer, void *udata) {
+  ++fio___test_io_early.closed;
+  (void)buffer, (void)udata;
+}
+
+static void fio___test_io_early_on_failed(fio_io_protocol_s *pr, void *udata) {
+  ++fio___test_io_early.failed;
+  (void)pr, (void)udata;
+}
+
+static void test_io_connect_early_read(void) {
+  FIO_MEMSET(&fio___test_io_early, 0, sizeof(fio___test_io_early));
+  fio___test_io_early.protocol = (fio_io_protocol_s){
+      .on_attach = fio___test_io_early_on_attach,
+      .on_data = fio___test_io_early_on_data,
+      .on_close = fio___test_io_early_on_close,
+  };
+
+  fio_socket_i listener =
+      fio_sock_open2("tcp://127.0.0.1:0", FIO_SOCK_SERVER | FIO_SOCK_TCP);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(listener), "early-read listener failed");
+  struct sockaddr_in address = {0};
+  socklen_t address_len = sizeof(address);
+  FIO_ASSERT(!getsockname(listener,
+                          (struct sockaddr *)&address,
+                          &address_len),
+             "early-read getsockname failed");
+  char url[64];
+  snprintf(url,
+           sizeof(url),
+           "tcp://127.0.0.1:%u",
+           (unsigned)ntohs(address.sin_port));
+
+  fio_io_s *io = fio_io_connect(url,
+                                .protocol = &fio___test_io_early.protocol,
+                                .on_failed = fio___test_io_early_on_failed,
+                                .timeout = 1000);
+  FIO_ASSERT(io, "early-read fio_io_connect failed");
+  fio_io_dup(io); /* observation reference while driving callbacks directly */
+  FIO_ASSERT(fio_sock_wait_io(listener, POLLIN, 1000) & POLLIN,
+             "early-read listener did not become readable");
+  fio_socket_i peer = fio_sock_accept(listener, NULL, NULL);
+  FIO_ASSERT(FIO_SOCK_FD_ISVALID(peer), "early-read accept failed");
+  FIO_ASSERT(fio_sock_write(peer, "early", 5) == 5,
+             "early-read server write failed");
+
+  /* Attach the temporary protocol without polling for readiness events. */
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio_io_protocol(io) != &fio___test_io_early.protocol,
+             "early-read test setup promoted the client too soon");
+  FIO_ASSERT(fio_sock_wait_io(fio_io_fd(io), POLLIN, 1000) & POLLIN,
+             "early-read client did not have pending input");
+  fio_io_protocol(io)->on_data(io);
+
+  FIO_ASSERT(fio_io_protocol(io) == &fio___test_io_early.protocol,
+             "readable connecting client was not promoted");
+  FIO_ASSERT(fio___test_io_early.attached == 1,
+             "early-read on_attach should run exactly once");
+  fio___test_io_early.protocol.on_data(io);
+  FIO_ASSERT(fio___test_io_early.data_calls == 1 &&
+                 fio___test_io_early.received_len == 5 &&
+                 !FIO_MEMCMP(fio___test_io_early.received, "early", 5),
+             "early-read promotion must preserve pending input");
+
+  fio_io_close_now(io);
+  fio_io_free(io);
+  fio_queue_perform_all(fio_io_queue());
+  fio_sock_close(peer);
+  fio_sock_close(listener);
+  FIO_ASSERT(!fio___test_io_early.failed,
+             "early-read connection unexpectedly failed");
+  FIO_ASSERT(fio___test_io_early.closed == 1,
+             "early-read on_close should run exactly once");
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io),
+             "early-read IO object leaked");
+  FIO_ASSERT(!FIO_LEAK_COUNTER_COUNT(fio___io_connecting_s),
+             "early-read connecting state leaked");
+  fprintf(stderr, "* connect promotion on early readability: OK\n");
+}
+#endif
 
 /* *****************************************************************************
 Integration tests - protocol callbacks and IO object lifecycle
@@ -1626,6 +2015,60 @@ static void test_io_open_predicate(void) {
 }
 
 /* *****************************************************************************
+Unit tests - the cached tick is fresh while the reactor is stopped
+
+The tick is only maintained while the reactor runs. Timers and IO objects
+created between reactor runs must start from "now", not from the previous
+run's last poll (a stale start made repeating timers fire catch-up bursts).
+***************************************************************************** */
+static int fio___test_io_stale_tick_timer(void *u1, void *u2) {
+  (void)u1, (void)u2;
+  return -1;
+}
+
+static void test_io_stale_tick(void) {
+  FIO_ASSERT(!fio_io_is_running(), "stale tick test needs a stopped reactor");
+  const int64_t stale = 60000;
+  int64_t now = fio_time_milli();
+  FIO___IO.tick = now - stale;
+  FIO___IO.time_ms = fio_time2milli(fio_time_real()) - stale;
+  uint32_t queued = fio_queue_count(fio_io_queue());
+  for (int i = 0; i < 64; ++i)
+    FIO_ASSERT(fio_io_last_tick() >= now,
+               "fio_io_last_tick must be fresh while stopped");
+  FIO_ASSERT(fio_io_last_tick_time() >=
+                 fio_time2milli(fio_time_real()) - (stale / 2),
+             "fio_io_last_tick_time must be fresh while stopped");
+  FIO_ASSERT(fio_queue_count(fio_io_queue()) == queued,
+             "stopped tick reads must not queue update tasks");
+
+  FIO___IO.tick = now - stale;
+  fio_io_run_every(.fn = fio___test_io_stale_tick_timer,
+                   .every = 1,
+                   .repetitions = 1);
+  FIO_ASSERT(fio_timer_next_at(&FIO___IO.timer) > now,
+             "timers scheduled while stopped must start from now");
+
+#if FIO_OS_POSIX
+  int sv[2];
+  FIO_ASSERT(!socketpair(AF_UNIX, SOCK_STREAM, 0, sv), "socketpair failed");
+  static fio_io_protocol_s pr;
+  FIO___IO.tick = now - stale;
+  fio_io_s *io = fio_io_attach_fd(sv[0], &pr, NULL, NULL);
+  FIO_ASSERT(io, "attach failed");
+  FIO_ASSERT(io->active >= now,
+             "IO attached while stopped must start its timeout from now");
+  fio_io_dup(io);
+  fio_queue_perform_all(fio_io_queue()); /* attach */
+  fio_io_close_now(io);
+  fio_io_free(io);
+  fio_queue_perform_all(fio_io_queue());
+  close(sv[1]);
+#endif
+  fprintf(stderr, "* stale tick refreshed while stopped: OK\n");
+}
+
+/* *****************************************************************************
 Main entry point
 ***************************************************************************** */
 int main(void) {
@@ -1636,6 +2079,7 @@ int main(void) {
   test_io_close_write_order();
   test_io_noop_and_protocol_set_init();
   test_io_defer();
+  test_io_stale_tick();
 #if FIO_OS_POSIX
   test_io_write2_null_io_ownership();
 #endif
@@ -1644,6 +2088,12 @@ int main(void) {
   test_io_tls_helpers();
   test_io_default_functions();
   test_io_connect_invalid_host();
+  test_io_tls_settings_transfer();
+  test_io_connect_verify();
+  test_io_tls_must();
+#if FIO_OS_POSIX
+  test_io_connect_early_read();
+#endif
 
   test_io_shared_protocol_listen_connect();
   test_io_protocol_set_null_lifecycle();

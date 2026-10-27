@@ -509,16 +509,16 @@ Extract 128-bit halves from a 256-bit value. `extracti128` uses `imm8 & 1`.
 #### `fio_fx86_256_sha512rnds2_epi64`, `fio_fx86_256_sha512msg1_epi64`, `fio_fx86_256_sha512msg2_epi64`
 
 ```c
-FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i state1,
-                                                        fio_fx86_m256i state0,
-                                                        fio_fx86_m256i wk);
+FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512rnds2_epi64(fio_fx86_m256i dst,
+                                                        fio_fx86_m256i src,
+                                                        fio_fx86_m128i wk);
 FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512msg1_epi64(fio_fx86_m256i w0,
-                                                       fio_fx86_m256i w1);
+                                                       fio_fx86_m128i w1);
 FIO_IFUNC fio_fx86_m256i fio_fx86_256_sha512msg2_epi64(fio_fx86_m256i w0,
                                                        fio_fx86_m256i w1);
 ```
 
-Intel SHA-512 extension helpers using four 64-bit lanes.
+Intel SHA-512 extension helpers. `rnds2` takes {C,D,G,H} in `dst` and {A,B,E,F} in `src` (high to low lanes), with two W+K words in `wk`. `msg1` takes only the low qword of its 128-bit second operand.
 
 ### Shadowed Intrinsic Families
 

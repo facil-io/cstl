@@ -3,6 +3,7 @@
 #define FIO_URL_ENCODED
 #include "test-helpers.h"
 
+#include <limits.h>
 #include <stdio.h>
 
 /* Test context */
@@ -45,6 +46,15 @@ static int on_pair_verify(void *udata,
     ctx->verified = 1;
   }
   return 7; /* Stop after first pair */
+}
+
+/* Callback errors are opaque, including parser's allocation-error value. */
+static int on_pair_error(void *udata,
+                         fio_buf_info_s name,
+                         fio_buf_info_s value) {
+  (void)name;
+  (void)value;
+  return *(const int *)udata;
 }
 
 /* Context for name-only test */
@@ -145,6 +155,24 @@ int main(void) {
   /* Empty string */
   TEST_PARSE("Empty string", "", 0, 0);
 
+  /* Empty NULL input is valid in callback and counting-only modes.
+   * Volatile inputs keep sanitizer builds from folding away the call. */
+  {
+    static const fio_url_encoded_parser_callbacks_s count_only = {0};
+    const char *volatile empty = NULL;
+    volatile size_t empty_len = 0;
+    test_ctx_s ctx = {.stop_at = -1};
+    for (size_t i = 0; i < 3; ++i) {
+      fio_url_encoded_result_s r =
+          fio_url_encoded_parse(i == 0 ? &callbacks : (i == 1 ? &count_only : NULL),
+                                &ctx,
+                                empty,
+                                empty_len);
+      FIO_ASSERT(!r.count && !r.consumed && !r.err && !ctx.count,
+                 "Empty NULL input must succeed without invoking callbacks");
+    }
+  }
+
   /* Single pair */
   TEST_PARSE("Single pair", "name=value", 1, strlen("name=value"));
 
@@ -187,6 +215,20 @@ int main(void) {
                r.count,
                r.consumed,
                r.err);
+  }
+
+  /* Preserve all callback error values and exclude the failed pair. */
+  {
+    static const fio_url_encoded_parser_callbacks_s error_callbacks = {
+        .on_pair = on_pair_error,
+    };
+    int errors[] = {-1, INT_MIN, INT_MAX};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(*errors); ++i) {
+      fio_url_encoded_result_s r =
+          fio_url_encoded_parse(&error_callbacks, &errors[i], "&&a=b", 5);
+      FIO_ASSERT(r.err == errors[i] && !r.count && r.consumed == 2,
+                 "Callback error %d was not preserved", errors[i]);
+    }
   }
 
   /* NULL callbacks or NULL on_pair: counting-only mode (no decoding). */
@@ -409,6 +451,8 @@ int main(void) {
         {"%E6%97%A5=%E6%9C%AC", "\xE6\x97\xA5", 3, "\xE6\x9C\xAC", 3},
         {"a%ZZ%=b%2%GG", "a%ZZ%", 5, "b%2%GG", 6},
         {"%u0041=%u20AC", "A", 1, "\xE2\x82\xAC", 3},
+        {"%u0061dmin=%uD83D%uDE00", "admin", 5, "\xF0\x9F\x98\x80", 4},
+        {"%u=%u004", "%u", 2, "%u004", 5},
         {"name+only", "name only", 9, "", 0},
         {"=%2B", "", 0, "+", 1},
         {"=", "", 0, "", 0},
@@ -427,6 +471,79 @@ int main(void) {
       FIO_ASSERT(r.err == 7 && !r.count && !r.consumed,
                  "Decoded callback stop result mismatch (case %zu)",
                  i);
+    }
+  }
+
+  /* Raw NUL is data, not an input terminator. */
+  {
+    static const fio_url_encoded_parser_callbacks_s verify_callbacks = {
+        .on_pair = on_pair_verify,
+    };
+    static const char input[] = {'a', '\0', '=', 'b', '\0', 'c'};
+    verify_ctx_s ctx = {.expected_name = "a\0",
+                        .expected_name_len = 2,
+                        .expected_value = "b\0c",
+                        .expected_value_len = 3};
+    fio_url_encoded_result_s r =
+        fio_url_encoded_parse(&verify_callbacks, &ctx, input, sizeof(input));
+    FIO_ASSERT(ctx.verified && r.err == 7 && !r.count && !r.consumed,
+               "Raw NUL pair mismatch");
+  }
+
+  /* Exact-sized, non-NUL-terminated input at stack/heap boundaries.
+   * Exercise both raw fields and shrinking escapes near the input end. */
+  {
+    static const size_t sizes[] = {1023, 1024, 1025, 4095, 4096, 4097};
+    static const struct {
+      const char *encoded;
+      const char *decoded;
+      size_t encoded_len;
+      size_t decoded_len;
+    } tails[] = {{"", "", 0, 0},
+                 {"%", "%", 1, 1},
+                 {"%2", "%2", 2, 2},
+                 {"%u004", "%u004", 5, 5},
+                 {"%u0041", "A", 6, 1},
+                 {"%uD83D%uDE00", "\xF0\x9F\x98\x80", 12, 4},
+                 {"%00", "\0", 3, 1}};
+    static const fio_url_encoded_parser_callbacks_s verify_callbacks = {
+        .on_pair = on_pair_verify,
+    };
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(*sizes); ++i) {
+      for (size_t j = 0; j < sizeof(sizes) / sizeof(*sizes); ++j) {
+        const size_t nl = sizes[i], vl = sizes[j], len = nl + 1 + vl;
+        char *input = (char *)malloc(len);
+        char *name = (char *)malloc(nl);
+        char *value = (char *)malloc(vl);
+        FIO_ASSERT(input && name && value, "Boundary fixture allocation failed");
+        for (size_t t = 0; t < sizeof(tails) / sizeof(*tails); ++t) {
+          const size_t np = nl - tails[t].encoded_len;
+          const size_t vp = vl - tails[t].encoded_len;
+          FIO_MEMSET(input, 'n', nl);
+          input[nl] = '=';
+          FIO_MEMSET(input + nl + 1, 'v', vl);
+          FIO_MEMCPY(input + np, tails[t].encoded, tails[t].encoded_len);
+          FIO_MEMCPY(input + nl + 1 + vp, tails[t].encoded, tails[t].encoded_len);
+          FIO_MEMSET(name, 'n', np);
+          FIO_MEMSET(value, 'v', vp);
+          FIO_MEMCPY(name + np, tails[t].decoded, tails[t].decoded_len);
+          FIO_MEMCPY(value + vp, tails[t].decoded, tails[t].decoded_len);
+          verify_ctx_s ctx = {.expected_name = name,
+                              .expected_name_len = np + tails[t].decoded_len,
+                              .expected_value = value,
+                              .expected_value_len = vp + tails[t].decoded_len};
+          fio_url_encoded_result_s r =
+              fio_url_encoded_parse(&verify_callbacks, &ctx, input, len);
+          FIO_ASSERT(ctx.verified && r.err == 7 && !r.count && !r.consumed,
+                     "Boundary decode mismatch (name=%zu value=%zu tail=%zu)",
+                     nl,
+                     vl,
+                     t);
+        }
+        free(value);
+        free(name);
+        free(input);
+      }
     }
   }
 

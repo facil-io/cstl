@@ -21,6 +21,11 @@ self-consistent unit.
 #define FIO_MALLOC
 #include FIO_INCLUDE_FILE
 
+/* a second (zeroing) allocator instance, for the realloc2 zeroing contract */
+#define FIO_MEMORY_NAME                   fio___tz
+#define FIO_MEMORY_INITIALIZE_ALLOCATIONS 1
+#include FIO_INCLUDE_FILE
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -68,6 +73,75 @@ FIO_SFUNC void fio___test_malloc_calloc_realloc(void) {
     FIO_ASSERT(shrunk[i] == (uint8_t)i, "fio_realloc2 shrink lost data");
   fio_free(shrunk);
   fio_free(NULL);
+}
+
+/* *****************************************************************************
+realloc2 zeroing contract + size overflow handling
+***************************************************************************** */
+
+/* fills `len` bytes, reallocates copying `copy` bytes, tests contents. */
+FIO_SFUNC void fio___test_malloc_tz_realloc2(size_t len,
+                                             size_t new_len,
+                                             size_t copy) {
+  uint8_t *p = (uint8_t *)fio___tz_malloc(len);
+  FIO_ASSERT(p, "zeroing allocator failed (%zu bytes)", len);
+  memset(p, 0xA5, len);
+  uint8_t *q = (uint8_t *)fio___tz_realloc2(p, new_len, copy);
+  FIO_ASSERT(q, "zeroing realloc2 failed (%zu => %zu)", len, new_len);
+  for (size_t i = 0; i < copy; ++i)
+    FIO_ASSERT(q[i] == 0xA5, "realloc2 lost data at %zu", i);
+  for (size_t i = copy; i < new_len; i += (i < len + 64 ? 1 : 4093))
+    FIO_ASSERT(!q[i],
+               "realloc2 tail not zeroed at %zu (%zu => %zu, copy %zu, %s)",
+               i,
+               len,
+               new_len,
+               copy,
+               (p == q ? "in-place" : "moved"));
+  fio___tz_free(q);
+}
+
+FIO_SFUNC void fio___test_malloc_realloc2_zero_and_overflow(void) {
+  if (fio___tz_realloc_is_safe()) {
+    const size_t block = fio___tz_malloc_block_size();
+    const size_t sys = fio___tz_malloc_sys_alloc_size();
+    fio___test_malloc_tz_realloc2(64, 128, 16);         /* slice route */
+    fio___test_malloc_tz_realloc2(256, 128, 8);         /* slice shrink */
+    fio___test_malloc_tz_realloc2(block, block + 4096, 16); /* big route */
+    fio___test_malloc_tz_realloc2(sys << 1, sys << 2, 16);  /* page route */
+    fio___test_malloc_tz_realloc2(sys << 2, (sys << 1) + 1, 64); /* shrink */
+  }
+#if !defined(FIO_MEMORY_DISABLE)
+  { /* page-backed realloc must reject wrapping sizes, keeping the old data */
+    const size_t len = fio_malloc_sys_alloc_size() << 1;
+    uint8_t *p = (uint8_t *)fio_malloc(len);
+    FIO_ASSERT(p, "page-backed allocation failed");
+    memset(p, 0x5A, len);
+    for (size_t d = 0; d < 1024; d += 63) {
+      errno = 0;
+      void *q = fio_realloc(p, (~(size_t)0) - d);
+      FIO_ASSERT(!q, "wrapping realloc should fail (SIZE_MAX - %zu)", d);
+      FIO_ASSERT(errno == ENOMEM, "wrapping realloc errno %d", (int)errno);
+    }
+    FIO_ASSERT(p[0] == 0x5A && p[len - 1] == 0x5A,
+               "failed realloc should preserve the allocation");
+    fio_free(p);
+  }
+  { /* calloc must reject overflowing products and wrapping sizes */
+    const size_t half = (size_t)1 << (sizeof(size_t) << 2);
+    errno = 0;
+    FIO_ASSERT(!fio_calloc(half, half + 1), "calloc product overflow");
+    FIO_ASSERT(errno == ENOMEM, "calloc overflow errno %d", (int)errno);
+    FIO_ASSERT(!fio_calloc(half + 1, half + 1), "calloc product overflow (2)");
+    FIO_ASSERT(!fio_calloc(1, ~(size_t)0), "calloc SIZE_MAX should fail");
+    FIO_ASSERT(!fio_calloc_aligned(half, half + 1, 64),
+               "calloc_aligned product overflow");
+    errno = 0;
+    FIO_ASSERT(!fio_malloc_aligned(~(size_t)0, 64),
+               "malloc_aligned SIZE_MAX should fail");
+    FIO_ASSERT(errno == ENOMEM, "malloc_aligned errno %d", (int)errno);
+  }
+#endif
 }
 
 /* *****************************************************************************
@@ -264,6 +338,58 @@ FIO_SFUNC void fio___test_malloc_refcounted_aligned(void) {
   fio___test_refaligned_free2(o2);
 }
 
+typedef struct {
+  uint64_t value;
+} FIO_ALIGN(128) fio___test_ref_metadata_s;
+
+#define FIO_REF_NAME fio___test_refmetadata
+#define FIO_REF_TYPE uint64_t
+#define FIO_REF_METADATA fio___test_ref_metadata_s
+#include FIO_INCLUDE_FILE
+
+FIO_SFUNC void fio___test_malloc_refcounted_metadata(void) {
+  uint64_t *p = fio___test_refmetadata_new2();
+  FIO_ASSERT(p, "reference-counted metadata allocation failed");
+  FIO_ASSERT(!((uintptr_t)fio___test_refmetadata_metadata(p) & 127),
+             "reference-counted metadata misaligned");
+  *p = 7;
+  fio___test_refmetadata_metadata(p)->value = 11;
+  FIO_ASSERT(*p == 7 && fio___test_refmetadata_metadata(p)->value == 11,
+             "reference-counted metadata inaccessible");
+  fio___test_refmetadata_free2(p);
+}
+
+/* *****************************************************************************
+Reference-counted flexible allocation boundaries (249 reference counter.h)
+***************************************************************************** */
+
+typedef struct {
+  uint64_t count;
+  uint64_t data[];
+} fio___test_ref_flex_s;
+
+#define FIO_REF_NAME fio___test_refflex
+#define FIO_REF_TYPE fio___test_ref_flex_s
+#define FIO_REF_FLEX_TYPE uint64_t
+#define FIO_REF_INIT(obj) ((obj).count = members)
+#include FIO_INCLUDE_FILE
+
+FIO_SFUNC void fio___test_malloc_refcounted_flex(void) {
+  fio___test_ref_flex_s *p = fio___test_refflex_new2(3);
+  FIO_ASSERT(p && p->count == 3 &&
+                 fio___test_refflex_metadata_flex_len(p) == 3,
+             "flex reference counter length mismatch");
+  p->data[2] = 42;
+  FIO_ASSERT(p->data[2] == 42, "flex suffix inaccessible");
+  fio___test_refflex_free2(p);
+  FIO_ASSERT(!fio___test_refflex_new2(SIZE_MAX / sizeof(uint64_t) + 1),
+             "flex multiplication overflow accepted");
+#if SIZE_MAX > UINT32_MAX
+  FIO_ASSERT(!fio___test_refflex_new2((size_t)UINT32_MAX + 1),
+             "flex count truncation accepted");
+#endif
+}
+
 /* *****************************************************************************
 Invalid alignment requests
 ***************************************************************************** */
@@ -286,12 +412,15 @@ FIO_SFUNC void fio___test_malloc_aligned_invalid(void) {
 int main(void) {
   fio___test_malloc_basic();
   fio___test_malloc_calloc_realloc();
+  fio___test_malloc_realloc2_zero_and_overflow();
   fio___test_malloc_aligned_basic();
   fio___test_malloc_aligned_realloc();
   fio___test_malloc_calloc_aligned();
   fio___test_malloc_alloc_size();
   fio___test_malloc_aligned_macros();
   fio___test_malloc_refcounted_aligned();
+  fio___test_malloc_refcounted_metadata();
+  fio___test_malloc_refcounted_flex();
   fio___test_malloc_aligned_invalid();
   return 0;
 }

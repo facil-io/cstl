@@ -10,6 +10,7 @@ intentionally omitted.
 ***************************************************************************** */
 #include "test-helpers.h"
 
+#define FIO_MATH
 #define FIO_P256
 #define FIO_SHA2
 #define FIO_RAND
@@ -184,6 +185,72 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_scalar_mul)(void) {
   }
 }
 
+/* Barrett scalar reduction must match generic division for all t < 2^512. */
+FIO_SFUNC void FIO_NAME_TEST(stl, p256_scalar_reduce)(void) {
+  const uint64_t n_ext[8] = {FIO___P256_N[0],
+                             FIO___P256_N[1],
+                             FIO___P256_N[2],
+                             FIO___P256_N[3],
+                             0,
+                             0,
+                             0,
+                             0};
+  for (size_t round = 0; round < 4096; ++round) {
+    uint64_t t[8], expect[8];
+    fio___p256_scalar_s got;
+    for (size_t i = 0; i < 8; ++i)
+      t[i] = fio_rand64();
+    switch (round) { /* edge cases first */
+    case 0: FIO_MEMSET(t, 0, sizeof(t)); break;
+    case 1: FIO_MEMSET(t, 0xFF, sizeof(t)); break;
+    case 2:
+      FIO_MEMSET(t, 0, sizeof(t));
+      FIO_MEMCPY(t, FIO___P256_N, 32);
+      break;
+    case 3:
+      FIO_MEMSET(t, 0, sizeof(t));
+      FIO_MEMCPY(t, FIO___P256_N, 32);
+      t[0] -= 1;
+      break;
+    case 4: /* (n-1)^2, the largest product of reduced scalars */
+    {
+      uint64_t nm1[4] = {FIO___P256_N[0] - 1,
+                         FIO___P256_N[1],
+                         FIO___P256_N[2],
+                         FIO___P256_N[3]};
+      fio_math_mul(t, nm1, nm1, 4);
+      break;
+    }
+    case 5: FIO_MEMSET(t + 4, 0, 32); break; /* t < 2^256 */
+    case 6: /* n * 2^256 */
+      FIO_MEMSET(t, 0, sizeof(t));
+      FIO_MEMCPY(t + 4, FIO___P256_N, 32);
+      break;
+    default:
+      if (round & 1) /* sparse top limbs */
+        t[7] &= 0xFF;
+      break;
+    }
+    fio_math_div(NULL, expect, t, n_ext, 8);
+    fio___p256_scalar_reduce(got, t);
+    FIO_ASSERT(!memcmp(got, expect, sizeof(got)) &&
+                   !(expect[4] | expect[5] | expect[6] | expect[7]),
+               "P-256 Barrett scalar reduction mismatch (round %zu)",
+               round);
+  }
+  { /* a * a^-1 == 1 */
+    fio___p256_scalar_s a, a_inv, one;
+    for (size_t i = 0; i < 4; ++i)
+      a[i] = fio_rand64();
+    fio___p256_scalar_sub_n_if(a, (uint64_t)fio___p256_scalar_ct_gte_n(a));
+    a[0] |= 1;
+    fio___p256_scalar_inv(a_inv, a);
+    fio___p256_scalar_mul(one, a, a_inv);
+    FIO_ASSERT(one[0] == 1 && !(one[1] | one[2] | one[3]),
+               "P-256 scalar inversion failed");
+  }
+}
+
 /* *****************************************************************************
 P-256 ECDSA RFC 6979 / NIST Test Vector
 ***************************************************************************** */
@@ -235,7 +302,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_der_parsing)(void) {
       0xe9, 0x56, 0x28, 0xbc, 0x64, 0xf2, 0xf1, 0xb2, 0x0c, 0x2d, 0x7e,
       0x9f, 0x51, 0x77, 0xa3, 0xc2, 0x94, 0xd4, 0x46, 0x22, 0x99};
 
-  static const uint8_t der_sig[] = {
+  /* Not strict DER: r's MSB is 0xef but lacks the required leading zero, so
+   * DER reads it as a negative INTEGER. */
+  static const uint8_t der_sig_neg_r[] = {
       0x30, 0x45, 0x02, 0x20, 0xef, 0xd4, 0x8b, 0x2a, 0xac, 0xb6, 0xa8,
       0xfd, 0x11, 0x40, 0xdd, 0x9c, 0xd4, 0x5e, 0x81, 0xd6, 0x9d, 0x2c,
       0x87, 0x7b, 0x56, 0xaa, 0xf9, 0x91, 0xc3, 0x4d, 0x0e, 0xa8, 0x4e,
@@ -243,10 +312,153 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_der_parsing)(void) {
       0x65, 0x7c, 0x41, 0xd4, 0x36, 0xc7, 0xa1, 0xb6, 0xe2, 0x9f, 0x65,
       0xf3, 0xe9, 0x00, 0xdb, 0xb9, 0xaf, 0xf4, 0x06, 0x4d, 0xc4, 0xab,
       0x2f, 0x84, 0x3a, 0xcd, 0xa8};
+  /* Strict DER: 30 46 | 02 21 00 r | 02 21 00 s */
+  uint8_t der_sig[72] = {0x30, 0x46, 0x02, 0x21, 0x00};
+  FIO_MEMCPY(der_sig + 5, der_sig_neg_r + 4, sizeof(der_sig_neg_r) - 4);
 
   FIO_ASSERT(fio_ecdsa_p256_verify(der_sig, sizeof(der_sig), msg_hash, pubkey,
                                    sizeof(pubkey)) == 0,
              "P-256 DER signature verification failed");
+  FIO_ASSERT(fio_ecdsa_p256_verify(der_sig_neg_r, sizeof(der_sig_neg_r),
+                                   msg_hash, pubkey, sizeof(pubkey)) != 0,
+             "P-256 DER negative r should fail");
+  { /* negative s: drop s's required leading zero */
+    uint8_t tmp[71];
+    FIO_MEMCPY(tmp, der_sig, 38);
+    tmp[1] = 0x45;
+    tmp[38] = 0x20;
+    FIO_MEMCPY(tmp + 39, der_sig + 40, 32);
+    FIO_ASSERT(fio_ecdsa_p256_verify(tmp, sizeof(tmp), msg_hash, pubkey,
+                                     sizeof(pubkey)) != 0,
+               "P-256 DER negative s should fail");
+  }
+
+  /* Every truncation must fail without reading past the buffer (ASan). */
+  for (size_t len = 0; len < sizeof(der_sig); ++len) {
+    uint8_t *tmp = (uint8_t *)malloc(len ? len : 1);
+    FIO_ASSERT_ALLOC(tmp);
+    FIO_MEMCPY(tmp, der_sig, len);
+    FIO_ASSERT(fio_ecdsa_p256_verify(tmp, len, msg_hash, pubkey,
+                                     sizeof(pubkey)) != 0,
+               "P-256 truncated DER (%zu bytes) should fail",
+               len);
+    free(tmp);
+  }
+  { /* r consumes the whole sequence; s tag would be read past the end */
+    static const uint8_t bad[8] = {0x30, 0x06, 0x02, 0x04, 1, 2, 3, 4};
+    uint8_t *tmp = (uint8_t *)malloc(sizeof(bad));
+    FIO_ASSERT_ALLOC(tmp);
+    FIO_MEMCPY(tmp, bad, sizeof(bad));
+    FIO_ASSERT(fio_ecdsa_p256_verify(tmp, sizeof(bad), msg_hash, pubkey,
+                                     sizeof(pubkey)) != 0,
+               "P-256 DER missing s should fail");
+    free(tmp);
+  }
+  { /* parser-level strictness checks */
+    static const uint8_t ok[] = {0x30, 0x06, 0x02, 0x01, 0x01,
+                                 0x02, 0x01, 0x01, 0x00};
+    static const uint8_t longform[] = {0x30, 0x81, 0x06, 0x02, 0x01,
+                                       0x01, 0x02, 0x01, 0x01};
+    static const uint8_t nonmin[] = {0x30, 0x07, 0x02, 0x02, 0x00,
+                                     0x01, 0x02, 0x01, 0x01};
+    static const uint8_t extra[] = {0x30, 0x09, 0x02, 0x01, 0x01, 0x02,
+                                    0x01, 0x01, 0x02, 0x01, 0x01};
+    uint8_t r[32], s[32];
+    FIO_ASSERT(!fio___p256_parse_der_signature(r, s, ok, sizeof(ok) - 1) &&
+                   r[31] == 1 && s[31] == 1,
+               "P-256 DER minimal small integers should parse");
+    FIO_ASSERT(fio___p256_parse_der_signature(r, s, ok, sizeof(ok)),
+               "P-256 DER trailing data should fail");
+    FIO_ASSERT(fio___p256_parse_der_signature(r, s, longform, sizeof(longform)),
+               "P-256 DER long-form length should fail");
+    FIO_ASSERT(fio___p256_parse_der_signature(r, s, nonmin, sizeof(nonmin)),
+               "P-256 DER non-minimal integer should fail");
+    FIO_ASSERT(fio___p256_parse_der_signature(r, s, extra, sizeof(extra)),
+               "P-256 DER extra element should fail");
+    { /* lenient-DER forms (accepted by der.h) stay rejected here */
+      static const uint8_t int_longform[] = {0x30, 0x07, 0x02, 0x81, 0x01,
+                                             0x01, 0x02, 0x01, 0x01};
+      static const uint8_t indefinite[] = {0x30, 0x80, 0x02, 0x01, 0x01, 0x02,
+                                           0x01, 0x01, 0x00, 0x00};
+      FIO_ASSERT(fio___p256_parse_der_signature(r, s, int_longform,
+                                               sizeof(int_longform)),
+                 "P-256 DER long-form INTEGER length should fail");
+      FIO_ASSERT(fio___p256_parse_der_signature(r, s, indefinite,
+                                               sizeof(indefinite)),
+                 "P-256 DER indefinite length should fail");
+    }
+  }
+
+  { /* field coordinates must be canonical (< p) */
+    fio___p256_fe_s fe;
+    uint8_t b[32];
+    fio___p256_fe_to_bytes(b, FIO___P256_P);
+    FIO_ASSERT(fio___p256_fe_from_bytes_canonical(fe, b) != 0,
+               "P-256 coordinate == p should fail");
+    b[31] -= 1;
+    FIO_ASSERT(fio___p256_fe_from_bytes_canonical(fe, b) == 0,
+               "P-256 coordinate p-1 should pass");
+    b[19] = 0x01; /* p + 1 (p ends with 0x00000000_FFFFFFFF_FFFFFFFF...) */
+    FIO_MEMSET(b + 20, 0, 12);
+    FIO_ASSERT(fio___p256_fe_from_bytes_canonical(fe, b) != 0,
+               "P-256 coordinate p+1 should fail");
+    FIO_MEMSET(b, 0xFF, 32);
+    FIO_ASSERT(fio___p256_fe_from_bytes_canonical(fe, b) != 0,
+               "P-256 coordinate 2^256-1 should fail");
+  }
+}
+
+/* *****************************************************************************
+P-256 Point at Infinity Handling (Q = -G, so G + Q = infinity)
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, p256_infinity)(void) {
+  fio___p256_point_affine_s g, q;
+  fio___p256_fe_copy(g.x, FIO___P256_GX);
+  fio___p256_fe_copy(g.y, FIO___P256_GY);
+  fio___p256_fe_copy(q.x, g.x);
+  fio___p256_fe_neg(q.y, g.y);
+  uint8_t qx[32], qy[32], r[32], s[32] = {0}, e[32];
+  fio___p256_fe_to_bytes(qx, q.x);
+  fio___p256_fe_to_bytes(qy, q.y);
+  s[31] = 1;
+
+  { /* valid signature for Q = -G: with s = 1, R = e*G - r*G = (e - r)*G.
+     * Pick R = k*G with k = 2^16, r = R.x, e = r + k: verification must
+     * succeed. e and r share their low 16 bits, so Shamir steps that need
+     * G + Q (infinity) occur after steps that differ (r is a real point). */
+    fio___p256_scalar_s k = {0x10000};
+    fio___p256_point_jacobian_s rj;
+    fio___p256_point_affine_s ra;
+    fio___p256_point_mul(&rj, k, &g);
+    fio___p256_point_to_affine(&ra, &rj);
+    fio___p256_fe_to_bytes(r, ra.x);
+    FIO_MEMCPY(e, r, 32);
+    unsigned carry = 1;
+    for (size_t i = 30; i-- && carry;) {
+      carry += e[i];
+      e[i] = (uint8_t)carry;
+      carry >>= 8;
+    }
+    FIO_ASSERT(!carry && r[0] != 0xFF && e[0] != 0xFF &&
+                   (r[31] | r[30]),
+               "P-256 infinity test vector setup out of range");
+    FIO_ASSERT(fio_ecdsa_p256_verify_raw(r, s, e, qx, qy) == 0,
+               "P-256 valid signature with Q = -G should verify");
+    e[31] ^= 1;
+    FIO_ASSERT(fio_ecdsa_p256_verify_raw(r, s, e, qx, qy) != 0,
+               "P-256 modified hash with Q = -G should fail");
+  }
+  { /* r == e, s = 1: u1 == u2, so u1*G + u2*Q = infinity -> reject */
+    FIO_MEMCPY(e, r, 32);
+    FIO_ASSERT(fio_ecdsa_p256_verify_raw(r, s, e, qx, qy) != 0,
+               "P-256 signature whose sum is infinity should fail");
+  }
+  { /* infinity / off-curve public key: affine (0,0) is not on the curve */
+    uint8_t zero[32] = {0};
+    FIO_ASSERT(fio_ecdsa_p256_verify_raw(r, s, e, zero, zero) != 0,
+               "P-256 public key (0,0) should fail");
+  }
 }
 
 /* *****************************************************************************
@@ -351,6 +563,196 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_invalid_sigs)(void) {
     FIO_ASSERT(fio_ecdsa_p256_verify_raw(r, bad_s, msg_hash, pubkey + 1,
                                          pubkey + 33) != 0,
                "P-256 should reject s with byte %zu flipped", i);
+  }
+}
+
+/* *****************************************************************************
+P-256 Public Key Derivation
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, p256_public_key)(void) {
+  /* RFC 6979 A.2.5 key pair */
+  static const uint8_t sk[32] = {
+      0xc9, 0xaf, 0xa9, 0xd8, 0x45, 0xba, 0x75, 0x16, 0x6b, 0x5c, 0x21,
+      0x57, 0x67, 0xb1, 0xd6, 0x93, 0x4e, 0x50, 0xc3, 0xdb, 0x36, 0xe8,
+      0x9b, 0x12, 0x7b, 0x8a, 0x62, 0x2b, 0x12, 0x0f, 0x67, 0x21};
+  static const uint8_t pk[65] = {
+      0x04, 0x60, 0xfe, 0xd4, 0xba, 0x25, 0x5a, 0x9d, 0x31, 0xc9, 0x61,
+      0xeb, 0x74, 0xc6, 0x35, 0x6d, 0x68, 0xc0, 0x49, 0xb8, 0x92, 0x3b,
+      0x61, 0xfa, 0x6c, 0xe6, 0x69, 0x62, 0x2e, 0x60, 0xf2, 0x9f, 0xb6,
+      0x79, 0x03, 0xfe, 0x10, 0x08, 0xb8, 0xbc, 0x99, 0xa4, 0x1a, 0xe9,
+      0xe9, 0x56, 0x28, 0xbc, 0x64, 0xf2, 0xf1, 0xb2, 0x0c, 0x2d, 0x7e,
+      0x9f, 0x51, 0x77, 0xa3, 0xc2, 0x94, 0xd4, 0x46, 0x22, 0x99};
+  uint8_t out[65];
+  FIO_ASSERT(!fio_p256_public_key(out, sk) && !FIO_MEMCMP(out, pk, 65),
+             "P-256 public key from RFC 6979 secret key mismatch");
+
+  /* derived public key matches keypair output */
+  for (int i = 0; i < 4; ++i) {
+    uint8_t ksk[32], kpk[65];
+    FIO_ASSERT(!fio_p256_keypair(ksk, kpk), "P-256 keypair failed");
+    FIO_ASSERT(!fio_p256_public_key(out, ksk) && !FIO_MEMCMP(out, kpk, 65),
+               "P-256 public key should match keypair output");
+  }
+
+  /* invalid scalars: 0, n, n+1, 2^256-1; output is zeroed */
+  uint8_t bad[32];
+  FIO_MEMSET(bad, 0, 32);
+  FIO_MEMSET(out, 0xAA, 65);
+  FIO_ASSERT(fio_p256_public_key(out, bad) == -1 && !out[0] && !out[64],
+             "P-256 public key should reject zero scalar");
+  fio___p256_fe_to_bytes(bad, FIO___P256_N);
+  FIO_ASSERT(fio_p256_public_key(out, bad) == -1,
+             "P-256 public key should reject n");
+  bad[31] += 1;
+  FIO_ASSERT(fio_p256_public_key(out, bad) == -1,
+             "P-256 public key should reject n+1");
+  bad[31] -= 2; /* n - 1 is the largest valid scalar */
+  FIO_ASSERT(fio_p256_public_key(out, bad) == 0 && out[0] == 0x04,
+             "P-256 public key should accept n-1");
+  FIO_MEMSET(bad, 0xFF, 32);
+  FIO_ASSERT(fio_p256_public_key(out, bad) == -1,
+             "P-256 public key should reject 2^256-1");
+  FIO_ASSERT(fio_p256_public_key(out, NULL) == -1 && !out[0],
+             "P-256 public key should reject NULL secret");
+  FIO_ASSERT(fio_p256_public_key(NULL, sk) == -1,
+             "P-256 public key should reject NULL output");
+}
+
+/* *****************************************************************************
+P-256 ECDSA Verify With Compressed Public Keys (SEC 1: 02/03 || x)
+***************************************************************************** */
+
+/** Compressed form (33 bytes) of an uncompressed public key (65 bytes). */
+FIO_SFUNC void fio___p256_test_compress(uint8_t out[33], const uint8_t pk[65]) {
+  out[0] = (uint8_t)(0x02 | (pk[64] & 1));
+  FIO_MEMCPY(out + 1, pk + 1, 32);
+}
+
+/** Big-endian 256-bit `x = a + k` (no overflow expected). */
+FIO_SFUNC void fio___p256_test_x(uint8_t x[32],
+                                 const uint64_t a[4],
+                                 uint32_t k) {
+  fio___p256_fe_to_bytes(x, a);
+  for (size_t i = 32; i-- && k;) {
+    k += x[i];
+    x[i] = (uint8_t)k;
+    k >>= 8;
+  }
+  FIO_ASSERT(!k, "P-256 test x overflow");
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, p256_compressed_verify)(void) {
+  fio___p256_point_affine_s pt;
+  uint8_t c[33], pk[65], sk[32], sig[72], buf[66];
+  size_t sig_len = 0;
+  const uint64_t zero[4] = {0};
+  const uint8_t msg[] = "compressed P-256 public key";
+  fio_u256 h = fio_sha256(msg, sizeof(msg) - 1);
+
+  { /* decompression recovers G (prefix of G's parity) and -G (the other) */
+    fio___p256_fe_s ny;
+    pk[0] = 0x04;
+    fio___p256_fe_to_bytes(pk + 1, FIO___P256_GX);
+    fio___p256_fe_to_bytes(pk + 33, FIO___P256_GY);
+    fio___p256_test_compress(c, pk);
+    FIO_ASSERT(!fio___p256_point_decompress(&pt, c) &&
+                   !fio___p256_fe_eq(pt.x, FIO___P256_GX) &&
+                   !fio___p256_fe_eq(pt.y, FIO___P256_GY),
+               "P-256 decompress(G) failed");
+    c[0] ^= 1;
+    fio___p256_fe_neg(ny, FIO___P256_GY);
+    FIO_ASSERT(!fio___p256_point_decompress(&pt, c) &&
+                   !fio___p256_fe_eq(pt.x, FIO___P256_GX) &&
+                   !fio___p256_fe_eq(pt.y, ny),
+               "P-256 decompress(-G) failed");
+  }
+
+  for (int i = 0; i < 16; ++i) {
+    FIO_ASSERT(!fio_p256_keypair(sk, pk), "P-256 keypair failed");
+    fio___p256_test_compress(c, pk);
+    /* decompression round trip */
+    FIO_ASSERT(!fio___p256_point_decompress(&pt, c), "P-256 decompress failed");
+    fio___p256_fe_to_bytes(buf, pt.x);
+    fio___p256_fe_to_bytes(buf + 32, pt.y);
+    FIO_ASSERT(!FIO_MEMCMP(buf, pk + 1, 64),
+               "P-256 decompressed point should equal the uncompressed key");
+    /* sign / verify with both encodings */
+    FIO_ASSERT(!fio_ecdsa_p256_sign(sig, &sig_len, sizeof(sig), h.u8, sk),
+               "P-256 sign failed");
+    FIO_ASSERT(!fio_ecdsa_p256_verify(sig, sig_len, h.u8, c, 33),
+               "P-256 verify should accept a compressed public key");
+    FIO_ASSERT(!fio_ecdsa_p256_verify(sig, sig_len, h.u8, pk, 65),
+               "P-256 verify should accept an uncompressed public key");
+    /* tampered signature / hash */
+    sig[sig_len - 1] ^= 1;
+    FIO_ASSERT(fio_ecdsa_p256_verify(sig, sig_len, h.u8, c, 33),
+               "P-256 tampered signature should fail (compressed key)");
+    sig[sig_len - 1] ^= 1;
+    h.u8[0] ^= 1;
+    FIO_ASSERT(fio_ecdsa_p256_verify(sig, sig_len, h.u8, c, 33),
+               "P-256 tampered hash should fail (compressed key)");
+    h.u8[0] ^= 1;
+    /* the other prefix is -Q: a different key */
+    c[0] ^= 1;
+    FIO_ASSERT(fio_ecdsa_p256_verify(sig, sig_len, h.u8, c, 33),
+               "P-256 compressed key with the wrong y parity should fail");
+    c[0] ^= 1;
+    /* lengths that don't match the prefix */
+    FIO_MEMCPY(buf, c, 33);
+    buf[33] = 0;
+    FIO_ASSERT(fio_ecdsa_p256_verify(sig, sig_len, h.u8, buf, 34) &&
+                   fio_ecdsa_p256_verify(sig, sig_len, h.u8, c, 32) &&
+                   fio_ecdsa_p256_verify(sig, sig_len, h.u8, pk, 33) &&
+                   fio_ecdsa_p256_verify(sig, sig_len, h.u8, pk, 64),
+               "P-256 public key length / prefix mismatch should fail");
+  }
+
+  /* invalid prefixes: identity (00), hybrid (06/07, RFC 5480), others */
+  static const uint8_t bad_prefix[] =
+      {0x00, 0x01, 0x04, 0x05, 0x06, 0x07, 0xFF};
+  for (size_t i = 0; i < sizeof(bad_prefix); ++i) {
+    FIO_MEMCPY(buf, c, 33);
+    buf[0] = bad_prefix[i];
+    FIO_ASSERT(fio___p256_point_decompress(&pt, buf) &&
+                   fio_ecdsa_p256_verify(sig, sig_len, h.u8, buf, 33),
+               "P-256 compressed prefix 0x%02X should fail",
+               bad_prefix[i]);
+  }
+  FIO_MEMCPY(buf, pk, 65);
+  buf[0] = (uint8_t)(0x06 | (pk[64] & 1)); /* hybrid form, otherwise valid */
+  FIO_ASSERT(fio_ecdsa_p256_verify(sig, sig_len, h.u8, buf, 65),
+             "P-256 hybrid public key (06/07 || x || y) should fail");
+  FIO_MEMSET(buf, 0, sizeof(buf));
+  FIO_ASSERT(fio_ecdsa_p256_verify(sig, sig_len, h.u8, buf, 1) &&
+                 fio_ecdsa_p256_verify(sig, sig_len, h.u8, buf, 33) &&
+                 fio_ecdsa_p256_verify(sig, sig_len, h.u8, buf, 65),
+             "P-256 point at infinity / zero public keys should fail");
+
+  { /* x without a curve point (y^2 not a square), and non-canonical x >= p */
+    uint32_t on = 0, off = 0;
+    for (uint32_t k = 1; k < 256 && (!on || !off); ++k) {
+      buf[0] = 0x02;
+      fio___p256_test_x(buf + 1, zero, k);
+      if (fio___p256_point_decompress(&pt, buf)) {
+        off = off ? off : k;
+      } else {
+        on = on ? on : k;
+        FIO_ASSERT(!fio___p256_point_validate(&pt),
+                   "P-256 decompressed point should be on the curve");
+      }
+    }
+    FIO_ASSERT(on && off, "P-256 test x values not found");
+    buf[0] = 0x02;
+    fio___p256_test_x(buf + 1, zero, off);
+    FIO_ASSERT(fio_ecdsa_p256_verify(sig, sig_len, h.u8, buf, 33),
+               "P-256 compressed x with no curve point should fail");
+    fio___p256_test_x(buf + 1, FIO___P256_P, on); /* x + p, x valid */
+    FIO_ASSERT(fio___p256_point_decompress(&pt, buf),
+               "P-256 non-canonical compressed x (x + p) should fail");
+    fio___p256_test_x(buf + 1, FIO___P256_P, 0);
+    FIO_ASSERT(fio___p256_point_decompress(&pt, buf),
+               "P-256 compressed x == p should fail");
   }
 }
 
@@ -521,6 +923,32 @@ FIO_SFUNC void FIO_NAME_TEST(stl, p256_openssl_verify)(void) {
              "OpenSSL public key setup failed");
   FIO_ASSERT(ECDSA_verify(0, msg_hash.u8, 32, sig, (int)sig_len, key) == 1,
              "OpenSSL should verify generated P-256 ECDSA signature");
+  { /* OpenSSL's compressed encoding: same bytes, verifies natively */
+    uint8_t comp[33], ours[33];
+    FIO_ASSERT(EC_POINT_point2oct(group,
+                                  point,
+                                  POINT_CONVERSION_COMPRESSED,
+                                  comp,
+                                  sizeof(comp),
+                                  NULL) == 33,
+               "OpenSSL compressed point encoding failed");
+    fio___p256_test_compress(ours, public_key);
+    FIO_ASSERT(!FIO_MEMCMP(comp, ours, 33),
+               "P-256 compressed encoding should match OpenSSL's");
+    FIO_ASSERT(!fio_ecdsa_p256_verify(sig, sig_len, msg_hash.u8, comp, 33),
+               "P-256 verify should accept OpenSSL's compressed public key");
+    /* an OpenSSL signature verifies natively with the compressed key */
+    BIGNUM *d = BN_bin2bn(secret_key, 32, NULL);
+    FIO_ASSERT(d && EC_KEY_set_private_key(key, d) == 1,
+               "OpenSSL private key setup failed");
+    unsigned char osig[80];
+    unsigned int osig_len = sizeof(osig);
+    FIO_ASSERT(ECDSA_sign(0, msg_hash.u8, 32, osig, &osig_len, key) == 1,
+               "OpenSSL ECDSA_sign failed");
+    FIO_ASSERT(!fio_ecdsa_p256_verify(osig, osig_len, msg_hash.u8, comp, 33),
+               "P-256 should verify an OpenSSL signature (compressed key)");
+    BN_clear_free(d);
+  }
 
   EC_POINT_free(point);
   BN_free(x);
@@ -543,9 +971,13 @@ int main(void) {
   FIO_NAME_TEST(stl, p256_field_ops)();
   FIO_NAME_TEST(stl, p256_base_point)();
   FIO_NAME_TEST(stl, p256_scalar_mul)();
+  FIO_NAME_TEST(stl, p256_scalar_reduce)();
   FIO_NAME_TEST(stl, p256_ecdsa_nist)();
   FIO_NAME_TEST(stl, p256_der_parsing)();
+  FIO_NAME_TEST(stl, p256_infinity)();
   FIO_NAME_TEST(stl, p256_invalid_sigs)();
+  FIO_NAME_TEST(stl, p256_public_key)();
+  FIO_NAME_TEST(stl, p256_compressed_verify)();
   FIO_NAME_TEST(stl, p256_ecdhe)();
   FIO_NAME_TEST(stl, p256_ecdhe_invalid_inputs)();
   FIO_NAME_TEST(stl, p256_ecdhe_compressed)();

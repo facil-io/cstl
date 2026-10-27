@@ -9,9 +9,19 @@ Uses in-process loopback sockets for deterministic roundtrips.
 ***************************************************************************** */
 #include "test-helpers.h"
 
+/* Exercise the recoverable path normally; a separate build can set this to
+ * 1 to verify the default fatal-syscall policy in an isolated child. */
+#ifndef FIO_POLL_EXIT_ON_SYSERR
+#define FIO_POLL_EXIT_ON_SYSERR 0
+#endif
 #define FIO_SOCK
 #define FIO_POLL
 #include FIO_INCLUDE_FILE
+
+#if defined(FIO_POLL_ENGINE_EPOLL) || defined(FIO_POLL_ENGINE_KQUEUE)
+#include <sys/resource.h>
+#include <sys/wait.h>
+#endif
 
 typedef struct {
   int on_data_count;
@@ -35,13 +45,61 @@ static void test_poll_engine_and_init(void) {
              "fio_poll_engine() should return %s", FIO_POLL_ENGINE_STR);
 
   fio_poll_s p;
-  fio_poll_init(&p,
-                .on_data = cb_on_data,
-                .on_ready = cb_on_ready,
-                .on_close = cb_on_close);
+  FIO_ASSERT(!fio_poll_init(&p,
+                            .on_data = cb_on_data,
+                            .on_ready = cb_on_ready,
+                            .on_close = cb_on_close),
+             "fio_poll_init should return 0 on success");
   fio_poll_destroy(&p);
-  fprintf(stderr, "* init/destroy: OK\n");
+  errno = 0;
+  FIO_ASSERT(fio_poll_init(NULL, .on_data = cb_on_data) == -1 &&
+                 errno == EINVAL,
+             "fio_poll_init(NULL) should return -1 and set EINVAL");
+  fprintf(stderr, "* init/destroy + invalid argument: OK\n");
 }
+
+#if defined(FIO_POLL_ENGINE_EPOLL) || defined(FIO_POLL_ENGINE_KQUEUE)
+/* Restrict descriptors in a child, so creation fails deterministically
+ * without modifying the parent's limit or relying on large allocations. */
+static void test_poll_init_syscall_failure(void) {
+  pid_t child = fork();
+  FIO_ASSERT(child >= 0, "fork for poll init failure test failed");
+  if (!child) {
+    struct rlimit limit = {.rlim_cur = 0, .rlim_max = 0};
+    if (setrlimit(RLIMIT_NOFILE, &limit))
+      _exit(2);
+    fio_poll_s p;
+    errno = 0;
+    int result = fio_poll_init(&p, .on_data = cb_on_data);
+#if FIO_POLL_EXIT_ON_SYSERR
+    /* Reaching here means the default fatal-syscall policy did not exit. */
+    (void)result;
+    _exit(3);
+#else
+    int failure_errno = errno;
+    if (result != -1 || failure_errno != EMFILE)
+      _exit(3);
+    fio_poll_destroy(&p);
+    _exit(0);
+#endif
+  }
+  int status = 0;
+  FIO_ASSERT(waitpid(child, &status, 0) == child && WIFEXITED(status),
+             "poll init syscall failure child did not exit normally");
+#if FIO_POLL_EXIT_ON_SYSERR
+  FIO_ASSERT(WEXITSTATUS(status) == EMFILE,
+             "default init syscall failure should exit with EMFILE (got %d)",
+             WEXITSTATUS(status));
+  fprintf(stderr, "* init syscall failure exits by default: OK\n");
+#else
+  FIO_ASSERT(WEXITSTATUS(status) == 0,
+             "init syscall failure should return -1/EMFILE and allow destroy "
+             "(child exit %d)",
+             WEXITSTATUS(status));
+  fprintf(stderr, "* init syscall failure + safe destroy: OK\n");
+#endif
+}
+#endif
 
 static void test_poll_on_ready(void) {
   fio_socket_i fds[2] = {FIO_SOCKET_INVALID, FIO_SOCKET_INVALID};
@@ -234,10 +292,8 @@ static void test_poll_forget(void) {
   FIO_ASSERT(!fio_poll_monitor(&p, fds[0], &counts, POLLIN),
              "fio_poll_monitor failed for forget test");
 
-  /* Forget the monitored fd. Return-value semantics vary by backend
-   * (kqueue deletes both READ and WRITE filters, so it may report ENOENT
-   * for a filter that was never added). We only assert the functional
-   * outcome: after forget, no events fire for that fd. */
+  /* Forget twice: already-removed registrations must remain forgotten.
+   * Return-value semantics may vary by backend. */
   fio_poll_forget(&p, fds[0]);
   fio_poll_forget(&p, fds[0]);
 
@@ -254,6 +310,112 @@ static void test_poll_forget(void) {
   fio_sock_close(fds[1]);
   fprintf(stderr, "* fio_poll_forget: OK\n");
 }
+
+#if defined(FIO_POLL_ENGINE_EPOLL)
+static void test_epoll_close_on_exec(void) {
+  fio_poll_s p;
+  fio_poll_init(&p, .on_close = cb_on_close);
+  for (size_t i = 0; i < 2; ++i) {
+    FIO_ASSERT(p.fds[i].fd >= 0, "epoll descriptor creation failed");
+    FIO_ASSERT(fcntl(p.fds[i].fd, F_GETFD) & FD_CLOEXEC,
+               "epoll descriptor %zu must be close-on-exec", i);
+  }
+  fio_poll_destroy(&p);
+  fprintf(stderr, "* epoll close-on-exec: OK\n");
+}
+
+static void test_epoll_write_only_error(void) {
+  int fds[2];
+  poll_counts_s counts = {0};
+  FIO_ASSERT(!pipe(fds), "pipe creation failed");
+  FIO_ASSERT(!fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK),
+             "nonblocking pipe setup failed");
+  char bytes[4096] = {0};
+  while (write(fds[1], bytes, sizeof(bytes)) > 0) {}
+  FIO_ASSERT(errno == EAGAIN || errno == EWOULDBLOCK,
+             "expected a full pipe");
+
+  fio_poll_s p;
+  fio_poll_init(&p, .on_ready = cb_on_ready, .on_close = cb_on_close);
+  FIO_ASSERT(!fio_poll_monitor(&p, fds[1], &counts, POLLOUT),
+             "write-only pipe monitor failed");
+  close(fds[0]); /* EPOLLERR is signaled without EPOLLOUT on a full pipe. */
+  FIO_ASSERT(fio_poll_review(&p, 100) > 0,
+             "closed pipe reader should wake the poller");
+  FIO_ASSERT(counts.on_close_count == 1 && !counts.on_ready_count,
+             "write-only error must invoke on_close exactly once");
+  fio_poll_destroy(&p);
+  close(fds[1]);
+  fprintf(stderr, "* epoll write-only error: OK\n");
+}
+#endif
+
+#if defined(FIO_POLL_ENGINE_KQUEUE)
+static void test_kqueue_fork_slot_reuse(void) {
+  fio_poll_s p;
+  fio_poll_init(&p, .on_data = cb_on_data);
+  int old_slot = p.fd;
+  pid_t child = fork();
+  FIO_ASSERT(child >= 0, "fork failed");
+  if (!child) {
+    int reused = open("/dev/null", O_RDONLY);
+    if (reused < 0 || dup2(reused, old_slot) < 0)
+      _exit(1);
+    if (reused != old_slot)
+      close(reused);
+    fio___kqueue_after_fork(&p);
+    struct stat st;
+    int ok = p.fd != old_slot && fstat(old_slot, &st) == 0 &&
+             S_ISCHR(st.st_mode);
+    fio_poll_destroy(&p);
+    close(old_slot);
+    _exit(ok ? 0 : 1);
+  }
+  int status = 0;
+  FIO_ASSERT(waitpid(child, &status, 0) == child && WIFEXITED(status) &&
+                 WEXITSTATUS(status) == 0,
+             "fork reinit closed a reused descriptor");
+  fio_poll_destroy(&p);
+  fprintf(stderr, "* kqueue fork slot reuse: OK\n");
+}
+
+static void test_kqueue_forget_write_only(void) {
+  fio_socket_i fds[2] = {FIO_SOCKET_INVALID, FIO_SOCKET_INVALID};
+  poll_counts_s counts = {0};
+  FIO_ASSERT(!fio_sock_socketpair(fds), "socketpair failed");
+  fio_poll_s p;
+  fio_poll_init(&p,
+                .on_data = cb_on_data,
+                .on_ready = cb_on_ready,
+                .on_close = cb_on_close);
+  FIO_ASSERT(fcntl(p.fd, F_GETFD) & FD_CLOEXEC,
+             "kqueue descriptor must be close-on-exec");
+  errno = 0;
+  FIO_ASSERT(fio_poll_monitor(&p, fds[0], &counts, POLLPRI) == -1 &&
+                 errno == EINVAL,
+             "unsupported-only event masks must fail");
+  FIO_ASSERT(!fio_poll_monitor(&p, fds[0], &counts, POLLOUT),
+             "write-only monitor failed");
+  FIO_ASSERT(!fio_poll_forget(&p, fds[0]), "write-only forget failed");
+  FIO_ASSERT(!fio_poll_review(&p, 0), "forgotten write event remained armed");
+  FIO_ASSERT(!counts.on_ready_count, "forgotten write callback fired");
+  FIO_ASSERT(!fio_poll_forget(&p, fds[0]), "repeated forget failed");
+  FIO_ASSERT(!fio_poll_monitor(&p, fds[0], &counts, POLLIN | POLLOUT),
+             "combined monitor failed");
+  FIO_ASSERT(fio_poll_review(&p, 0) >= 1,
+             "write readiness should consume its one-shot filter");
+  FIO_ASSERT(!fio_poll_forget(&p, fds[0]),
+             "forget after partial consumption failed");
+  counts = (poll_counts_s){0};
+  FIO_ASSERT(fio_sock_write(fds[1], "x", 1) == 1, "socket write failed");
+  FIO_ASSERT(!fio_poll_review(&p, 0), "read filter survived forget");
+  FIO_ASSERT(!counts.on_data_count, "read callback survived forget");
+  fio_poll_destroy(&p);
+  fio_sock_close(fds[0]);
+  fio_sock_close(fds[1]);
+  fprintf(stderr, "* kqueue write-only forget: OK\n");
+}
+#endif
 
 static void test_poll_empty_review(void) {
   fio_poll_s p;
@@ -292,6 +454,83 @@ static void test_poll_empty_review_timeout(void) {
 }
 
 #if defined(FIO_POLL_ENGINE_POLL)
+#if !FIO_OS_WIN
+static struct {
+  fio_poll_s *poller;
+  fio_socket_i fd;
+  poll_counts_s *counts;
+} poll_rearm_state;
+
+static void cb_poll_rearm(void *udata) {
+  cb_on_data(udata);
+  FIO_ASSERT(!fio_poll_forget(poll_rearm_state.poller, poll_rearm_state.fd),
+             "forget in callback failed");
+  FIO_ASSERT(!fio_poll_monitor(poll_rearm_state.poller,
+                               poll_rearm_state.fd,
+                               poll_rearm_state.counts,
+                               POLLIN),
+             "re-monitor in callback failed");
+}
+
+static void test_poll_rearm_after_forget(void) {
+  fio_socket_i fds[2];
+  poll_counts_s counts = {0};
+  FIO_ASSERT(!fio_sock_socketpair(fds), "socketpair failed");
+  FIO_ASSERT(!fio_sock_set_non_block(fds[0]), "nonblocking failed");
+  /* Saturate the send buffer: OUT must survive the IN event in the old
+   * snapshot, but must not migrate to the newly registered generation. */
+  char buf[8192] = {0};
+  while (fio_sock_write(fds[0], buf, sizeof(buf)) > 0) {}
+  FIO_ASSERT(errno == EAGAIN || errno == EWOULDBLOCK,
+             "send buffer was not saturated");
+  FIO_ASSERT(fio_sock_write(fds[1], "x", 1) == 1, "peer write failed");
+  fio_poll_s p;
+  fio_poll_init(&p,
+                .on_data = cb_poll_rearm,
+                .on_ready = cb_on_ready,
+                .on_close = cb_on_close);
+  poll_rearm_state.poller = &p;
+  poll_rearm_state.fd = fds[0];
+  poll_rearm_state.counts = &counts;
+  FIO_ASSERT(!fio_poll_monitor(&p, fds[0], &counts, POLLIN | POLLOUT),
+             "initial monitor failed");
+  FIO_ASSERT(fio_poll_review(&p, 100) > 0, "initial review failed");
+  FIO_ASSERT(counts.on_data_count == 1, "data callback missing");
+  fio___poll_i_s *entry =
+      fio___poll_map_get(&p.map, (fio___poll_i_s){.fd = fds[0]});
+  FIO_ASSERT(entry && !(entry->flags & POLLOUT),
+             "old snapshot restored OUT into new IN-only registration");
+  char byte;
+  FIO_ASSERT(fio_sock_read(fds[0], &byte, 1) == 1, "read failed");
+  FIO_ASSERT(fio_poll_review(&p, 0) == 0, "old OUT flag survived forget");
+  fio_poll_destroy(&p);
+  fio_sock_close(fds[0]);
+  fio_sock_close(fds[1]);
+}
+
+#if defined(POLLRDHUP)
+static void test_poll_half_close(void) {
+  fio_socket_i fds[2];
+  poll_counts_s counts = {0};
+  FIO_ASSERT(!fio_sock_socketpair(fds), "socketpair failed");
+  fio_poll_s p;
+  fio_poll_init(&p,
+                .on_data = cb_on_data,
+                .on_ready = cb_on_ready,
+                .on_close = cb_on_close);
+  FIO_ASSERT(!fio_poll_monitor(&p, fds[0], &counts, POLLOUT),
+             "half-close monitor failed");
+  FIO_ASSERT(!shutdown(fds[1], SHUT_WR), "half-close shutdown failed");
+  FIO_ASSERT(fio_poll_review(&p, 100) > 0, "half-close review failed");
+  FIO_ASSERT(counts.on_close_count == 1,
+             "half-close must trigger on_close even for OUT-only monitors");
+  fio_poll_destroy(&p);
+  fio_sock_close(fds[0]);
+  fio_sock_close(fds[1]);
+}
+#endif
+#endif /* !FIO_OS_WIN */
+
 static void test_poll_invalid_arguments(void) {
   FIO_ASSERT(fio_poll_forget(NULL, FIO_SOCKET_INVALID) == -1,
              "poll backend must reject a NULL poller");
@@ -310,15 +549,32 @@ int main(void) {
           FIO_POLL_ENGINE_STR);
 
   test_poll_engine_and_init();
+#if defined(FIO_POLL_ENGINE_EPOLL) || defined(FIO_POLL_ENGINE_KQUEUE)
+  test_poll_init_syscall_failure();
+#endif
   test_poll_on_ready();
   test_poll_on_data();
   test_poll_duplicated_listener();
   test_poll_on_close();
   test_poll_forget();
+#if defined(FIO_POLL_ENGINE_KQUEUE)
+  test_kqueue_fork_slot_reuse();
+  test_kqueue_forget_write_only();
+#endif
   test_poll_empty_review();
   test_poll_empty_review_timeout();
+#if defined(FIO_POLL_ENGINE_EPOLL)
+  test_epoll_close_on_exec();
+  test_epoll_write_only_error();
+#endif
 #if defined(FIO_POLL_ENGINE_POLL)
   test_poll_invalid_arguments();
+#if !FIO_OS_WIN
+  test_poll_rearm_after_forget();
+#if defined(POLLRDHUP)
+  test_poll_half_close();
+#endif
+#endif
 #endif
 
   fprintf(stderr, "=== All poll tests passed ===\n");

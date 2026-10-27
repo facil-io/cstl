@@ -14,9 +14,9 @@ This is **not** a key-management vault — it is a convenience for deriving a st
 At startup (via `FIO_CONSTRUCTOR`), the module checks:
 
 - `SECRET` — the secret value, plain text or Hex encoded.
-- `SECRET_LENGTH` — optional byte length; if omitted, `strlen` is used.
+- `SECRET_LENGTH` — optional byte length (`1..strlen(SECRET)`) that truncates `SECRET`; if omitted, `strlen` is used. Invalid values (non-numeric, negative, zero or longer than `SECRET`) are ignored with a warning.
 
-If `SECRET` is unset or empty, a random 512-bit secret is generated.
+If `SECRET` is unset, empty or whitespace only, a random 512-bit secret is generated.
 
 ### API Functions
 
@@ -47,11 +47,13 @@ SFUNC void fio_secret_set(char *str, size_t len, bool is_random);
 Sets the global secret from `str` and stores its masked SHA-512 hash.
 
 **Parameters:**
-- `str` — secret bytes; may be plain text or Hex encoded. Whitespace is ignored during Hex decoding.
+- `str` — secret bytes; may be plain text or Hex encoded. Whitespace between Hex byte pairs is ignored during Hex decoding.
 - `len` — length of `str` in bytes.
 - `is_random` — set `true` if the secret is randomly generated.
 
-If `str` is `NULL` or `len` is `0`, a random secret is generated and `is_random` is forced to `true`.
+If `str` is `NULL`, `len` is `0` or `str` contains only whitespace, a random secret is generated and `is_random` is forced to `true`.
+
+Setters are meant for initialization (before threads are started); they are not synchronized with concurrent readers.
 
 #### `fio_secret_set_at`
 
@@ -66,7 +68,9 @@ Hashes `str` with SHA-512 and stores the masked result in `secret`.
 - `str` — secret bytes; Hex decoding and whitespace handling apply as in `fio_secret_set`.
 - `len` — length of `str`.
 
-If `str` is `NULL` or `len` is `0`, random bytes are hashed instead.
+If `str` is `NULL`, `len` is `0` or `str` contains only whitespace, random bytes are hashed instead.
+
+All values share one process-lifetime mask, so values stored earlier remain valid after later `fio_secret_set` / `fio_secret_set_at` calls.
 
 #### `fio_secret_at`
 
@@ -79,7 +83,7 @@ Unmasks a secret hash stored by `fio_secret_set_at`.
 **Parameters:**
 - `secret` — pointer to a masked `fio_u512`.
 
-**Returns:** the unmasked SHA-512 hash.
+**Returns:** the unmasked SHA-512 hash (all zeros if `secret` is `NULL`).
 
 ### Example
 

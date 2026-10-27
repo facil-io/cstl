@@ -133,7 +133,8 @@ static int fio_http1_on_header_content_length(fio_buf_info_s name,
                                               fio_buf_info_s value,
                                               size_t content_length,
                                               void *udata);
-/** called when `Expect` arrives and may require a 100 continue response. */
+/** called when `Expect` arrives and may require a 100 continue response.
+ * A non-zero return is a parse error (the declared body may still follow). */
 static int fio_http1_on_expect(void *udata);
 /** called when a body chunk is parsed. */
 static int fio_http1_on_body_chunk(fio_buf_info_s chunk, void *udata);
@@ -158,6 +159,10 @@ static int fio_http1___read_body(fio_http1_parser_s *p,
 static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
                                          fio_buf_info_s *buf,
                                          void *udata);
+/* parsing stage 2 - read chunked body - EOL after chunk data. */
+static int fio_http1___read_body_chunked_eol(fio_http1_parser_s *p,
+                                             fio_buf_info_s *buf,
+                                             void *udata);
 /* parsing stage 1 - read headers. */
 static int fio_http1___read_trailer(fio_http1_parser_s *p,
                                     fio_buf_info_s *buf,
@@ -278,7 +283,7 @@ static int fio_http1___start(fio_http1_parser_s *p,
       (char *)FIO_MEMCHR(start, '\n', (size_t)((buf->buf + buf->len) - start));
   if (!eol)
     return 1;
-  if (start + 13 > eol) /* test for minimal data GET HTTP/1 or ### HTTP/1 */
+  if (eol - start < 12) /* minimal line: `HTTP/1.1 200` or `GET / HTTP/1` */
     return -1;
   /* test for `NUL` in data */
   if (FIO_MEMCHR(start, 0, (size_t)(eol - start)))
@@ -295,15 +300,23 @@ static int fio_http1___start(fio_http1_parser_s *p,
     return -1;
   wrd[0] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
   start = tmp + 1;
-  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', eol - start)))
+  if (!(tmp = (char *)FIO_MEMCHR(start, ' ', (size_t)(eol - start)))) {
+    /* only a response may omit the reason phrase and its SP (RFC 9112 §4
+     * requires the SP, but recipients commonly accept its absence) */
+    wrd[1] = FIO_BUF_INFO2(start, (size_t)(eol - start));
+    wrd[2] = FIO_BUF_INFO2(eol, 0);
+    if (wrd[1].len && fio_c2i(wrd[1].buf[0]) < 10)
+      goto parse_response_line;
     return -1;
+  }
   wrd[1] = FIO_BUF_INFO2(start, (size_t)(tmp - start));
   start = tmp + 1;
-  if (start >= eol)
-    return -1;
   wrd[2] = FIO_BUF_INFO2(start, (size_t)(eol - start));
-  if (fio_c2i(wrd[1].buf[0]) < 10) /* test if path or code */
-    goto parse_response_line;
+  /* test if path or code (an empty `wrd[1]` points at the SP) */
+  if (fio_c2i(wrd[1].buf[0]) < 10)
+    goto parse_response_line; /* the reason phrase may be empty */
+  if (!wrd[2].len)
+    return -1; /* requests require a version */
   if (wrd[2].len > 14)
     wrd[2].len = 14;
   /* GET / HEAD / OPTIONS requests have no body (known before callbacks) */
@@ -335,7 +348,14 @@ parse_response_line:
   if (fio_http1_on_version(wrd[0], udata))
     return -1;
   {
-    const size_t status = fio_atol10u(&wrd[1].buf);
+    /* status-code = 3DIGIT (RFC 9112 §4), first digit 1-9 */
+    const uint8_t *s = (const uint8_t *)wrd[1].buf;
+    if (wrd[1].len != 3 || ((uint8_t)(s[0] - '1') > 8) |
+                               ((uint8_t)(s[1] - '0') > 9) |
+                               ((uint8_t)(s[2] - '0') > 9))
+      return -1;
+    const size_t status = (size_t)(s[0] - '0') * 100 +
+                          (size_t)(s[1] - '0') * 10 + (size_t)(s[2] - '0');
     /* 1xx, 204 and 304 responses never have a body (RFC 9112 §6.3) */
     if ((status - 100) < 100 || status == 204 || status == 304)
       p->flags |= FIO___HTTP1_FLAG_NO_BODY;
@@ -391,8 +411,8 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
       p->flags &= ~FIO___HTTP1_FLAG_HOST_REQUIRED;
     }
     break;
-  case 6: /* test for "expect" */
-    if (!no_body && value.len == 12 &&
+  case 6: /* test for "expect" (a request header, RFC 9110 §10.1.1) */
+    if (!no_body && (p->flags & FIO___HTTP1_FLAG_REQUEST) && value.len == 12 &&
         fio_buf2u32u(name.buf) == fio_buf2u32u("expe") &&
         fio_buf2u32u(name.buf + 2) == fio_buf2u32u("pect")) {
       /* Expect value validation */
@@ -452,18 +472,22 @@ static inline int fio_http1___on_header(fio_http1_parser_s *p,
        * the next message (request smuggling). */
       if (p->expected)
         return -1;
-      char *c_start = value.buf + value.len - (value.len >= 7 ? 7 : 0);
+      char *c_start;
       if (value.len < 7 ||
-          (fio_buf2u32u(c_start) | 0x20202020UL) != fio_buf2u32u("chun") ||
-          (fio_buf2u32u(c_start + 3) | 0x20202020UL) !=
-              fio_buf2u32u("nked") ||
-          (value.len > 7 && c_start[-1] != ' ' && c_start[-1] != ',' &&
-           c_start[-1] != '\t')) {
+          (fio_buf2u32u((c_start = value.buf + value.len - 7)) |
+           0x20202020UL) != fio_buf2u32u("chun") ||
+          (fio_buf2u32u(c_start + 3) | 0x20202020UL) != fio_buf2u32u("nked")) {
         if (fio_http1___te_has_chunked(value))
           return -1; /* `chunked` isn't the final coding */
         p->flags |= FIO___HTTP1_FLAG_TE_UNFRAMED;
         break; /* forward the codings, a later field line may end the list */
       }
+      /* the final coding must be a whole list element: `gzip, chunked`, but
+       * never `gzip chunked` or `xchunked` (framing differentials). */
+      while (c_start > value.buf && (c_start[-1] == ' ' || c_start[-1] == '\t'))
+        --c_start;
+      if (c_start > value.buf && c_start[-1] != ',')
+        return -1;
       p->expected = FIO_HTTP1_EXPECTED_CHUNKED;
       p->flags &= ~FIO___HTTP1_FLAG_TE_UNFRAMED;
       /* endpoint does not need to know if the body was chunked or not */
@@ -556,7 +580,6 @@ static inline int fio_http1___read_header_line(
     fio_buf_info_s name, value;
     if (!eol)
       return 1;
-
     buf->len -= (eol - buf->buf) + 1;
     buf->buf = eol + 1;
     eol -= (eol != start && eol[-1] == '\r');
@@ -576,7 +599,7 @@ static inline int fio_http1___read_header_line(
         --eol;
     value = FIO_BUF_INFO2((div == eol) ? NULL : div, (size_t)(eol - div));
 
-    if (FIO_MEMCHR(value.buf, 0, value.len))
+    if (value.len && FIO_MEMCHR(value.buf, 0, value.len))
       return -1;
     int r = handler(p, name, value, udata);
     if (FIO_UNLIKELY(r))
@@ -595,7 +618,8 @@ headers_finished:
     /* `100 Continue` only matters when a body may follow (RFC 9110 §10.1.1) */
     if (p->expected && p->expected != FIO___HTTP1_BODY_NOT_ALLOWED &&
         fio_http1_on_expect(udata))
-      goto expect_failed;
+      return -1; /* the declared body may follow: never parse it as a
+                    message (request smuggling), the connection must close */
   }
   p->fn = (!p->expected || p->expected == FIO___HTTP1_BODY_NOT_ALLOWED)
               ? fio_http1___finish
@@ -603,10 +627,6 @@ headers_finished:
               ? fio_http1___read_body_chunked
               : fio_http1___read_body;
   return p->fn(p, buf, udata);
-
-expect_failed:
-  *p = (fio_http1_parser_s){0};
-  return 1;
 }
 
 /* parsing stage 1 - read headers. */
@@ -663,7 +683,7 @@ static int fio_http1___read_body_chunked_read(fio_http1_parser_s *p,
       return -1;
     buf->buf += p->expected;
     buf->len -= p->expected;
-    p->fn = fio_http1___read_body_chunked;
+    p->fn = fio_http1___read_body_chunked_eol;
     return 0;
   }
   if (fio_http1_on_body_chunk(buf[0], udata))
@@ -673,6 +693,26 @@ static int fio_http1___read_body_chunked_read(fio_http1_parser_s *p,
   return 1;
 }
 
+/* parsing stage 2 - read chunked body - the EOL after the chunk data. */
+static int fio_http1___read_body_chunked_eol(fio_http1_parser_s *p,
+                                             fio_buf_info_s *buf,
+                                             void *udata) {
+  (void)udata;
+  if (!buf->len)
+    return 1;
+  /* CRLF required (a bare LF is a tolerated line terminator, RFC 9112 §2.2) */
+  size_t tmp = (buf->buf[0] == '\r');
+  if (tmp && buf->len < 2)
+    return 1;
+  if (buf->buf[tmp] != '\n')
+    return -1;
+  ++tmp;
+  buf->len -= tmp;
+  buf->buf += tmp;
+  p->fn = fio_http1___read_body_chunked;
+  return 0;
+}
+
 /* parsing stage 2 - read chunked body - read next chunk length. */
 static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
                                          fio_buf_info_s *buf,
@@ -680,12 +720,6 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
   (void)udata;
   if (buf->len < 3)
     return 1;
-  { /* remove possible extra EOL after chunk payload */
-    size_t tmp = (buf->buf[0] == '\r');
-    tmp += (buf->buf[tmp] == '\n');
-    buf->len -= tmp;
-    buf->buf += tmp;
-  }
 
   if (!FIO_MEMCHR(buf->buf, '\n', buf->len)) /* prevent read overflow */
     return (buf->len < 10) ? 1 : -1;
@@ -711,13 +745,15 @@ static int fio_http1___read_body_chunked(fio_http1_parser_s *p,
     buf->buf = eol;
     return (p->fn = fio_http1___read_body_chunked_read)(p, buf, udata);
   }
-  if ((eol + 1 < buf->buf + buf->len) && (eol[0] == '\r' || eol[0] == '\n')) {
-    /* no trailers, finish now. */
-    eol += (eol[0] == '\r');
-    ++eol;
-    buf->len -= eol - buf->buf;
-    buf->buf = eol;
-    return fio_http1___finish(p, buf, udata);
+  { /* no trailers (an empty line: LF or CRLF)? finish now. */
+    const size_t left = (size_t)((buf->buf + buf->len) - eol);
+    const size_t cr = (left && eol[0] == '\r');
+    if (left > cr && eol[cr] == '\n') {
+      eol += cr + 1;
+      buf->len -= eol - buf->buf;
+      buf->buf = eol;
+      return fio_http1___finish(p, buf, udata);
+    }
   }
   /* possible trailers */
   buf->len -= eol - buf->buf;

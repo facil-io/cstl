@@ -327,6 +327,8 @@ SFUNC void fio_sha3_consume(fio_sha3_s *restrict h,
                             const void *restrict data,
                             size_t len) {
   const uint8_t *p = (const uint8_t *)data;
+  if (!len)
+    return; /* allows (NULL, 0) without passing NULL to memcpy */
 
   /* Fill buffer if partially filled */
   if (h->buflen > 0) {
@@ -379,6 +381,10 @@ SFUNC void fio_sha3_finalize(fio_sha3_s *restrict h, void *restrict out) {
     uint64_t last = fio_ltole64(h->state[full_words]);
     FIO_MEMCPY(o + (full_words << 3), &last, rem);
   }
+  /* Fixed-output finalization is terminal: wipe absorbed data / state. */
+  fio_secure_zero(h->state, sizeof(h->state));
+  fio_secure_zero(h->buf, sizeof(h->buf));
+  h->buflen = 0;
 }
 
 /** Squeeze output from SHAKE (can be called multiple times). */
@@ -410,7 +416,8 @@ SFUNC void fio_shake_squeeze(fio_sha3_s *restrict h,
       size_t word_rem = 8 - (pos & 7);
       if (word_rem > to_copy - copied)
         word_rem = to_copy - copied;
-      uint64_t w = fio_ltole64(h->state[pos >> 3]);
+      /* numeric lane value: byte k of the lane is (w >> 8k) on any endian */
+      uint64_t w = h->state[pos >> 3];
       for (size_t j = 0; j < word_rem; ++j)
         o[copied + j] = (uint8_t)(w >> (8 * ((pos + j) & 7)));
       copied += word_rem;
@@ -424,7 +431,7 @@ SFUNC void fio_shake_squeeze(fio_sha3_s *restrict h,
     }
     /* Handle trailing partial word */
     if (copied < to_copy) {
-      uint64_t w = fio_ltole64(h->state[pos >> 3]);
+      uint64_t w = h->state[pos >> 3];
       for (size_t j = 0; copied < to_copy; ++j, ++copied)
         o[copied] = (uint8_t)(w >> (8 * j));
     }
@@ -482,6 +489,7 @@ SFUNC void fio_shake128(void *restrict out,
   fio_sha3_s h = fio_shake128_init();
   fio_sha3_consume(&h, data, len);
   fio_shake_squeeze(&h, out, outlen);
+  fio_secure_zero(&h, sizeof(h));
 }
 
 /** Simple SHAKE256. */
@@ -492,6 +500,7 @@ SFUNC void fio_shake256(void *restrict out,
   fio_sha3_s h = fio_shake256_init();
   fio_sha3_consume(&h, data, len);
   fio_shake_squeeze(&h, out, outlen);
+  fio_secure_zero(&h, sizeof(h));
 }
 
 /* *****************************************************************************

@@ -128,8 +128,9 @@ facil.io headers are designed to be included more than once to generate code. [`
 
 - **`FIO_COMPILER_GUARD`** — clobber memory and prevent the compiler from reordering instructions around it.
 - **`FIO_COMPILER_GUARD_INSTRUCTION`** — prevent instruction reordering without the full memory clobber.
+- **`FIO_COMPILER_GUARD_PTR(ptr)`** — like `FIO_COMPILER_GUARD`, but also makes the memory at `ptr` visible to the barrier (as if read). Use it after wiping a private (non-escaping) buffer: a plain memory clobber only covers memory the compiler already considers reachable, so stores to a local key buffer may still be removed as dead stores.
 
-On GCC/Clang these are inline `asm volatile` barriers; on MSVC they map to `_ReadWriteBarrier` and `_WriteBarrier`.
+On GCC/Clang these are inline `asm volatile` barriers (`FIO_COMPILER_GUARD_PTR` passes `ptr` as an `asm` input); on MSVC they map to `_ReadWriteBarrier` and `_WriteBarrier` (`FIO_COMPILER_GUARD_PTR` first stores `ptr` to a `volatile` sink).
 
 ## Thread scheduling
 

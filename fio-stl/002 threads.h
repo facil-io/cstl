@@ -25,7 +25,7 @@ At this point, define any MACROs and customizable settings available to the
 developer.
 ***************************************************************************** */
 
-#if FIO_OS_POSIX /* POSIX Systems */
+#if FIO_OS_POSIX || defined(__CYGWIN__) /* POSIX Systems */
 #include <pthread.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -52,27 +52,9 @@ typedef pthread_cond_t fio_thread_cond_t;
 #include <synchapi.h>
 
 #ifndef FIO_THREADS_BYO
-/* On Windows, fio_thread_t stores the numeric Thread ID (TID, a DWORD).
- *
- * Design:
- *  - fio_thread_create() calls _beginthreadex, captures the TID via the tid
- *    out-param, stores (fio_thread_t)tid in *t, then immediately CloseHandle
- *    the returned HANDLE — it is not needed.
- *  - fio_thread_join() opens a transient HANDLE via
- *    OpenThread(SYNCHRONIZE, FALSE, (DWORD)*t), waits, then CloseHandle.
- *    If OpenThread returns NULL the thread already exited — return 0.
- *  - fio_thread_detach() is a no-op: TID is not a kernel resource.
- *    Just zeroes *t and returns 0.
- *  - fio_thread_current() returns GetCurrentThreadId() cast to uintptr_t —
- *    a TID, no kernel object, no CloseHandle, no leak.
- *  - fio_thread_equal() is a direct integer compare — both sides are TIDs.
- *  - fio_thread_t is a scalar (uintptr_t), castable through void* — matches
- *    pthread_t on Linux/glibc and satisfies IO module abstraction patterns.
- *
- * Accepted tradeoff: fio_thread_join is only called by code that knows the
- * thread is alive (or just finished), so the narrow window where OpenThread
- * could open a recycled TID is acceptable for this library.
- */
+/* Numeric thread ID. The implementation retains each created thread's real
+ * HANDLE until join/detach, so fast exit and TID reuse cannot invalidate joins.
+ * Current/equal remain allocation-free and compatible with scalar callers. */
 typedef uintptr_t fio_thread_t;
 #endif
 
@@ -104,16 +86,17 @@ typedef CONDITION_VARIABLE fio_thread_cond_t;
 API for forking processes
 ***************************************************************************** */
 
-/** Should behave the same as the POSIX system call `fork`. */
+/** POSIX fork; native Windows returns (fio_thread_pid_t)-1 with ENOSYS. */
 FIO_IFUNC fio_thread_pid_t fio_thread_fork(void);
 
 /** Should behave the same as the POSIX system call `getpid`. */
 FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void);
 
-/** Should behave the same as the POSIX system call `kill`. */
+/** POSIX kill; native Windows supports positive PIDs only (no groups). */
 FIO_IFUNC int fio_thread_kill(fio_thread_pid_t pid, int sig);
 
-/** Should behave the same as the POSIX system call `waitpid`. */
+/** POSIX waitpid. Native Windows supports snapshot-visible children with
+ * options 0 or WNOHANG only; no POSIX reaping or durable zombie status. */
 FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid,
                                  int *stat_loc,
                                  int options);
@@ -122,12 +105,15 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid,
 API for spawning threads
 ***************************************************************************** */
 
-/** Starts a new thread, returns 0 on success and -1 on failure. */
+/** Starts fn(arg); returns 0 or -1 with errno on failure. On success t owns
+ * one join/detach obligation. Keep arg alive until the callback stops using it.
+ */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t,
                                 void *(*fn)(void *),
                                 void *arg);
 
-/** Waits for the thread to finish. */
+/** Waits for a created, joinable thread. Zero means completion; nonzero is an
+ * error, not completion. Do not concurrently join/detach the same thread. */
 FIO_IFUNC int fio_thread_join(fio_thread_t *t);
 
 /** Detaches the thread, so thread resources are freed automatically. */
@@ -202,7 +188,9 @@ FIO_IFUNC int fio_thread_cond_init(fio_thread_cond_t *c);
 /** Waits on a conditional variable (MUST be previously locked). */
 FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c, fio_thread_mutex_t *m);
 
-/** Waits on a conditional variable (MUST be previously locked). */
+/** Waits with m locked. Returns 0 on wake, nonzero on timeout/error. POSIX
+ * uses CLOCK_REALTIME and rejects unrepresentable deadlines; Windows clamps
+ * finite durations to INFINITE-1 milliseconds rather than wrapping. */
 FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
                                         fio_thread_mutex_t *m,
                                         size_t milliseconds);
@@ -223,7 +211,7 @@ POSIX Implementation - inlined static functions
 
 
 ***************************************************************************** */
-#if FIO_OS_POSIX
+#if FIO_OS_POSIX || defined(__CYGWIN__)
 
 #ifndef FIO_THREADS_FORK_BYO
 /** Should behave the same as the POSIX system call `getpid`. */
@@ -250,7 +238,11 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
 // clang-format off
 
 /** Starts a new thread, returns 0 on success and -1 on failure. */
-FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) { return pthread_create(t, NULL, fn, arg); }
+FIO_IFUNC int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg) {
+  int r = pthread_create(t, NULL, fn, arg);
+  if (r) errno = r;
+  return r ? -1 : 0;
+}
 
 FIO_IFUNC int fio_thread_join(fio_thread_t *t) { return pthread_join(*t, NULL); }
 
@@ -312,9 +304,11 @@ FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e pr) {
   case FIO_THREAD_PRIORITY_NORMAL:  qos = QOS_CLASS_DEFAULT;          rel = 0; break;
   case FIO_THREAD_PRIORITY_HIGH:    qos = QOS_CLASS_USER_INITIATED;   rel = 2; break;
   case FIO_THREAD_PRIORITY_HIGHEST: qos = QOS_CLASS_USER_INTERACTIVE; rel = 4; break;
-  case FIO_THREAD_PRIORITY_ERROR:   qos = QOS_CLASS_DEFAULT;          rel = 0; break;
+  default: errno = EINVAL; return -1;
   }
-  return pthread_set_qos_class_self_np(qos, rel);
+  int r = pthread_set_qos_class_self_np(qos, rel);
+  if (r) errno = r;
+  return r ? -1 : 0;
 }
 
 #else /* portable POSIX */
@@ -327,6 +321,10 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
     return FIO_THREAD_PRIORITY_ERROR;
   int min = sched_get_priority_min(policy);
   int max = sched_get_priority_max(policy);
+  if (min == -1 || max == -1 || max < min)
+    return FIO_THREAD_PRIORITY_ERROR;
+  if (min == max)
+    return FIO_THREAD_PRIORITY_NORMAL;
   size_t steps = (size_t)(max - min) / 5;
   size_t priority_value = (schd.sched_priority - min);
   if(steps) priority_value /= steps; else priority_value = 5;
@@ -342,12 +340,19 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
 
 /** Sets a thread's priority level. */
 FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e priority_value) {
+  if (priority_value < FIO_THREAD_PRIORITY_LOWEST ||
+      priority_value > FIO_THREAD_PRIORITY_HIGHEST) {
+    errno = EINVAL;
+    return -1;
+  }
   int policy;
   struct sched_param schd;
-  if(pthread_getschedparam(pthread_self(), &policy, &schd))
-    return -1;
+  int r = pthread_getschedparam(pthread_self(), &policy, &schd);
+  if (r) { errno = r; return -1; }
   int min = sched_get_priority_min(policy);
   int max = sched_get_priority_max(policy);
+  if (min == -1 || max == -1 || max < min)
+    return -1;
   size_t steps = (size_t)(max - min) / 5;
   switch(priority_value) {
   case FIO_THREAD_PRIORITY_LOWEST:  schd.sched_priority = min + steps; break;
@@ -355,9 +360,11 @@ FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e priority_value) {
   case FIO_THREAD_PRIORITY_NORMAL:  schd.sched_priority = max - (steps << 1); break; 
   case FIO_THREAD_PRIORITY_HIGH:    schd.sched_priority = max - steps; break; 
   case FIO_THREAD_PRIORITY_HIGHEST: schd.sched_priority = max; break; 
-  case FIO_THREAD_PRIORITY_ERROR: return -1;
+  default: errno = EINVAL; return -1;
   }
-  return pthread_setschedparam(pthread_self(), policy, &schd);
+  r = pthread_setschedparam(pthread_self(), policy, &schd);
+  if (r) errno = r;
+  return r ? -1 : 0;
 }
 
 #endif /* MacOS vs. portable POSIX */
@@ -368,13 +375,21 @@ FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e priority_value) {
 FIO_IFUNC int fio_thread_mutex_init(fio_thread_mutex_t *m) { return pthread_mutex_init(m, NULL); }
 
 /** Locks a simple Mutex, returning -1 on error. */
-FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) { return pthread_mutex_lock(m); }
+FIO_IFUNC int fio_thread_mutex_lock(fio_thread_mutex_t *m) {
+  int r = pthread_mutex_lock(m);
+  if (r) errno = r;
+  return r ? -1 : 0;
+}
 
 /** Attempts to lock a simple Mutex, returning zero on success. */
 FIO_IFUNC int fio_thread_mutex_trylock(fio_thread_mutex_t *m) { return pthread_mutex_trylock(m); }
 
 /** Unlocks a simple Mutex, returning zero on success or -1 on error. */
-FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) { return pthread_mutex_unlock(m); }
+FIO_IFUNC int fio_thread_mutex_unlock(fio_thread_mutex_t *m) {
+  int r = pthread_mutex_unlock(m);
+  if (r) errno = r;
+  return r ? -1 : 0;
+}
 
 /** Destroys the simple Mutex (cleanup). */
 FIO_IFUNC void fio_thread_mutex_destroy(fio_thread_mutex_t *m) { pthread_mutex_destroy(m); *m = (pthread_mutex_t)PTHREAD_MUTEX_INITIALIZER; }
@@ -399,10 +414,21 @@ FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
                                         fio_thread_mutex_t *m,
                                         size_t milliseconds) {
   struct timespec t;
-  clock_gettime(CLOCK_REALTIME, &t);
-  milliseconds += (size_t)(t.tv_nsec / 1000000);
-  t.tv_sec += (long)(milliseconds / 1000);
-  t.tv_nsec = (long)((milliseconds % 1000) * 1000000);
+  if (clock_gettime(CLOCK_REALTIME, &t))
+    return errno;
+  /* Split before adding: neither SIZE_MAX nor a fractional carry may wrap. */
+  uintmax_t seconds = (uintmax_t)(milliseconds / 1000);
+  long nanoseconds = t.tv_nsec + (long)(milliseconds % 1000) * 1000000L;
+  seconds += (nanoseconds >= 1000000000L);
+  nanoseconds %= 1000000000L;
+  const uintmax_t time_max =
+      ((time_t)-1 > (time_t)0)
+          ? (uintmax_t)(time_t)-1
+          : (((uintmax_t)1 << (sizeof(time_t) * CHAR_BIT - 1)) - 1);
+  if (t.tv_sec < 0 || seconds > time_max - (uintmax_t)t.tv_sec)
+    return EOVERFLOW;
+  t.tv_sec += (time_t)seconds;
+  t.tv_nsec = nanoseconds;
   return pthread_cond_timedwait(c, m, &t);
 }
 
@@ -439,7 +465,7 @@ FIO_IFUNC fio_thread_pid_t fio_thread_getpid(void) {
   return (fio_thread_pid_t)GetCurrentProcessId();
 }
 
-#if defined(fork) && defined(WEXITSTATUS) /* unix features pre-patched */
+#if defined(__CYGWIN__) || (defined(fork) && defined(WEXITSTATUS))
 FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   return (fio_thread_pid_t)fork();
 }
@@ -455,6 +481,7 @@ FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t i, int *s, int o) {
 FIO_IFUNC fio_thread_pid_t fio_thread_fork(void) {
   FIO_LOG_FATAL(
       "`fork` unsupported on this platform - cannot spawn worker processes.");
+  errno = ENOSYS;
   return (fio_thread_pid_t)-1;
 }
 
@@ -473,14 +500,15 @@ FIO_IFUNC int fio_thread_kill(fio_thread_pid_t pid, int sig) {
   }
 #endif
 
-  if (pid == -1)
-    pid = 0;
-
-  if (!pid)
-    handle = GetCurrentProcess();
-  else
-    handle =
-        OpenProcess(PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, FALSE, pid);
+  /* POSIX group/broadcast forms must never silently target the caller. */
+  if (!pid || pid == (fio_thread_pid_t)-1) {
+    errno = ENOSYS;
+    return -1;
+  }
+  handle =
+      OpenProcess((sig ? PROCESS_TERMINATE : 0) | PROCESS_QUERY_INFORMATION,
+                  FALSE,
+                  pid);
   if (!handle)
     goto something_went_wrong;
 
@@ -551,7 +579,7 @@ cleanup_after_error:
 #endif /* WIFEXITED */
 
 #ifndef WIFSIGNALED
-#define WIFSIGNALED(status) (((signed char)(__WTERMSIG(status) + 1) >> 1) > 0)
+#define WIFSIGNALED(status) (((signed char)(WTERMSIG(status) + 1) >> 1) > 0)
 #endif /* WIFSIGNALED */
 
 #ifndef WTERMSIG
@@ -566,143 +594,201 @@ cleanup_after_error:
 #define WSTOPSIG(status) WEXITSTATUS(status)
 #endif /* WSTOPSIG */
 
-static int fio___thread_waitpid_anychild(PROCESSENTRY32W *pe, DWORD pid) {
-  return pe->th32ParentProcessID == GetCurrentProcessId();
-}
-
-static int fio___thread_waitpid_pid(PROCESSENTRY32W *pe, DWORD pid) {
-  return pe->th32ProcessID == pid;
-}
-
 FIO_IFUNC int fio_thread_waitpid(fio_thread_pid_t pid, int *status, int opt) {
-  /* adopted from:
-   * https://github.com/win32ports/sys_wait_h/blob/master/sys/wait.h Copyright
-   * Copyright (c) 2019 win32ports, MIT license
-   */
-  int saved_status = 0;
-  HANDLE hProcess = INVALID_HANDLE_VALUE, hSnapshot = INVALID_HANDLE_VALUE;
-  int (*are_these_the_druides_were_looking_for)(PROCESSENTRY32W *, DWORD);
+  /* Windows has no POSIX zombie/reap facility. Only children present in the
+   * snapshot can be discovered; callers needing durable exit status should
+   * retain their CreateProcess handle instead. */
+  if (opt & ~WNOHANG) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (!pid) {
+    errno = ENOSYS;
+    return -1;
+  }
+  if (pid != (fio_thread_pid_t)-1 && pid > INT_MAX) {
+    errno = EOVERFLOW; /* public return type is int */
+    return -1;
+  }
+  HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+  if (snapshot == INVALID_HANDLE_VALUE) {
+    errno = EIO;
+    return -1;
+  }
   PROCESSENTRY32W pe;
-  DWORD wait_status = 0, exit_code = 0;
-  int nohang = WNOHANG == (WNOHANG & opt);
-  opt &= ~(WUNTRACED | WNOWAIT | WCONTINUED | WNOHANG);
-  if (opt) {
-    errno = -EINVAL;
-    return -1;
-  }
-
-  if (pid < -1 || pid == 0) {
-    FIO_LOG_ERROR(
-        "fio_thread_waitpid not implemented for pid < -1 || pid == 0.");
-    return -1;
-  }
-
-  are_these_the_druides_were_looking_for = fio___thread_waitpid_pid;
-  if (pid == -1) /* wait for any child */
-    are_these_the_druides_were_looking_for = fio___thread_waitpid_anychild;
-
-  hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-  if (INVALID_HANDLE_VALUE == hSnapshot) {
-    errno = ECHILD;
-    return -1;
-  }
-
   pe.dwSize = sizeof(pe);
-  if (!Process32FirstW(hSnapshot, &pe)) {
-    CloseHandle(hSnapshot);
-    errno = ECHILD;
-    return -1;
-  }
+  int result = -1, error = ECHILD;
+  int live_child = 0;
+  if (!Process32FirstW(snapshot, &pe))
+    goto cleanup;
   do {
-    if (are_these_the_druides_were_looking_for(&pe, pid)) {
-      hProcess = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION,
-                             0,
-                             pe.th32ProcessID);
-      if (INVALID_HANDLE_VALUE == hProcess) {
-        CloseHandle(hSnapshot);
-        errno = ECHILD;
-        return -1;
-      }
-      break;
+    if (pe.th32ParentProcessID != GetCurrentProcessId() ||
+        (pid != (fio_thread_pid_t)-1 && pe.th32ProcessID != pid))
+      continue;
+    if (pe.th32ProcessID > INT_MAX) {
+      error = EOVERFLOW;
+      goto cleanup;
     }
-  } while (Process32NextW(hSnapshot, &pe));
-  if (INVALID_HANDLE_VALUE == hProcess) {
-    CloseHandle(hSnapshot);
-    errno = ECHILD;
-    return -1;
-  }
-
-  wait_status = WaitForSingleObject(hProcess, nohang ? 0 : INFINITE);
-
-  if (WAIT_OBJECT_0 == wait_status) {
-    if (GetExitCodeProcess(hProcess, &exit_code))
-      saved_status |= (exit_code & 0xFF) << 8;
-  } else if (WAIT_TIMEOUT == wait_status && nohang) {
-    return 0;
-  } else {
-    CloseHandle(hProcess);
-    CloseHandle(hSnapshot);
-    errno = ECHILD;
-    return -1;
-  }
-
-  CloseHandle(hProcess);
-  CloseHandle(hSnapshot);
-
-  if (status)
-    *status = saved_status;
-
-  return pe.th32ParentProcessID;
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_INFORMATION,
+                                 FALSE,
+                                 pe.th32ProcessID);
+    if (!process) {
+      if (GetLastError() == ERROR_INVALID_PARAMETER)
+        continue; /* exited between snapshot and open */
+      error = (GetLastError() == ERROR_ACCESS_DENIED) ? EPERM : EIO;
+      goto cleanup;
+    }
+    DWORD wait = WaitForSingleObject(process, (opt & WNOHANG) ? 0 : INFINITE);
+    DWORD exit_code = 0;
+    if (wait == WAIT_OBJECT_0) {
+      if (!GetExitCodeProcess(process, &exit_code)) {
+        error = EIO;
+      } else {
+        result = (int)pe.th32ProcessID;
+        if (status)
+          *status = (int)((exit_code & 0xFF) << 8);
+      }
+      CloseHandle(process);
+      goto cleanup;
+    }
+    CloseHandle(process);
+    if (wait != WAIT_TIMEOUT || !(opt & WNOHANG)) {
+      error = EIO;
+      goto cleanup;
+    }
+    live_child = 1; /* scan other children before returning a no-change poll */
+  } while (Process32NextW(snapshot, &pe));
+  if (live_child)
+    result = 0;
+cleanup:
+  CloseHandle(snapshot);
+  if (result < 0)
+    errno = error;
+  return result;
 }
 
 #endif /* already patched by some other implementation */
 #endif /* FIO_THREADS_FORK_BYO */
 
 #ifndef FIO_THREADS_BYO
+typedef struct fio___thread_start_s {
+  struct fio___thread_start_s *next;
+  HANDLE handle;
+  void *(*fn)(void *);
+  void *arg;
+  DWORD tid;
+  volatile LONG refs; /* registry owner + startup worker */
+} fio___thread_start_s;
+typedef struct {
+  SRWLOCK lock;
+  fio___thread_start_s *head;
+} fio___thread_registry_s;
+
+/* Share joinable ownership across translation units, as with state callbacks.
+ */
+FIO_WEAK_VAR fio___thread_registry_s fio___thread_registry = {0};
+
+FIO_IFUNC void fio___thread_start_release(fio___thread_start_s *s) {
+  if (!InterlockedDecrement(&s->refs))
+    HeapFree(GetProcessHeap(), 0, s);
+}
+
+/* Match _beginthreadex's ABI, including __stdcall on 32-bit Windows. */
+FIO_SFUNC unsigned __stdcall fio___thread_start(void *arg) {
+  fio___thread_start_s *s = (fio___thread_start_s *)arg;
+  fio___thread_registry_s *registry = &fio___thread_registry;
+  /* The creator publishes the handle, TID and output before user code runs. */
+  AcquireSRWLockShared(&registry->lock);
+  void *(*fn)(void *) = s->fn;
+  void *fn_arg = s->arg;
+  ReleaseSRWLockShared(&registry->lock);
+  fio___thread_start_release(s);
+  (void)fn(fn_arg);
+  return 0;
+}
+
 /** Starts a new thread, returns 0 on success and -1 on failure. */
 FIO_IFUNC int fio_thread_create(fio_thread_t *t,
                                 void *(*fn)(void *),
                                 void *arg) {
-  unsigned tid = 0;
-  HANDLE h = (HANDLE)_beginthreadex(NULL,
-                                    0,
-                                    (_beginthreadex_proc_type)(uintptr_t)fn,
-                                    arg,
-                                    0,
-                                    &tid);
-  if (!h)
+  fio___thread_start_s *s = (fio___thread_start_s *)HeapAlloc(GetProcessHeap(),
+                                                              HEAP_ZERO_MEMORY,
+                                                              sizeof(*s));
+  if (!s) {
+    errno = ENOMEM;
     return -1;
-  CloseHandle(h); /* TID is stored; HANDLE not needed */
+  }
+  s->fn = fn;
+  s->arg = arg;
+  s->refs = 2;
+  unsigned tid = 0;
+  fio___thread_registry_s *registry = &fio___thread_registry;
+  AcquireSRWLockExclusive(&registry->lock);
+  s->handle = (HANDLE)_beginthreadex(NULL, 0, fio___thread_start, s, 0, &tid);
+  if (!s->handle) {
+    ReleaseSRWLockExclusive(&registry->lock);
+    HeapFree(GetProcessHeap(), 0, s);
+    return -1;
+  }
+  s->tid = tid;
+  s->next = registry->head;
+  registry->head = s;
   *t = (fio_thread_t)tid;
+  ReleaseSRWLockExclusive(&registry->lock);
   return 0;
 }
 
 FIO_IFUNC int fio_thread_join(fio_thread_t *t) {
-  if (!*t) {
+  if (*t == fio_thread_current()) {
+    errno = EDEADLK;
+    return -1;
+  }
+  fio___thread_registry_s *registry = &fio___thread_registry;
+  AcquireSRWLockShared(&registry->lock);
+  fio___thread_start_s *s = registry->head;
+  while (s && s->tid != (DWORD)*t)
+    s = s->next;
+  ReleaseSRWLockShared(&registry->lock);
+  if (!s) {
     errno = EINVAL;
     return -1;
   }
-  /* Open a transient HANDLE for the duration of the wait only. */
-  HANDLE h = OpenThread(SYNCHRONIZE, FALSE, (DWORD)*t);
-  if (!h) {
-    /* Thread already exited and TID was recycled — nothing to wait for. */
-    *t = 0;
-    return 0;
+  /* A caller must not join/detach the same thread concurrently. */
+  if (WaitForSingleObject(s->handle, INFINITE) != WAIT_OBJECT_0) {
+    errno = EIO;
+    return -1; /* retain ownership so the caller can retry */
   }
-  int r = (WaitForSingleObject(h, INFINITE) == WAIT_FAILED) ? -1 : 0;
-  if (r)
-    errno = GetLastError();
-  CloseHandle(h);
+  return fio_thread_detach(t);
+}
+
+/** Releases the joinable handle; the startup worker owns its own reference. */
+FIO_IFUNC int fio_thread_detach(fio_thread_t *t) {
+  fio___thread_registry_s *registry = &fio___thread_registry;
+  AcquireSRWLockExclusive(&registry->lock);
+  fio___thread_start_s **pos = &registry->head;
+  while (*pos && (*pos)->tid != (DWORD)*t)
+    pos = &(*pos)->next;
+  fio___thread_start_s *s = *pos;
+  if (!s) {
+    ReleaseSRWLockExclusive(&registry->lock);
+    errno = EINVAL;
+    return -1;
+  }
+  if (!CloseHandle(s->handle)) {
+    ReleaseSRWLockExclusive(&registry->lock);
+    errno = EIO;
+    return -1;
+  }
+  *pos = s->next;
+  ReleaseSRWLockExclusive(&registry->lock);
   *t = 0;
-  return r;
+  fio___thread_start_release(s);
+  return 0;
 }
 
 // clang-format off
-/** Detaches the thread — TID is not a kernel resource; just zero *t. */
-FIO_IFUNC int fio_thread_detach(fio_thread_t *t) { *t = 0; return 0; }
-
 /** Ends the current running thread. */
-FIO_IFUNC void fio_thread_exit(void) { _endthread(); }
+FIO_IFUNC void fio_thread_exit(void) { _endthreadex(0); }
 
 /* Returns non-zero if both threads refer to the same thread.
  * Both values are TIDs — direct integer compare is correct and sufficient. */
@@ -741,7 +827,7 @@ FIO_SFUNC fio_thread_priority_e fio_thread_priority(void) {
 FIO_SFUNC int fio_thread_priority_set(fio_thread_priority_e pr) {
   int    priority;
   switch(pr){
-  case FIO_THREAD_PRIORITY_ERROR: return -1;
+  default: errno = EINVAL; return -1;
   case FIO_THREAD_PRIORITY_LOWEST:  priority = THREAD_PRIORITY_LOWEST; break;
   case FIO_THREAD_PRIORITY_LOW:     priority = THREAD_PRIORITY_BELOW_NORMAL; break;
   case FIO_THREAD_PRIORITY_NORMAL:  priority = THREAD_PRIORITY_NORMAL; break;
@@ -806,7 +892,11 @@ FIO_IFUNC int fio_thread_cond_wait(fio_thread_cond_t *c,
 FIO_IFUNC int fio_thread_cond_timedwait(fio_thread_cond_t *c,
                                         fio_thread_mutex_t *m,
                                         size_t milliseconds) {
-  return 0 - !SleepConditionVariableSRW(c, m, (DWORD)milliseconds, 0);
+  /* INFINITE is a sentinel, not a finite duration. Saturate without wrapping.
+   */
+  DWORD timeout =
+      milliseconds >= (size_t)INFINITE ? INFINITE - 1 : (DWORD)milliseconds;
+  return 0 - !SleepConditionVariableSRW(c, m, timeout, 0);
 }
 
 /** Signals a simple conditional variable. */
@@ -878,7 +968,9 @@ finished_creating_thread:
   FIO_MEMCPY(d, (const void *)s, bytes); /* memcpy reminder */
   while (i) {
     --i;
-    fio_thread_join(threads + i);
+    /* There is no safe return while a worker may still own info/buffers. */
+    FIO_ASSERT(!fio_thread_join(threads + i),
+               "fio_thread_memcpy worker join failed");
   }
   return r;
 }
@@ -887,9 +979,7 @@ finished_creating_thread:
 Module Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
-#if FIO_OS_WIN
-/* SRWLOCK is always zero-initialized and ready to use — no lazy init needed. */
-#endif /* FIO_OS_WIN */
+
 /* *****************************************************************************
 Module Cleanup
 ***************************************************************************** */

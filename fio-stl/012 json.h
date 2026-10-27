@@ -103,7 +103,8 @@ typedef struct FIO_ALIGN(64) {
                                     void *map,
                                     fio_buf_info_s key,
                                     void *value);
-  /** Appends `value` (owned, taken even on error). Returns non-zero on error. */
+  /** Appends `value` (owned, taken even on error). Returns non-zero on error.
+   */
   int (*array_push)(void *udata, void *array, void *value);
   /** Returns non-zero if `obj` is an array (optional). */
   int (*is_array)(void *udata, void *obj);
@@ -153,20 +154,21 @@ SFUNC fio_json_result_s fio_json_parse(const fio_json_parser_callbacks_s *cb,
  * Opens a map via `cb->on_map` and resolves a returned `old` value using the
  * default conflict rules. Returns the opened map (borrowed, owned at the root).
  * Requires on_map, on_array, map_push, array_push, free_unused_object; missing
- * is_map / is_array callbacks are treated as always false.
+ * is_map / is_array callbacks are treated as always false. Conflict descent
+ * is bounded by FIO_JSON_MAX_DEPTH, returning FIO_JSON_ERROR_NESTING.
  */
-SFUNC fio_json_obj_result_s fio_json_resolve_on_map(
-    const fio_json_parser_callbacks_s *cb,
-    void *udata,
-    void *parent,
-    fio_buf_info_s key);
+SFUNC fio_json_obj_result_s
+fio_json_resolve_on_map(const fio_json_parser_callbacks_s *cb,
+                        void *udata,
+                        void *parent,
+                        fio_buf_info_s key);
 /** Opens an array via `cb->on_array`, resolving `old` like
  * `fio_json_resolve_on_map`. Same requirements. */
-SFUNC fio_json_obj_result_s fio_json_resolve_on_array(
-    const fio_json_parser_callbacks_s *cb,
-    void *udata,
-    void *parent,
-    fio_buf_info_s key);
+SFUNC fio_json_obj_result_s
+fio_json_resolve_on_array(const fio_json_parser_callbacks_s *cb,
+                          void *udata,
+                          void *parent,
+                          fio_buf_info_s key);
 /** Stores an owned `value` (taken even on error) via `cb->map_push`, resolving
  * a returned replaced value. Returns 0 or an unchanged callback error. Same
  * requirements. */
@@ -266,7 +268,8 @@ FIO_SFUNC int fio___json_consume_comment(fio___json_state_s *s) {
 }
 
 /* Unwraps a value callback result, recording a callback error. */
-FIO_IFUNC void *fio___json_take(fio___json_state_s *s, fio_json_obj_result_s r) {
+FIO_IFUNC void *fio___json_take(fio___json_state_s *s,
+                                fio_json_obj_result_s r) {
   if (r.err) {
     s->error = r.err;
     return NULL;
@@ -281,11 +284,11 @@ FIO_SFUNC void *fio___json_consume_infinit(fio___json_state_s *s,
   const uint16_t inf16 = fio_buf2u16u("nf");
   uint64_t tst64;
   uint16_t tst16;
-  if (s->pos + 3 > s->end)
+  if ((size_t)(s->end - s->pos) < 3)
     goto buffer_error;
   tst16 = (fio_buf2u16u(s->pos + 1) | (uint16_t)0x2020U);
   if (tst16 == inf16) {
-    if (s->pos + 7 < s->end) {
+    if ((size_t)(s->end - s->pos) >= 8) {
       tst64 = (fio_buf2u64u(s->pos) | (uint64_t)0x2020202020202020ULL);
       s->pos += (tst64 == inf64) * 5;
     }
@@ -335,13 +338,17 @@ FIO_IFUNC void *fio___json_consume_string_any(fio___json_state_s *s,
     if (s->pos >= s->end)
       break;
     if (*s->pos == quote) {
-      fio_buf_info_s str = FIO_BUF_INFO2((char *)start, (size_t)(s->pos - start));
+      fio_buf_info_s str =
+          FIO_BUF_INFO2((char *)start, (size_t)(s->pos - start));
       ++s->pos;
       return fio___json_take(s, cb(s->udata, str));
     }
-    if (*s->pos == '\\')
+    if (*s->pos++ == '\\') {
       cb = s->cb.on_string;
-    s->pos += 1 + (*s->pos == '\\'); /* skip the escaped byte, if any */
+      if (s->pos == s->end)
+        break;
+      ++s->pos; /* skip the escaped byte */
+    }
   }
   s->error = FIO_JSON_ERROR_GENERIC;
   return NULL;
@@ -414,7 +421,8 @@ FIO_SFUNC fio_buf_info_s fio___json_consume_object_key(fio___json_state_s *s) {
       }
       if (*s->pos == '\\') {
         escaped = 1;
-        ++s->pos;
+        if (++s->pos == s->end)
+          goto set_error;
       }
     }
     goto set_error;
@@ -426,15 +434,21 @@ FIO_SFUNC fio_buf_info_s fio___json_consume_object_key(fio___json_state_s *s) {
   const char *start = s->pos;
   for (; s->pos < s->end;) {
     size_t add = 1;
+    const size_t left = (size_t)(s->end - s->pos);
     if (!valid_key[(*(uint8_t *)s->pos)] &&
-        (add = fio_utf8_char_len(s->pos)) < 2)
+        (add = fio_utf8_char_len_bounded(s->pos, left)) < 2)
       return fio___json_key_from_slice(s,
                                        start,
                                        (size_t)(s->pos - start),
                                        escaped);
-    if (*s->pos == '\\')
+    if (*s->pos == '\\') {
       escaped = 1;
-    add += (*s->pos == '\\');
+      if (left == 1) {
+        ++s->pos;
+        goto set_error;
+      }
+      ++add;
+    }
     s->pos += add;
   }
 set_error:
@@ -470,6 +484,12 @@ SFUNC int fio_json_resolve_map_push(const fio_json_parser_callbacks_s *cb,
                                     void *map,
                                     fio_buf_info_s key,
                                     void *value) {
+  size_t depth = 0;
+resolve_next:
+  if (depth++ == FIO_JSON_MAX_DEPTH) {
+    fio___json_free(cb, udata, value);
+    return FIO_JSON_ERROR_NESTING;
+  }
   fio_json_obj_result_s r = cb->map_push(udata, map, key, value);
   if (r.err)
     return r.err;
@@ -484,12 +504,12 @@ SFUNC int fio_json_resolve_map_push(const fio_json_parser_callbacks_s *cb,
       return r.err;
     if (!r.obj)
       return 0;
-    if (old_is_map)
-      return fio_json_resolve_map_push(cb,
-                                       udata,
-                                       old,
-                                       FIO___JSON_EMPTY_KEY,
-                                       r.obj);
+    if (old_is_map) {
+      map = old;
+      key = FIO___JSON_EMPTY_KEY;
+      value = r.obj;
+      goto resolve_next;
+    }
     return cb->array_push(udata, old, r.obj);
   }
   /* scalar conflict: replace the incoming value with [old, incoming] */
@@ -511,11 +531,11 @@ SFUNC int fio_json_resolve_map_push(const fio_json_parser_callbacks_s *cb,
   return a.old ? cb->array_push(udata, a.obj, a.old) : 0;
 }
 
-SFUNC fio_json_obj_result_s fio_json_resolve_on_map(
-    const fio_json_parser_callbacks_s *cb,
-    void *udata,
-    void *parent,
-    fio_buf_info_s key) {
+SFUNC fio_json_obj_result_s
+fio_json_resolve_on_map(const fio_json_parser_callbacks_s *cb,
+                        void *udata,
+                        void *parent,
+                        fio_buf_info_s key) {
   fio_json_obj_result_s r = {0};
   fio_json_push_result_s m = cb->on_map(udata, parent, key);
   if (m.err) {
@@ -538,11 +558,15 @@ SFUNC fio_json_obj_result_s fio_json_resolve_on_map(
   return r;
 }
 
-SFUNC fio_json_obj_result_s fio_json_resolve_on_array(
-    const fio_json_parser_callbacks_s *cb,
-    void *udata,
-    void *parent,
-    fio_buf_info_s key) {
+SFUNC fio_json_obj_result_s
+fio_json_resolve_on_array(const fio_json_parser_callbacks_s *cb,
+                          void *udata,
+                          void *parent,
+                          fio_buf_info_s key) {
+  size_t depth = 0;
+resolve_next:
+  if (depth++ == FIO_JSON_MAX_DEPTH)
+    return (fio_json_obj_result_s){.err = FIO_JSON_ERROR_NESTING};
   fio_json_obj_result_s r = {0};
   fio_json_push_result_s a = cb->on_array(udata, parent, key);
   if (a.err) {
@@ -564,7 +588,9 @@ SFUNC fio_json_obj_result_s fio_json_resolve_on_array(
     if (r.err)
       return r;
     fio___json_free(cb, udata, r.obj); /* the displaced new array */
-    return fio_json_resolve_on_array(cb, udata, a.old, FIO___JSON_EMPTY_KEY);
+    parent = a.old;
+    key = FIO___JSON_EMPTY_KEY;
+    goto resolve_next;
   }
   r.err = cb->array_push(udata, a.obj, a.old);
   if (!r.err)
@@ -755,14 +781,9 @@ FIO_SFUNC void *fio___json_consume(fio___json_state_s *s) {
           container = s->root;
         } else {
           fio_json_obj_result_s c =
-              array ? fio_json_resolve_on_array(&s->cb,
-                                                s->udata,
-                                                parent,
-                                                s->key)
-                    : fio_json_resolve_on_map(&s->cb,
-                                              s->udata,
-                                              parent,
-                                              s->key);
+              array
+                  ? fio_json_resolve_on_array(&s->cb, s->udata, parent, s->key)
+                  : fio_json_resolve_on_map(&s->cb, s->udata, parent, s->key);
           container = fio___json_take(s, c);
           if (!parent)
             root = container;
@@ -894,16 +915,18 @@ SFUNC fio_json_result_s fio_json_parse(const fio_json_parser_callbacks_s *cb,
   if (len >= 3 && state.pos[0] == (char)0xEF && state.pos[1] == (char)0xBB &&
       state.pos[2] == (char)0xBF) {
     state.pos += 3;
-    if (len == 3)
+    if (len == 3) {
+      r.stop_pos = 3;
       goto finish;
+    }
   }
   r.ctx = fio___json_consume(&state);
   r.err = state.error;
   r.stop_pos = state.pos - start;
-  if (state.error)
+  if (state.error && state.pos <= state.end)
     FIO_LOG_DEBUG(
         "JSON parsing failed after:\n%.*s",
-        ((state.end - state.pos > 48) ? 48 : ((int)(state.end - state.pos))),
+        (int)((state.end - state.pos > 48) ? 48 : (state.end - state.pos)),
         state.pos);
 finish:
   if (state.key_buffer.buf != state.key_storage)

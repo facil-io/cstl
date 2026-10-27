@@ -3,7 +3,8 @@ Test - Core Module
 Covers 000 core.h, atomics, type-size sanity, state callbacks, and logging.
 ***************************************************************************** */
 #define FIO_LOG
-#define FIO___DIFF_INDEX 1 /* Exercise the experimental first-difference helper. */
+#define FIO___DIFF_INDEX                                                       \
+  1                 /* Exercise the experimental first-difference helper. */
 #define FIO_THREADS /* Enable thread type declarations for size checks. */
 #include "test-helpers.h"
 
@@ -28,7 +29,7 @@ FIO_SFUNC void fio___test_core_memcpy_primitives(void) {
         {fio_memcpy1023x, "fio_memcpy1023x", 1023},
         {fio_memcpy2047x, "fio_memcpy2047x", 2047},
         {fio_memcpy4095x, "fio_memcpy4095x", 4095},
-        {NULL},
+        {.fn = NULL},
     };
     char buf[(4096 << 1) + 64];
     fio_rand_bytes(buf + (4096 + 32), (4096 + 32));
@@ -45,6 +46,11 @@ FIO_SFUNC void fio___test_core_memcpy_primitives(void) {
                    i);
         FIO_ASSERT(fio_ct_is_eq(buf + i, buf + (4096 + 32), len),
                    "fio_ct_is_eq claims that %s failed @ %zu\n",
+                   tests[ifn].name,
+                   i);
+        FIO_ASSERT(fio_buf_info_is_eq(FIO_BUF_INFO2(buf + i, len),
+                                      FIO_BUF_INFO2(buf + (4096 + 32), len)),
+                   "fio_buf_info_is_eq claims that %s failed @ %zu\n",
                    tests[ifn].name,
                    i);
         FIO_ASSERT(buf[i + len] == '\xFF', "%s overflow?", tests[ifn].name);
@@ -122,11 +128,11 @@ FIO_SFUNC void fio___test_core_bit_index(void) {
 #endif
     FIO_ASSERT(fio_bits_msb_index(((1ULL << i) | 1)) == i,
                "fio_bits_msb_index(%zu) != %zu",
-               ((1ULL << i)),
+               (size_t)(1ULL << i),
                (size_t)fio_bits_msb_index(((1ULL << i) | 1)));
     FIO_ASSERT(fio_bits_lsb_index(((~0ULL) << i)) == i,
                "fio_bits_lsb_index(%zu) != %zu",
-               1,
+               (size_t)1,
                (size_t)fio_bits_lsb_index(((~0ULL) << i)));
   }
   /* Test fio_bits_lsb and fio_bits_msb */
@@ -424,37 +430,37 @@ FIO_SFUNC void fio___test_core_utf8(void) {
     size_t clen;
     bool expect_fail;
   } utf8_core_tests[] = {
-      {"\xf0\x9f\x92\x85", 4},
-      {"\xf0\x9f\x92\x95", 4},
-      {"\xe2\x9d\xa4", 3},
-      {"\xE1\x9A\x80", 3},
-      {"\xE2\x80\x80", 3},
-      {"\xE2\x80\x81", 3},
-      {"\xE2\x80\x82", 3},
-      {"\xE2\x80\x83", 3},
-      {"\xE2\x80\x84", 3},
-      {"\xE2\x80\x85", 3},
-      {"\xE2\x80\x86", 3},
-      {"\xE2\x80\x87", 3},
-      {"\xE2\x80\x88", 3},
-      {"\xE2\x80\x89", 3},
-      {"\xE2\x80\x8A", 3},
-      {"\xE2\x80\xA8", 3},
-      {"\xE2\x80\xA9", 3},
-      {"\xE2\x80\xAF", 3},
-      {"\xE2\x81\x9F", 3},
-      {"\xE3\x80\x80", 3},
-      {"\xEF\xBB\xBF", 3},
-      {"\xc6\x92", 2},
-      {"\xC2\xA0", 2},
-      {"\x09", 1},
-      {"\x0A", 1},
-      {"\x0B", 1},
-      {"\x0C", 1},
-      {"\x0D", 1},
-      {"\x20", 1},
-      {"Z", 1},
-      {"\0", 1},
+      {"\xf0\x9f\x92\x85", .clen = 4},
+      {"\xf0\x9f\x92\x95", .clen = 4},
+      {"\xe2\x9d\xa4", .clen = 3},
+      {"\xE1\x9A\x80", .clen = 3},
+      {"\xE2\x80\x80", .clen = 3},
+      {"\xE2\x80\x81", .clen = 3},
+      {"\xE2\x80\x82", .clen = 3},
+      {"\xE2\x80\x83", .clen = 3},
+      {"\xE2\x80\x84", .clen = 3},
+      {"\xE2\x80\x85", .clen = 3},
+      {"\xE2\x80\x86", .clen = 3},
+      {"\xE2\x80\x87", .clen = 3},
+      {"\xE2\x80\x88", .clen = 3},
+      {"\xE2\x80\x89", .clen = 3},
+      {"\xE2\x80\x8A", .clen = 3},
+      {"\xE2\x80\xA8", .clen = 3},
+      {"\xE2\x80\xA9", .clen = 3},
+      {"\xE2\x80\xAF", .clen = 3},
+      {"\xE2\x81\x9F", .clen = 3},
+      {"\xE3\x80\x80", .clen = 3},
+      {"\xEF\xBB\xBF", .clen = 3},
+      {"\xc6\x92", .clen = 2},
+      {"\xC2\xA0", .clen = 2},
+      {"\x09", .clen = 1},
+      {"\x0A", .clen = 1},
+      {"\x0B", .clen = 1},
+      {"\x0C", .clen = 1},
+      {"\x0D", .clen = 1},
+      {"\x20", .clen = 1},
+      {"Z", .clen = 1},
+      {"\0", .clen = 1},
       {"\xf0\x9f\x92\x35", 4, 1},
       {"\xf0\x9f\x32\x95", 4, 1},
       {"\xf0\x3f\x92\x95", 4, 1},
@@ -500,8 +506,8 @@ FIO_SFUNC void fio___test_core_utf8(void) {
                utf8_core_tests[i].buf,
                tst_str,
                (size_t)value,
-               val_len,
-               utf8_core_tests[i].clen);
+               (size_t)val_len,
+               (size_t)utf8_core_tests[i].clen);
     pos = output;
     validate = fio_utf8_read(&pos);
     FIO_ASSERT(validate == value && (value > 0 || !utf8_core_tests[i].buf[0]),
@@ -509,8 +515,8 @@ FIO_SFUNC void fio___test_core_utf8(void) {
                "\t %zu != %zu",
                i,
                utf8_core_tests[i].buf,
-               validate,
-               value);
+               (size_t)validate,
+               (size_t)value);
   }
 }
 
@@ -1563,7 +1569,7 @@ FIO_SFUNC void fio___test_core_atomics_and_locks(void) {
                "fio_trylock should fail");
     FIO_ASSERT(fio_trylock_full(&lock), "fio_trylock_full should fail");
     FIO_ASSERT(fio_is_group_locked(&lock, FIO_LOCK_SUBLOCK(i)),
-               "sub-lock %d should be engaged",
+               "sub-lock %zu should be engaged",
                i);
     {
       uint8_t g =
@@ -1794,14 +1800,15 @@ FIO_SFUNC void fio___test_core_list_each(void) {
   }
 }
 
-/* First-difference index, including the internal experimental implementation. */
+/* First-difference index, including the internal experimental implementation.
+ */
 FIO_SFUNC void fio___test_core_diff_index(void) {
 #if FIO___DIFF_INDEX
   enum { MAX_LEN = 4096 };
   uint8_t a_store[MAX_LEN + 16], b_store[MAX_LEN + 16];
   FIO_ASSERT(fio___diff_index(NULL, NULL, 0) == 0, "empty difference");
-  const size_t lengths[] = {0, 1, 2, 3, 4, 7, 8, 15, 16, 31, 32, 63,
-                            64, 127, 128, 129, 255, 256, 257, 4095, 4096};
+  const size_t lengths[] = {0,  1,  2,   3,   4,   7,   8,   15,  16,   31,  32,
+                            63, 64, 127, 128, 129, 255, 256, 257, 4095, 4096};
   for (size_t offset = 0; offset < 8; ++offset) {
     uint8_t *a = a_store + offset, *b = b_store + ((offset + 3) & 7);
     for (size_t i = 0; i < MAX_LEN; ++i)
@@ -1813,7 +1820,10 @@ FIO_SFUNC void fio___test_core_diff_index(void) {
       for (size_t pos = 0; pos < len; ++pos) {
         b[pos] ^= 0x80U;
         FIO_ASSERT(fio___diff_index(a, b, len) == pos,
-                   "diff index len=%zu pos=%zu offset=%zu", len, pos, offset);
+                   "diff index len=%zu pos=%zu offset=%zu",
+                   len,
+                   pos,
+                   offset);
         b[pos] ^= 0x80U;
       }
     }
@@ -1822,14 +1832,18 @@ FIO_SFUNC void fio___test_core_diff_index(void) {
 }
 
 /* ASCII reference independent of the optimized word-lane implementation. */
-FIO_SFUNC bool fio___core_buf_ieq_reference(fio_buf_info_s a, fio_buf_info_s b) {
+FIO_SFUNC bool fio___core_buf_ieq_reference(fio_buf_info_s a,
+                                            fio_buf_info_s b) {
   if (a.len != b.len)
     return false;
   for (size_t i = 0; i < a.len; ++i) {
     uint8_t x = (uint8_t)a.buf[i], y = (uint8_t)b.buf[i];
-    if (x >= 'A' && x <= 'Z') x = (uint8_t)(x + 32);
-    if (y >= 'A' && y <= 'Z') y = (uint8_t)(y + 32);
-    if (x != y) return false;
+    if (x >= 'A' && x <= 'Z')
+      x = (uint8_t)(x + 32);
+    if (y >= 'A' && y <= 'Z')
+      y = (uint8_t)(y + 32);
+    if (x != y)
+      return false;
   }
   return true;
 }
@@ -1837,16 +1851,18 @@ FIO_SFUNC bool fio___core_buf_ieq_reference(fio_buf_info_s a, fio_buf_info_s b) 
 FIO_SFUNC void fio___core_check_info_eq(fio_buf_info_s a, fio_buf_info_s b) {
   bool exact = a.len == b.len && (!a.len || !FIO_MEMCMP(a.buf, b.buf, a.len));
   bool folded = fio___core_buf_ieq_reference(a, b);
-  FIO_ASSERT(fio_buf_info_is_eq(a, b) == exact,
-             "buf exact length=%zu", a.len);
+  FIO_ASSERT(fio_buf_info_is_eq(a, b) == exact, "buf exact length=%zu", a.len);
   FIO_ASSERT(fio_buf_info_is_ieq(a, b) == folded,
-             "buf ASCII length=%zu", a.len);
+             "buf ASCII length=%zu",
+             a.len);
   fio_str_info_s sa = {.len = a.len, .buf = a.buf};
   fio_str_info_s sb = {.len = b.len, .buf = b.buf};
   FIO_ASSERT(fio_str_info_is_eq(sa, sb) == exact,
-             "str exact length=%zu", a.len);
+             "str exact length=%zu",
+             a.len);
   FIO_ASSERT(fio_str_info_is_ieq(sa, sb) == folded,
-             "str ASCII length=%zu", a.len);
+             "str ASCII length=%zu",
+             a.len);
 }
 
 FIO_SFUNC void fio___test_core_info_equality(void) {
@@ -1858,7 +1874,7 @@ FIO_SFUNC void fio___test_core_info_equality(void) {
       a_store[0] = (char)x;
       b_store[0] = (char)y;
       fio___core_check_info_eq((fio_buf_info_s){1, a_store},
-                                (fio_buf_info_s){1, b_store});
+                               (fio_buf_info_s){1, b_store});
     }
   }
   /* Every byte position and length, including both neighbors of power-of-two
@@ -1869,11 +1885,12 @@ FIO_SFUNC void fio___test_core_info_equality(void) {
     for (size_t i = 0; i < MAX_LEN; ++i) {
       a[i] = "Az@`[_{|9!"[i % 10];
       b[i] = a[i];
-      if (b[i] >= 'A' && b[i] <= 'Z') b[i] += 32;
+      if (b[i] >= 'A' && b[i] <= 'Z')
+        b[i] += 32;
     }
-    const size_t lengths[] = {0, 1, 2, 3, 4, 5, 7, 8, 9, 15, 16, 17,
-                              31, 32, 33, 63, 64, 65, 127, 128, 129,
-                              255, 256, 1023, 1024, 1025, 2047, 2048};
+    const size_t lengths[] = {
+        0,  1,  2,  3,  4,   5,   7,   8,   9,   15,   16,   17,   31,   32,
+        33, 63, 64, 65, 127, 128, 129, 255, 256, 1023, 1024, 1025, 2047, 2048};
     for (size_t k = 0; k < sizeof lengths / sizeof *lengths; ++k) {
       size_t len = lengths[k];
       fio_buf_info_s x = {len, a}, y = {len, b};
@@ -1892,6 +1909,307 @@ FIO_SFUNC void fio___test_core_info_equality(void) {
         b[pos] = original;
       }
     }
+  }
+}
+
+/* Security regression tests for `000 core.h` candidates (2026-10-27 audit). */
+#if defined(__SIZEOF_INT128__)
+/* reference (a * b) % m for 128 bit values (double-and-add, overflow safe) */
+FIO_SFUNC __uint128_t fio___test_mulmod128(__uint128_t a,
+                                           __uint128_t b,
+                                           __uint128_t m) {
+  __uint128_t r = 0;
+  a %= m;
+  for (; b; b >>= 1) {
+    if (b & 1)
+      r = (r >= m - a) ? r - (m - a) : r + a;
+    a = (a >= m - a) ? a - (m - a) : a + a;
+  }
+  return r;
+}
+#endif
+
+/* deterministic 64 bit test values */
+FIO_SFUNC uint64_t fio___test_mix64(uint64_t i, uint64_t seed) {
+  uint64_t x = (i + 1) * 0x9E3779B97F4A7C15ULL + seed * 0xC2B2AE3D27D4EB4FULL;
+  x ^= x >> 29;
+  x *= 0xBF58476D1CE4E5B9ULL;
+  return x ^ (x >> 32);
+}
+
+FIO_SFUNC void fio___test_core_security_regressions(void) {
+  { /* C1: signed constant-time min / max at the extrema */
+    const intmax_t v[] = {INTMAX_MIN,
+                          INTMAX_MIN + 1,
+                          -2,
+                          -1,
+                          0,
+                          1,
+                          2,
+                          INTMAX_MAX - 1,
+                          INTMAX_MAX};
+    for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); ++i)
+      for (size_t j = 0; j < sizeof(v) / sizeof(v[0]); ++j) {
+        FIO_ASSERT(fio_ct_max(v[i], v[j]) == (v[i] > v[j] ? v[i] : v[j]),
+                   "fio_ct_max wrong at [%zu, %zu]",
+                   i,
+                   j);
+        FIO_ASSERT(fio_ct_min(v[i], v[j]) == (v[i] < v[j] ? v[i] : v[j]),
+                   "fio_ct_min wrong at [%zu, %zu]",
+                   i,
+                   j);
+      }
+  }
+  { /* C2: shift counts at / above the width are masked, not UB */
+    volatile uint8_t c32 = 32, c64 = 64;
+    FIO_ASSERT(fio_xor_rrot2_shr_32(0x80000001UL, 0, 0, c32) == 0x80000001UL,
+               "fio_xor_rrot2_shr_32 shift not masked");
+    FIO_ASSERT(fio_xor_rrot2_shr_64(0x8000000000000001ULL, 0, 0, c64) ==
+                   0x8000000000000001ULL,
+               "fio_xor_rrot2_shr_64 shift not masked");
+  }
+  { /* C3: fio_xmask_cpy tail, all lengths, matches fio_xmask */
+    char src[64], dst[64], ref[64];
+    for (size_t i = 0; i < sizeof(src); ++i)
+      src[i] = (char)(i * 7 + 1);
+    for (size_t len = 0; len < 48; ++len) {
+      FIO_MEMSET(dst, 0x5A, sizeof(dst));
+      FIO_MEMCPY(ref, src, sizeof(ref));
+      fio_xmask(ref, len, 0x0123456789ABCDEFULL);
+      fio_xmask_cpy(dst, src, len, 0x0123456789ABCDEFULL);
+      FIO_ASSERT(!FIO_MEMCMP(dst, ref, len), "fio_xmask_cpy len %zu", len);
+      for (size_t i = len; i < sizeof(dst); ++i)
+        FIO_ASSERT(dst[i] == 0x5A, "fio_xmask_cpy overflow at len %zu", len);
+    }
+  }
+  { /* C7: fio_has_full_byte32 detects 0xFF, not 0x00 */
+    FIO_ASSERT(!fio_has_full_byte32(0x00000000UL), "full byte: zero row");
+    FIO_ASSERT(!fio_has_full_byte32(0x7F80FE01UL), "full byte: false hit");
+    FIO_ASSERT(fio_has_full_byte32(0x00FF0000UL) == 0x00800000UL,
+               "full byte: missed 0xFF");
+    FIO_ASSERT(fio_has_full_byte32(0xFFFFFFFFUL) == 0x80808080UL,
+               "full byte: all set");
+    for (unsigned b = 0; b < 256; ++b)
+      FIO_ASSERT(!!fio_has_full_byte32((uint32_t)b << 8) == (b == 0xFF),
+                 "full byte: byte %u",
+                 b);
+  }
+  { /* C8: zero-length multiplication writes nothing */
+    uint64_t one = 1;
+    fio_math_mul(NULL, &one, &one, 0);
+  }
+  { /* C9: lengths above the Karatsuba limit still multiply correctly */
+    enum { LEN = FIO___MATH_KARATSUBA_LIMIT + 2 };
+    static uint64_t a[LEN], b[LEN], r1[LEN * 2], r2[LEN * 2];
+    for (size_t i = 0; i < LEN; ++i) {
+      a[i] = fio___test_mix64(i, 1);
+      b[i] = fio___test_mix64(i, 2);
+    }
+    fio_math_mul(r1, a, b, LEN);
+    fio___math_mul_long(r2, a, b, LEN);
+    FIO_ASSERT(!FIO_MEMCMP(r1, r2, sizeof(r1)), "large fio_math_mul");
+  }
+  { /* C10 / C11: modular helpers edge cases */
+    FIO_ASSERT(!fio_math_is_iprime(INT64_MIN), "INT64_MIN isn't prime");
+    FIO_ASSERT(fio_math_is_iprime(-7), "-7 is (absolutely) prime");
+    FIO_ASSERT(!fio_math_mod_mul64(3, 5, 0), "mod 0 => 0");
+    FIO_ASSERT(!fio_math_mod_expo64(3, 5, 0), "expo mod 0 => 0");
+    FIO_ASSERT(!fio_math_mod_expo64(3, 0, 1), "x^0 mod 1 == 0");
+    FIO_ASSERT(fio_math_mod_expo64(3, 0, 7) == 1, "x^0 mod 7 == 1");
+    const uint64_t m = 0xFFFFFFFFFFFFFFC5ULL; /* largest 64 bit prime */
+    FIO_ASSERT(fio_math_mod_mul64(m - 1, m - 1, m) == 1,
+               "(-1)*(-1) mod m == 1");
+    FIO_ASSERT(fio_math_mod_mul64(m - 1, 2, m) == m - 2, "(-1)*2 mod m");
+    FIO_ASSERT(fio_math_is_uprime(m), "largest 64 bit prime");
+  }
+  { /* C14: case-insensitive compare guards NULL buffers */
+    FIO_ASSERT(!fio_buf_info_is_ieq(FIO_BUF_INFO2(NULL, 3),
+                                    FIO_BUF_INFO2((char *)"abc", 3)),
+               "ieq NULL a");
+    FIO_ASSERT(!fio_buf_info_is_ieq(FIO_BUF_INFO2((char *)"abc", 3),
+                                    FIO_BUF_INFO2(NULL, 3)),
+               "ieq NULL b");
+  }
+#if defined(__SIZEOF_INT128__)
+  { /* C16: Montgomery reduction with N close to R (carry out of t + mN) */
+    const __uint128_t n_vals[] = {
+        ((__uint128_t)0xFFFFFFFFFFFFFFFFULL << 64) | 0xFFFFFFFFFFFFFF61ULL,
+        ((__uint128_t)0x8000000000000000ULL << 64) | 0x0000000000000001ULL,
+        ((__uint128_t)0xC3A5C85C97CB3127ULL << 64) | 0xB492B66FBE98F273ULL,
+    };
+    for (size_t k = 0; k < sizeof(n_vals) / sizeof(n_vals[0]); ++k) {
+      const __uint128_t n = n_vals[k];
+      __uint128_t inv = n; /* Newton: n^-1 mod 2^128 */
+      for (size_t i = 0; i < 7; ++i)
+        inv *= 2 - n * inv;
+      const __uint128_t n_dash_v = (__uint128_t)0 - inv;
+      const __uint128_t r_mod_n = ((__uint128_t)0 - n) % n; /* 2^128 mod n */
+      for (size_t i = 0; i < 64; ++i) {
+        __uint128_t av = n - 1 - (__uint128_t)fio___test_mix64(i, 3) * i;
+        __uint128_t bv = n - 1 - ((__uint128_t)fio___test_mix64(i, 4) << 63);
+        av %= n;
+        bv %= n;
+        fio_u128 a, b, N, N_dash, res;
+        a.u64[0] = (uint64_t)av, a.u64[1] = (uint64_t)(av >> 64);
+        b.u64[0] = (uint64_t)bv, b.u64[1] = (uint64_t)(bv >> 64);
+        N.u64[0] = (uint64_t)n, N.u64[1] = (uint64_t)(n >> 64);
+        N_dash.u64[0] = (uint64_t)n_dash_v;
+        N_dash.u64[1] = (uint64_t)(n_dash_v >> 64);
+        fio_u128_montgomery_mul(&res, &a, &b, &N, &N_dash);
+        __uint128_t rv = ((__uint128_t)res.u64[1] << 64) | res.u64[0];
+        FIO_ASSERT(rv < n, "montgomery result not reduced [%zu:%zu]", k, i);
+        FIO_ASSERT(fio___test_mulmod128(rv, r_mod_n, n) ==
+                       fio___test_mulmod128(av, bv, n),
+                   "montgomery result wrong [%zu:%zu]",
+                   k,
+                   i);
+      }
+    }
+  }
+#endif /* __SIZEOF_INT128__ */
+  {    /* C17: invalid code points write nothing; ASCII writes one byte */
+    uint8_t buf[8];
+    FIO_MEMSET(buf, 0xAA, sizeof(buf));
+    FIO_ASSERT(!fio_utf8_write(buf, 0x200000UL) && buf[0] == 0xAA,
+               "fio_utf8_write wrote an invalid code point");
+    FIO_ASSERT(fio_utf8_write(buf, 'A') == 1 && buf[0] == 'A' && buf[1] == 0xAA,
+               "fio_utf8_write ASCII overflow");
+  }
+  { /* C18: strict UTF-8 validation (RFC 3629) */
+    static const struct {
+      const char *s;
+      unsigned len;
+    } t[] = {
+        {"\xC2\x80", 2},         {"\xDF\xBF", 2},
+        {"\xE0\xA0\x80", 3},     {"\xED\x9F\xBF", 3},
+        {"\xEE\x80\x80", 3},     {"\xEF\xBF\xBF", 3},
+        {"\xF0\x90\x80\x80", 4}, {"\xF4\x8F\xBF\xBF", 4},
+        {"\xC0\x80", 0},         /* overlong NUL */
+        {"\xC0\xAF", 0},         /* overlong '/' */
+        {"\xC1\xBF", 0},         /* overlong */
+        {"\xE0\x80\xAF", 0},     /* overlong '/' */
+        {"\xE0\x9F\xBF", 0},     /* overlong */
+        {"\xED\xA0\x80", 0},     /* surrogate U+D800 */
+        {"\xED\xBF\xBF", 0},     /* surrogate U+DFFF */
+        {"\xF0\x80\x80\xAF", 0}, /* overlong '/' */
+        {"\xF0\x8F\xBF\xBF", 0}, /* overlong */
+        {"\xF4\x90\x80\x80", 0}, /* U+110000 */
+        {"\xF5\x80\x80\x80", 0}, {"\xF7\xBF\xBF\xBF", 0},
+    };
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
+      char *pos = (char *)t[i].s;
+      FIO_ASSERT(fio_utf8_char_len(t[i].s) == t[i].len,
+                 "fio_utf8_char_len strictness [%zu] %u != %u",
+                 i,
+                 fio_utf8_char_len(t[i].s),
+                 t[i].len);
+      uint32_t u = fio_utf8_read(&pos);
+      FIO_ASSERT((size_t)(pos - t[i].s) == t[i].len && (!t[i].len || u),
+                 "fio_utf8_read strictness [%zu]",
+                 i);
+    }
+    /* exhaustive: every (c0, c1) pair x interesting c2 / c3 vs. a decoder */
+    static const uint8_t tails[] = {0x00, 0x41, 0x7F, 0x80, 0xBF, 0xC0, 0xFF};
+    for (unsigned c0 = 0; c0 < 256; ++c0) {
+      for (unsigned c1 = 0; c1 < 256; ++c1) {
+        for (size_t j = 0; j < sizeof(tails); ++j) {
+          for (size_t k = 0; k < sizeof(tails); ++k) {
+            const uint8_t b[4] = {(uint8_t)c0, (uint8_t)c1, tails[j], tails[k]};
+            unsigned want = 0;
+            uint32_t cp = 0;
+            if (c0 < 0x80)
+              want = 1;
+            else if ((c0 & 0xE0U) == 0xC0U)
+              want = 2, cp = c0 & 0x1FU;
+            else if ((c0 & 0xF0U) == 0xE0U)
+              want = 3, cp = c0 & 0x0FU;
+            else if ((c0 & 0xF8U) == 0xF0U)
+              want = 4, cp = c0 & 0x07U;
+            for (unsigned n = 1; n < want; ++n) {
+              if ((b[n] & 0xC0U) != 0x80U) {
+                want = 0;
+                break;
+              }
+              cp = (cp << 6) | (b[n] & 0x3FU);
+            }
+            static const uint32_t min_cp[5] = {0, 0, 0x80, 0x800, 0x10000};
+            if (cp < min_cp[want] || (cp >= 0xD800U && cp <= 0xDFFFU) ||
+                cp > 0x10FFFFU)
+              want = 0;
+            FIO_ASSERT(fio_utf8_char_len(b) == want,
+                       "fio_utf8_char_len(%02X %02X %02X %02X) %u != %u",
+                       b[0],
+                       b[1],
+                       b[2],
+                       b[3],
+                       fio_utf8_char_len(b),
+                       want);
+          }
+        }
+      }
+    }
+  }
+  { /* C20: bounded reads never pass `len` (exact-size heap copies so ASan
+     * catches overreads; also run with FIO_UTF8_ALLOW_IF=0) */
+    static const struct {
+      const char *s;
+      size_t len;
+      unsigned expect;
+    } t[] = {
+        {"A", 1, 1},
+        {"\x80", 1, 0},
+        {"\xC3\xA9", 2, 2},
+        {"\xC3\xA9", 1, 0},
+        {"\xE2\x82\xAC", 3, 3},
+        {"\xE2\x82\xAC", 2, 0},
+        {"\xF0\x9F\x98\x80", 4, 4},
+        {"\xF0\x9F\x98\x80", 3, 0},
+        {"\xC0\x80", 2, 0},
+        {"A\x80", 2, 1}, /* both build modes agree: ASCII stands alone */
+    };
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
+      char *b = (char *)malloc(t[i].len);
+      FIO_ASSERT_ALLOC(b);
+      FIO_MEMCPY(b, t[i].s, t[i].len);
+      FIO_ASSERT(fio_utf8_char_len_bounded(b, t[i].len) == t[i].expect,
+                 "fio_utf8_char_len_bounded [%zu] %u != %u",
+                 i,
+                 fio_utf8_char_len_bounded(b, t[i].len),
+                 t[i].expect);
+      free(b);
+    }
+    FIO_ASSERT(!fio_utf8_char_len_bounded(NULL, 0),
+               "fio_utf8_char_len_bounded must not read when len == 0");
+    /* NUL terminated: reads stop at the first NUL (or ASCII) byte */
+    static const char *full[] = {"\xC3\xA9",
+                                 "\xE2\x82\xAC",
+                                 "\xED\x9F\xBF",
+                                 "\xF0\x9F\x98\x80",
+                                 "\xF4\x8F\xBF\xBF"};
+    for (size_t i = 0; i < sizeof(full) / sizeof(full[0]); ++i) {
+      const size_t n = strlen(full[i]);
+      for (size_t k = 1; k < n; ++k) {
+        for (size_t ascii = 0; ascii < 2; ++ascii) {
+          char *b = (char *)malloc(k + ascii + 1);
+          FIO_ASSERT_ALLOC(b);
+          FIO_MEMCPY(b, full[i], k);
+          b[k] = 'A';
+          b[k + ascii] = 0;
+          FIO_ASSERT(!fio_utf8_char_len(b),
+                     "fio_utf8_char_len NUL tail [%zu] %zu %zu",
+                     i,
+                     k,
+                     ascii);
+          free(b);
+        }
+      }
+    }
+  }
+  { /* C19: generated shuffle indexes wrap within the vector */
+    uint64_t v[4] = {10, 11, 12, 13};
+    FIO_MATH_UXXX_SUFFLE(v, 64, 7, 6, 5, 4);
+    FIO_ASSERT(v[0] == 13 && v[1] == 12 && v[2] == 11 && v[3] == 10,
+               "FIO_MATH_UXXX_SUFFLE index masking");
   }
 }
 
@@ -1934,5 +2252,6 @@ int main(void) {
   fio___test_core_rotation_macros();
   fio___test_core_static_safe_alloc();
   fio___test_core_list_each();
+  fio___test_core_security_regressions();
   return 0;
 }

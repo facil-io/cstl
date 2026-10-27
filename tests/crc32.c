@@ -8,7 +8,10 @@ Tests the standard CRC32 polynomial (0xEDB88320 / gzip / ITU-T V.42).
 #include FIO_INCLUDE_FILE
 
 #include <string.h>
-#include <time.h>
+#if !defined(_WIN32)
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 #ifdef HAVE_ZLIB
 #include <zlib.h>
@@ -155,17 +158,173 @@ static void test_crc32_all_short_lengths(void) {
 }
 
 /* *****************************************************************************
+Independent differential and exact-boundary regression tests.
+Exercise SIMD entry, parallel folds, 16-byte drains and tails with seeded and
+incremental CRCs. The bitwise oracle shares no production tables or intrinsics.
+***************************************************************************** */
+
+static uint32_t test_crc32_reference(const uint8_t *p,
+                                     size_t len,
+                                     uint32_t initial_crc) {
+  uint32_t crc = ~initial_crc;
+  while (len--) {
+    crc ^= *p++;
+    for (unsigned bit = 0; bit < 8; ++bit)
+      crc = (crc >> 1) ^ (0xEDB88320U & (0U - (crc & 1U)));
+  }
+  return ~crc;
+}
+
+static const size_t test_crc32_long_lengths[] = {
+    260,  261,  263,  264,  265,  319,  320,  321,  511,  512,  513,  1023,
+    1024, 1025, 2047, 2048, 2049, 4095, 4096, 4097, 8191, 8192, 8193,
+};
+
+static void test_crc32_case(uint8_t *p, size_t len, size_t offset) {
+  static const uint32_t seeds[] = {0, 0xA5F03C69U, 0xFFFFFFFFU};
+  static const size_t splits[] = {
+      0,
+      1,
+      4,
+      8,
+      15,
+      16,
+      17,
+      31,
+      32,
+      63,
+      64,
+      65,
+      79,
+      80,
+      127,
+      128,
+      129,
+  };
+  uint32_t rng = 0x12345678U;
+  for (size_t i = 0; i < len; ++i) {
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
+    p[i] = (uint8_t)rng;
+  }
+  for (size_t s = 0; s < sizeof(seeds) / sizeof(*seeds); ++s) {
+    uint32_t expected = test_crc32_reference(p, len, seeds[s]);
+    TEST_ASSERT(fio_crc32(p, len, seeds[s]) == expected,
+                "oracle: offset=%zu len=%zu seed=0x%08X",
+                offset,
+                len,
+                seeds[s]);
+    for (size_t i = 0; i < sizeof(splits) / sizeof(*splits) + 2; ++i) {
+      size_t split =
+          (i < sizeof(splits) / sizeof(*splits))
+              ? splits[i]
+              : ((i == sizeof(splits) / sizeof(*splits)) ? len / 2 : len);
+      if (split > len)
+        continue;
+      uint32_t crc = fio_crc32(p, split, seeds[s]);
+      crc = fio_crc32(p + split, len - split, crc);
+      TEST_ASSERT(
+          crc == expected,
+          "incremental oracle: offset=%zu len=%zu split=%zu seed=0x%08X",
+          offset,
+          len,
+          split,
+          seeds[s]);
+    }
+  }
+}
+
+static void test_crc32_differential(void) {
+  fprintf(stderr,
+          "Testing CRC32 independent oracle, offsets and exact extents...\n");
+  for (size_t offset = 0; offset < 16; ++offset) {
+    for (size_t i = 0; i < 260 + sizeof(test_crc32_long_lengths) /
+                                     sizeof(*test_crc32_long_lengths);
+         ++i) {
+      size_t len = i < 260 ? i : test_crc32_long_lengths[i - 260];
+      /* No readable suffix: ASan detects even a one-byte overread. */
+      size_t extent = offset + len;
+      uint8_t *buf = (uint8_t *)malloc(extent ? extent : 1);
+      TEST_ASSERT(buf != NULL, "differential: malloc failed");
+      if (!buf)
+        return;
+      test_crc32_case(buf + offset, len, offset);
+      free(buf);
+    }
+  }
+}
+
+static void test_crc32_guard_page(void) {
+#if !defined(_WIN32) && defined(MAP_ANONYMOUS)
+  fprintf(stderr, "Testing CRC32 at an unreadable page boundary...\n");
+  long page_query = sysconf(_SC_PAGESIZE);
+  TEST_ASSERT(page_query > 0, "guard: sysconf failed");
+  if (page_query <= 0)
+    return;
+  size_t page = (size_t)page_query;
+  size_t data_size = ((8193 + page - 1) / page) * page;
+  size_t mapping_size = data_size + page;
+  uint8_t *mapping = (uint8_t *)mmap(NULL,
+                                     mapping_size,
+                                     PROT_READ | PROT_WRITE,
+                                     MAP_PRIVATE | MAP_ANONYMOUS,
+                                     -1,
+                                     0);
+  TEST_ASSERT(mapping != MAP_FAILED, "guard: mmap failed");
+  if (mapping == MAP_FAILED)
+    return;
+  uint8_t *guard = mapping + data_size;
+  int rc = mprotect(guard, page, PROT_NONE);
+  TEST_ASSERT(!rc, "guard: mprotect failed");
+  if (!rc) {
+    for (size_t len = 0; len < 260; ++len)
+      test_crc32_case(guard - len, len, len % 16);
+    for (size_t i = 0;
+         i < sizeof(test_crc32_long_lengths) / sizeof(*test_crc32_long_lengths);
+         ++i) {
+      size_t len = test_crc32_long_lengths[i];
+      test_crc32_case(guard - len, len, len % 16);
+    }
+  }
+  TEST_ASSERT(!munmap(mapping, mapping_size), "guard: munmap failed");
+#endif
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 
 int main(void) {
   fprintf(stderr, "=== CRC32 Test Suite ===\n\n");
+#if defined(__aarch64__) && defined(__ARM_FEATURE_CRC32)
+#if defined(FIO___HAS_ARM_INTRIN) || defined(__ARM_FEATURE_PMULL) ||           \
+    defined(__ARM_FEATURE_CRYPTO)
+  fprintf(stderr, "CRC32 path: ARM PMULL + scalar\n");
+#else
+  fprintf(stderr, "CRC32 path: ARM scalar\n");
+#endif
+#elif defined(FIO___HAS_X86_INTRIN) && defined(__SSE4_2__) &&                  \
+    defined(__PCLMUL__)
+  fprintf(stderr,
+          "CRC32 path: x86 PCLMUL%s\n",
+#if defined(FIO_FAKE_X86_SHADOW)
+          " (fx86 shadow)"
+#else
+          ""
+#endif
+  );
+#else
+  fprintf(stderr, "CRC32 path: software\n");
+#endif
 
   /* Section 1: Compliance tests (always run) */
   test_crc32_known_vectors();
   test_crc32_incremental();
   test_crc32_large_buffer();
   test_crc32_all_short_lengths();
+  test_crc32_differential();
+  test_crc32_guard_page();
 
   fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
 

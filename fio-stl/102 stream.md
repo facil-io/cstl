@@ -138,7 +138,7 @@ Packs bytes from an open file descriptor. Reads are performed later by `fio_stre
 - If `keep_open == 0`, the descriptor is closed when the packet is freed, or on pack failure after ownership was accepted.
 - If `keep_open != 0`, the caller remains responsible for closing `fd`.
 
-**Returns:** packet pointer, or `NULL` on invalid input, size detection failure / oversized auto-detected size when `len == 0`, or allocation failure.
+**Returns:** packet pointer, or `NULL` on invalid input (a negative `fd`, or an `offset + len` range that `off_t` can't represent), size detection failure / oversized auto-detected size when `len == 0`, or allocation failure.
 
 #### `fio_stream_add`
 
@@ -177,6 +177,8 @@ After the call:
 - On empty stream or error, `*buf == NULL` and `*len == 0`.
 - Otherwise `*buf` either still points to the supplied scratch buffer or points directly into stream-owned memory.
 - `*len` is updated to the number of readable bytes available at `*buf`.
+
+If a file descriptor packet hits EOF or a read error before its declared length (e.g., the file shrank after it was added), the read stops after the bytes actually read, truncates that packet and discards its queued tail. This reduces `fio_stream_length` during an otherwise non-consuming read. Consumers that already framed the declared length must detect this reduction and close or abort their output; IO does so. A short file never reports unread scratch bytes or stalls the stream. The stream stores no persistent failure flag and accepts new packets after the read.
 
 Reset both `*buf` and `*len` before each read if reusing the same scratch buffer. This is not thread-safe.
 

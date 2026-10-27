@@ -4,13 +4,13 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3224.
+Total symbols: 3264.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1772
-- [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 12
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1773
+- [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 13
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 1
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
 - [`./fio-stl/001 patches.h`](#fio-stl-001-patches-h) — 2
@@ -19,7 +19,7 @@ Total symbols: 3224.
 - [`./fio-stl/002 glob matching.h`](#fio-stl-002-glob-matching-h) — 1
 - [`./fio-stl/002 imap.h`](#fio-stl-002-imap-h) — 7
 - [`./fio-stl/002 math.h`](#fio-stl-002-math-h) — 6
-- [`./fio-stl/002 random.h`](#fio-stl-002-random-h) — 15
+- [`./fio-stl/002 random.h`](#fio-stl-002-random-h) — 19
 - [`./fio-stl/002 signals.h`](#fio-stl-002-signals-h) — 8
 - [`./fio-stl/002 sort.h`](#fio-stl-002-sort-h) — 3
 - [`./fio-stl/002 threads.h`](#fio-stl-002-threads-h) — 33
@@ -27,55 +27,54 @@ Total symbols: 3224.
 - [`./fio-stl/003 entities.h`](#fio-stl-003-entities-h) — 1
 - [`./fio-stl/004 files.h`](#fio-stl-004-files-h) — 29
 - [`./fio-stl/004 http1 parser.h`](#fio-stl-004-http1-parser-h) — 3
-- [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 6
+- [`./fio-stl/004 multipart.h`](#fio-stl-004-multipart-h) — 8
 - [`./fio-stl/004 resp3.h`](#fio-stl-004-resp3-h) — 24
-- [`./fio-stl/004 sock.h`](#fio-stl-004-sock-h) — 35
-- [`./fio-stl/004 state callbacks.h`](#fio-stl-004-state-callbacks-h) — 4
+- [`./fio-stl/004 sock.h`](#fio-stl-004-sock-h) — 37
+- [`./fio-stl/004 state callbacks.h`](#fio-stl-004-state-callbacks-h) — 5
 - [`./fio-stl/004 time.h`](#fio-stl-004-time-h) — 17
 - [`./fio-stl/004 websocket parser.h`](#fio-stl-004-websocket-parser-h) — 29
 - [`./fio-stl/005 cli.h`](#fio-stl-005-cli-h) — 23
 - [`./fio-stl/010 mem.h`](#fio-stl-010-mem-h) — 50
-- [`./fio-stl/011 string core.h`](#fio-stl-011-string-core-h) — 106
+- [`./fio-stl/011 string core.h`](#fio-stl-011-string-core-h) — 107
 - [`./fio-stl/012 data.h`](#fio-stl-012-data-h) — 17
 - [`./fio-stl/012 gfm.h`](#fio-stl-012-gfm-h) — 10
 - [`./fio-stl/012 json.h`](#fio-stl-012-json-h) — 12
 - [`./fio-stl/012 urlencoded.h`](#fio-stl-012-urlencoded-h) — 3
-- [`./fio-stl/102 poll api.h`](#fio-stl-102-poll-api-h) — 16
+- [`./fio-stl/102 poll api.h`](#fio-stl-102-poll-api-h) — 17
 - [`./fio-stl/102 queue.h`](#fio-stl-102-queue-h) — 28
 - [`./fio-stl/102 stream.h`](#fio-stl-102-stream-h) — 16
 - [`./fio-stl/103 md2html.h`](#fio-stl-103-md2html-h) — 2
 - [`./fio-stl/104 mustache.h`](#fio-stl-104-mustache-h) — 14
 - [`./fio-stl/150 crypto core.h`](#fio-stl-150-crypto-core-h) — 2
-- [`./fio-stl/152 blake2.h`](#fio-stl-152-blake2-h) — 14
-- [`./fio-stl/152 chacha20poly1305.h`](#fio-stl-152-chacha20poly1305-h) — 7
-- [`./fio-stl/152 sha1.h`](#fio-stl-152-sha1-h) — 4
-- [`./fio-stl/152 sha2.h`](#fio-stl-152-sha2-h) — 14
+- [`./fio-stl/152 blake2.h`](#fio-stl-152-blake2-h) — 16
+- [`./fio-stl/152 chacha20poly1305.h`](#fio-stl-152-chacha20poly1305-h) — 8
+- [`./fio-stl/152 sha1.h`](#fio-stl-152-sha1-h) — 5
+- [`./fio-stl/152 sha2.h`](#fio-stl-152-sha2-h) — 17
 - [`./fio-stl/152 sha2z hkdf.h`](#fio-stl-152-sha2z-hkdf-h) — 5
 - [`./fio-stl/152 sha3.h`](#fio-stl-152-sha3-h) — 17
 - [`./fio-stl/153 aes.h`](#fio-stl-153-aes-h) — 4
 - [`./fio-stl/154 ed25519.h`](#fio-stl-154-ed25519-h) — 13
-- [`./fio-stl/154 p256.h`](#fio-stl-154-p256-h) — 5
-- [`./fio-stl/154 p384.h`](#fio-stl-154-p384-h) — 2
+- [`./fio-stl/154 p256.h`](#fio-stl-154-p256-h) — 6
+- [`./fio-stl/154 p384.h`](#fio-stl-154-p384-h) — 5
 - [`./fio-stl/155 der.h`](#fio-stl-155-der-h) — 18
 - [`./fio-stl/155 rsa.h`](#fio-stl-155-rsa-h) — 9
 - [`./fio-stl/156 mlkem.h`](#fio-stl-156-mlkem-h) — 17
-- [`./fio-stl/156 x509.h`](#fio-stl-156-x509-h) — 57
-- [`./fio-stl/157 pem.h`](#fio-stl-157-pem-h) — 8
+- [`./fio-stl/156 x509.h`](#fio-stl-156-x509-h) — 71
+- [`./fio-stl/157 pem.h`](#fio-stl-157-pem-h) — 9
 - [`./fio-stl/159 argon2.h`](#fio-stl-159-argon2-h) — 6
 - [`./fio-stl/159 lyra2.h`](#fio-stl-159-lyra2-h) — 5
-- [`./fio-stl/159 otp.h`](#fio-stl-159-otp-h) — 7
+- [`./fio-stl/159 otp.h`](#fio-stl-159-otp-h) — 8
 - [`./fio-stl/159 secret.h`](#fio-stl-159-secret-h) — 5
 - [`./fio-stl/162 brotli.h`](#fio-stl-162-brotli-h) — 4
 - [`./fio-stl/162 deflate.h`](#fio-stl-162-deflate-h) — 13
-- [`./fio-stl/190 tls13.h`](#fio-stl-190-tls13-h) — 60
+- [`./fio-stl/190 tls13.h`](#fio-stl-190-tls13-h) — 61
 - [`./fio-stl/201 string.h`](#fio-stl-201-string-h) — 47
-- [`./fio-stl/202 array.h`](#fio-stl-202-array-h) — 30
+- [`./fio-stl/202 array.h`](#fio-stl-202-array-h) — 31
 - [`./fio-stl/210 map.h`](#fio-stl-210-map-h) — 30
-- [`./fio-stl/210 map2.h`](#fio-stl-210-map2-h) — 3
 - [`./fio-stl/249 reference counter.h`](#fio-stl-249-reference-counter-h) — 17
 - [`./fio-stl/250 fiobj.h`](#fio-stl-250-fiobj-h) — 75
 - [`./fio-stl/401 io api.h`](#fio-stl-401-io-api-h) — 105
-- [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 45
+- [`./fio-stl/404 ipc.h`](#fio-stl-404-ipc-h) — 46
 - [`./fio-stl/405 tls13.h`](#fio-stl-405-tls13-h) — 1
 - [`./fio-stl/420 pubsub.h`](#fio-stl-420-pubsub-h) — 26
 - [`./fio-stl/422 redis.h`](#fio-stl-422-redis-h) — 10
@@ -104,7 +103,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1772 public symbols.
+1773 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -617,6 +616,21 @@ Prevent compiler reordering optimizations.
 
 _Symbol type:_ `macro`
 
+#### `FIO_COMPILER_GUARD_PTR`
+
+```c
+#define FIO_COMPILER_GUARD_PTR(ptr) __asm__ volatile("" : : "r"(ptr) : "memory")
+```
+
+A memory guard that also treats the memory at `ptr` as read (escaped).
+
+Use when writes to a local (non-escaping) buffer must be performed, i.e.,
+wiping secrets - `FIO_COMPILER_GUARD` only covers memory the compiler
+already considers reachable, so stores to a private stack buffer may be
+removed as dead stores.
+
+_Symbol type:_ `macro`
+
 #### `FIO_UNALIGNED_MEMORY_ACCESS_ENABLED`
 
 ```c
@@ -653,7 +667,7 @@ _Symbol type:_ `macro`
 #define FIO_KILL_SELF() GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
 ```
 
-Sends a signal to kill the current process (emulates CTRL + C).
+Interrupts the process group (emulates CTRL + C); define to override.
 
 _Symbol type:_ `macro`
 
@@ -1350,6 +1364,9 @@ _Symbol type:_ `macro`
 
 Places `pages` x 4096 bytes of zero (`0`) on the stack.
 
+`pages` MUST be a small compile-time constant (the array is initialized, so
+a runtime value fails to compile rather than creating a VLA).
+
 _Symbol type:_ `macro`
 
 #### `FIO_MEMCPY`
@@ -1654,8 +1671,8 @@ _Symbol type:_ `macro`
 #### `FIO_LIST_IS_EMPTY`
 
 ```c
-#define FIO_LIST_IS_EMPTY(head)   \
-  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
+#define FIO_LIST_IS_EMPTY(head) /* uintptr_t: no GCC -Waddress for `&head` */   \
+  ((!(uintptr_t)(head)) || ((!(head)->next) | ((head)->next == (head))))
 ```
 
 UNSAFE macro for testing if a list is empty.
@@ -3325,7 +3342,8 @@ _Symbol type:_ `macro`
     uint##bits##_t t____[sizeof((var)) / sizeof((var)[0])];   \
     const uint8_t shuf____[sizeof((var)) / sizeof((var)[0])] = {__VA_ARGS__};   \
     for (size_t i___ = 0; i___ < (sizeof((var)) / sizeof((var)[0])); ++i___)   \
-      t____[i___] = (var)[shuf____[i___]];   \
+      t____[i___] =   \
+          (var)[shuf____[i___] % (sizeof((var)) / sizeof((var)[0]))];   \
     for (size_t i___ = 0; i___ < (sizeof((var)) / sizeof((var)[0])); ++i___)   \
       (var)[i___] = t____[i___];   \
   } while (0)
@@ -3479,23 +3497,26 @@ _Symbol type:_ `macro`
 
 ```c
 #define FIO_DEFINE_RANDOM128_FN(extern, name, reseed_log, seed_offset)   \
-  static uint64_t name##___state[9] FIO_ALIGN(64) = {   \
+  /* [0-3] state lanes, [4] atomic call sequence (no plain stores: racing */   \
+  /* callers always get distinct values), [5],[7] working lanes, [6]     */   \
+  /* unused. One 64 byte block: keep the counter in it. */   \
+  static uint64_t name##___state[8] FIO_ALIGN(64) = {   \
       0x9c65875be1fce7b9ULL + seed_offset,   \
       0x7cc568e838f6a40dULL,   \
       0x4bb8d885a0fe47d5ULL + seed_offset,   \
-      0x95561f0927ad7ecdULL,   \
-      0};   \
-  extern FIO_MAYBE_UNUSED void name##_reset(void) {   \
+      0x95561f0927ad7ecdULL};   \
+  extern FIO_MAYBE_UNUSED FIO___TSAN_AVOID void name##_reset(void) {   \
     name##___state[0] = 0x9c65875be1fce7b9ULL + seed_offset;   \
     name##___state[1] = 0x7cc568e838f6a40dULL;   \
     name##___state[2] = 0x4bb8d885a0fe47d5ULL + seed_offset;   \
     name##___state[3] = 0x95561f0927ad7ecdULL;   \
-    name##___state[8] = name##___state[4] = 0;   \
+    name##___state[4] = 0;   \
   }   \
-  extern void name##_reseed(void) {   \
+  /** Mixes clock jitter into the state lanes. */   \
+  extern FIO___TSAN_AVOID void name##_reseed(void) {   \
     const size_t jitter_samples = 16 | (name##___state[0] & 15);   \
     for (size_t i = 0; i < jitter_samples; ++i) {   \
-      struct timespec t;   \
+      struct timespec t = {0}; /* defined even if clock_gettime fails */   \
       clock_gettime(CLOCK_MONOTONIC, &t);   \
       uint64_t clk[2] = {(uint64_t)(uintptr_t)&clk + (uint64_t)(uintptr_t) &   \
                              (name##_reseed),   \
@@ -3512,20 +3533,28 @@ _Symbol type:_ `macro`
       name##___state[2] += clk[0] + fio_cycle_counter();   \
       name##___state[3] += clk[1] + fio_cycle_counter();   \
     }   \
-    name##___state[8] += ((name##___state[8] & 7) + (name##___state[0] & 30));   \
   }   \
-  /** Re-seeds the PNGR so forked processes don't match. */   \
-  extern FIO_MAYBE_UNUSED void name##_on_fork(void *is_null) {   \
+  /** Re-seeds the PNGR (call in forked child). */   \
+  extern FIO_MAYBE_UNUSED FIO___TSAN_AVOID void name##_on_fork(   \
+      void *is_null) {   \
     (void)is_null;   \
     name##_reseed();   \
+    name##___state[4] = 0;   \
+    name##___state[5] = 0;   \
+    name##___state[6] = 0;   \
+    name##___state[7] = 0;   \
   }   \
   /** Returns a 128 bit pseudo-random number. */   \
-  extern FIO_MAYBE_UNUSED fio_u128 name##128(void) {   \
+  extern FIO_MAYBE_UNUSED FIO___TSAN_AVOID fio_u128 name##128(void) {   \
     fio_u128 r;   \
-    uint64_t s0[4];   \
-    const uint64_t counter = fio_atomic_add(name##___state + 4, 1);   \
+    /* `counter` feeds lane 1 back (as before) plus a sequence number from */   \
+    /* [4], which is only written atomically: racing callers that read the */   \
+    /* same lanes (e.g. -O0 builds) still get distinct values. Reseeds */   \
+    /* happen every 2^reseed_log calls on average. */   \
+    const uint64_t counter =   \
+        name##___state[1] + fio_atomic_add((name##___state + 4), 1);   \
     if (!(counter & ((1ULL << reseed_log) - 1)) &&   \
-        ((size_t)(reseed_log - 1) < 63))   \
+        ((size_t)(reseed_log - 1U) < 63))   \
       name##_reseed();   \
     { /* load state + per-call input (timing, counter, address variation) */   \
       const uint64_t cycles =   \
@@ -3534,50 +3563,43 @@ _Symbol type:_ `macro`
       const uint64_t variation =   \
           0x4E55788DULL +   \
           (reseed_log ? (uint64_t)(uintptr_t)&name##_reseed : 0);   \
-      s0[0] = name##___state[0] + cycles + counter;   \
-      s0[1] = name##___state[1] + cycles + (seed_offset + 0x59DD1C23ULL);   \
-      s0[2] = name##___state[2] + cycles + counter;   \
-      s0[3] = name##___state[3] + cycles + variation;   \
-    }   \
-    { /* update: one Feistel layer (lanes 0,2 from 1,3), then rotate lanes */   \
-      const uint64_t a_ =   \
-          s0[0] + fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME0,   \
-                                      s0[3] ^ FIO_U64_HASH_PRIME1);   \
-      const uint64_t c_ =   \
-          s0[2] + fio_math_mul64_fold(s0[3] ^ FIO_U64_HASH_PRIME2,   \
-                                      s0[1] ^ FIO_U64_HASH_PRIME3);   \
-      s0[0] = s0[1]; /* rotate: the other pair is updated next call */   \
-      s0[1] = c_;   \
-      s0[2] = s0[3];   \
-      s0[3] = a_;   \
-    }   \
-    /* output: two multiply layers over all lanes (never stored) */   \
-    r.u64[0] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME8,   \
-                                   s0[1] ^ FIO_U64_HASH_PRIME9) +   \
-               fio_math_mul64_fold(s0[2] ^ FIO_U64_HASH_PRIME10,   \
-                                   s0[3] ^ FIO_U64_HASH_PRIME11);   \
-    r.u64[1] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME12,   \
-                                   s0[3] ^ FIO_U64_HASH_PRIME13) +   \
-               fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME14,   \
-                                   s0[2] ^ FIO_U64_HASH_PRIME15);   \
-    for (size_t i = 0; i < 4; ++i) /* store to memory */   \
-      name##___state[i] = s0[i];   \
+      name##___state[5] = name##___state[1] + cycles + variation;   \
+      name##___state[7] = name##___state[3] + cycles + variation;   \
+      /* update: one Feistel layer (lanes 0,2 from 1,3), then rotate lanes; */   \
+      /* lanes 1,3 take the counter-mixed lanes 0,2 before 0,2 rotate */   \
+      name##___state[1] =   \
+          name##___state[0] + cycles + counter +   \
+          fio_math_mul64_fold(name##___state[5] ^ FIO_U64_HASH_PRIME0,   \
+                              name##___state[7] ^ FIO_U64_HASH_PRIME1);   \
+      name##___state[3] =   \
+          name##___state[2] + cycles + counter +   \
+          fio_math_mul64_fold(name##___state[7] ^ FIO_U64_HASH_PRIME2,   \
+                              name##___state[5] ^ FIO_U64_HASH_PRIME3);   \
+      name##___state[0] = name##___state[5];   \
+      name##___state[2] = name##___state[7];   \
+    } /* output: two multiply layers over all new lanes (never stored) */   \
+    r.u64[0] = fio_math_mul64_fold(name##___state[0] ^ FIO_U64_HASH_PRIME8,   \
+                                   (name##___state[1] ^ FIO_U64_HASH_PRIME9) +   \
+                                       counter) +   \
+               fio_math_mul64_fold(name##___state[2] ^ FIO_U64_HASH_PRIME10,   \
+                                   name##___state[3] ^ FIO_U64_HASH_PRIME11);   \
+    r.u64[1] = fio_math_mul64_fold(   \
+                   name##___state[0] ^ FIO_U64_HASH_PRIME12,   \
+                   (name##___state[3] ^ FIO_U64_HASH_PRIME13) + counter) +   \
+               fio_math_mul64_fold(name##___state[1] ^ FIO_U64_HASH_PRIME14,   \
+                                   name##___state[2] ^ FIO_U64_HASH_PRIME15);   \
     return r;   \
   }   \
   /** Returns a 64 bit pseudo-random number. */   \
   extern FIO_MAYBE_UNUSED uint64_t name##64(void) {   \
-    static fio_u128 r;   \
-    size_t counter = fio_atomic_add(name##___state + 8, 1);   \
-    if (!(counter & 1))   \
-      r = name##128();   \
-    return r.u64[counter & 1];   \
+    return name##128().u64[0];   \
   }   \
   /** Fills the `dest` buffer with pseudo-random noise. */   \
   extern FIO_MAYBE_UNUSED void name##_bytes(void *dest, size_t len) {   \
     if (!dest || !len)   \
       return;   \
     uint8_t *d = (uint8_t *)dest;   \
-    for (unsigned i = 15; i < len; i += 16) {   \
+    for (size_t i = 15; i < len; i += 16) {   \
       fio_u128 r = name##128();   \
       fio_memcpy16(d, r.u8);   \
       d += 16;   \
@@ -3604,6 +3626,13 @@ deterministic, as it will automatically re-seeds itself every 2^reseed_log
 iterations.
 
 If `extern` is `static` or `FIO_SFUNC`, static function will be defined.
+
+The `reseed_log` is a statistical average for a reseeding period.
+
+Racing threads may collide on the state lanes (by design, adding
+randomness), but each call takes a unique atomic sequence number that is
+mixed into its output. When seeking deterministic randomness, calls
+should be synchronized.
 
 _Symbol type:_ `macro`
 
@@ -3651,7 +3680,9 @@ _Symbol type:_ `macro`
 
 ```c
 #define FIO_STR_INFO1(str)   \
-  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+  ((fio_str_info_s){.len =   \
+                        (fio___cstr_nullable((str)) ? FIO_STRLEN((str)) : 0),   \
+                    .buf = (str)})
 ```
 
 Converts a C String into a fio_str_info_s.
@@ -3694,7 +3725,9 @@ _Symbol type:_ `macro`
 
 ```c
 #define FIO_BUF_INFO1(str)   \
-  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+  ((fio_buf_info_s){.len =   \
+                        (fio___cstr_nullable((str)) ? FIO_STRLEN((str)) : 0),   \
+                    .buf = (str)})
 ```
 
 Converts a C String into a fio_buf_info_s.
@@ -3778,6 +3811,9 @@ _Symbol type:_ `macro`
 ```
 
 Creates a stack fio_str_info_s variable `name` with `capacity` bytes.
+
+`capacity` SHOULD be a compile-time constant that fits the stack; a runtime
+value creates an unchecked VLA (never pass untrusted sizes).
 
 _Symbol type:_ `macro`
 
@@ -10236,20 +10272,20 @@ _Symbol type:_ `function`
 #### `fio_ct_max`
 
 ```c
-inline FIO_CONST intmax_t fio_ct_max(intmax_t a_, intmax_t b_)
+inline FIO_CONST intmax_t fio_ct_max(intmax_t a, intmax_t b)
 ```
 
-Returns `a` if a >= `b`.
+Returns the bigger of `a` and `b` (constant time).
 
 _Symbol type:_ `function`
 
 #### `fio_ct_min`
 
 ```c
-inline FIO_CONST intmax_t fio_ct_min(intmax_t a_, intmax_t b_)
+inline FIO_CONST intmax_t fio_ct_min(intmax_t a, intmax_t b)
 ```
 
-Returns `a` if a >= `b`.
+Returns the smaller of `a` and `b` (constant time).
 
 _Symbol type:_ `function`
 
@@ -10355,7 +10391,10 @@ _Symbol type:_ `function`
 inline void fio_secure_zero(void *a_, size_t bytes)
 ```
 
-A timing attack resistant memory zeroing function.
+Zeroes memory in a way the compiler may not optimize away (dead stores).
+
+Unaligned-safe word stores, followed by `FIO_COMPILER_GUARD_PTR` (the
+buffer's address escapes, so the stores can't be treated as dead).
 
 _Symbol type:_ `function`
 
@@ -10418,16 +10457,6 @@ _Symbol type:_ `macro`
 _Note:_ this may be a macro only / macro wrapper for a function.
 
 _Symbol type:_ `macro`
-
-#### `fio_rrot8`
-
-```c
-inline FIO_CONST uint8_t fio_rrot8(uint8_t i, uint8_t bits)
-```
-
-8Bit right rotation, inlined.
-
-_Symbol type:_ `function`
 
 #### `fio_rrot16`
 
@@ -10840,6 +10869,8 @@ inline uint64_t fio_math_mod_mul64(uint64_t a, uint64_t b, uint64_t mod)
 ```
 
 Perform modular multiplication for numbers with up to 64 bits.
+
+Returns 0 if `mod` is 0.
 
 _Symbol type:_ `function`
 
@@ -18720,6 +18751,24 @@ inline unsigned fio_utf8_char_len(const void *str_)
 
 Returns the number of valid UTF-8 bytes used by first char at `str`.
 
+Validation is strict (RFC 3629): overlong forms, surrogates and code points
+above U+10FFFF return 0.
+
+Reads stop at the first non-continuation byte (NUL terminated input is safe)
+and never reach the lead byte's `fio_utf8_char_len_unsafe` length.
+
+_Symbol type:_ `function`
+
+#### `fio_utf8_char_len_bounded`
+
+```c
+inline unsigned fio_utf8_char_len_bounded(const void *str, size_t len)
+```
+
+Same as `fio_utf8_char_len`, but never reads past `len` bytes: a sequence
+truncated by the end of the buffer returns 0. Use for raw (unterminated)
+buffers.
+
 _Symbol type:_ `function`
 
 #### `fio_utf8_write`
@@ -18729,6 +18778,8 @@ inline unsigned fio_utf8_write(void *dest_, uint32_t u)
 ```
 
 Writes code point to `dest` using UFT-8. Returns number of bytes written.
+
+Writes exactly the returned number of bytes (nothing if `u` > 0x1FFFFF).
 
 _Symbol type:_ `function`
 
@@ -18758,7 +18809,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-001-header-h"></a> `./fio-stl/001 header.h`
 
-12 public symbols.
+13 public symbols.
 
 ### Macros
 
@@ -18844,6 +18895,16 @@ Mirrors the custom allocator's default FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG.
 
 _Symbol type:_ `macro`
 
+#### `FIO_LEAK_COUNTER_DEC`
+
+```c
+#define FIO_LEAK_COUNTER_DEC(name)
+```
+
+
+
+_Symbol type:_ `macro`
+
 #### `FIO_PTR_TAG`
 
 ```c
@@ -18864,7 +18925,9 @@ _Symbol type:_ `macro`
 
 Supports embedded pointer tagging / untagging for the included types.
 
-Should resolve to an untagged pointer value. i.e.: ((uintptr_t)(p) | ~1UL)
+Should resolve to an untagged pointer value. i.e.:
+((uintptr_t)(p) & ~(uintptr_t)1)
+Only clear reserved tag bits; preserve all original pointer bits.
 
 _Symbol type:_ `macro`
 
@@ -18970,7 +19033,7 @@ _Symbol type:_ `function`
 size_t fio_strlen(const char *str)
 ```
 
-An alternative to `strlen` - may raise Address Sanitation errors.
+An alternative to `strlen`; stops at the first NUL byte.
 
 _Symbol type:_ `function`
 
@@ -19078,7 +19141,7 @@ _Symbol type:_ `type`
 #### `fio_aton`
 
 ```c
-FIO_SFUNC fio_aton_s fio_aton(char **pstr)
+fio_aton_s fio_aton(char **pstr)
 ```
 
 Converts a String to a number - either an integer or a float (double).
@@ -19267,7 +19330,7 @@ _Symbol type:_ `function`
 FIO_SFUNC size_t fio_digits_xbase(uint64_t i, size_t base)
 ```
 
-Returns the number of digits in any base X<65 for an unsigned number.
+Returns the number of digits in base 2-36 (other bases return 0).
 
 _Symbol type:_ `function`
 
@@ -19327,7 +19390,8 @@ _Symbol type:_ `function`
 inline void fio_ltoa_xbase(char *dest, uint64_t i, size_t digits, size_t base)
 ```
 
-Writes unsigned number to `dest` using `digits` bytes (+ `NUL`)
+Writes unsigned number in base 2-36 to `dest` using `digits` bytes (+ `NUL`)
+- other bases write an empty string.
 
 _Symbol type:_ `function`
 
@@ -19377,7 +19441,8 @@ _Symbol type:_ `function`
 uint64_t fio_atol_xbase(char **pstr, size_t base)
 ```
 
-Read an unsigned number in any base up to base 36.
+Reads an unsigned number in base 2-36 (other bases return 0, consuming
+nothing). Sets `errno == E2BIG` on overflow, stopping before the digit.
 
 _Symbol type:_ `function`
 
@@ -19740,7 +19805,7 @@ _Symbol type:_ `macro`
   /** Returns a pointer to the index map. */   \
   FIO_IFUNC imap_type *FIO_NAME(array_name,   \
                                 imap)(FIO_NAME(array_name, s) * a) {   \
-    return (imap_type *)(a->ary + ((imap_type)1ULL << a->capa_bits));   \
+    return (imap_type *)(a->ary + ((size_t)1ULL << a->capa_bits));   \
   }   \
   /** Deallocates dynamic memory. */   \
   FIO_IFUNC void FIO_NAME(array_name, destroy)(FIO_NAME(array_name, s) * a) {   \
@@ -19754,36 +19819,26 @@ _Symbol type:_ `macro`
     *a = (FIO_NAME(array_name, s)){0};   \
     (void)capa; /* if unused */   \
   }   \
-  /** Allocates dynamic memory. */   \
-  FIO_IFUNC int FIO_NAME(array_name, __alloc)(FIO_NAME(array_name, s) * a,   \
-                                              size_t bits) {   \
-    if (!bits || bits > ((sizeof(imap_type) << 3) - 2))   \
-      return -1;   \
-    size_t capa = 1ULL << bits;   \
+  /** Allocates a buffer with an empty imap (`bits >= 3` aligns the imap). */   \
+  FIO_IFUNC array_type *FIO_NAME(array_name, __alloc)(size_t bits) {   \
+    if (bits < 3 || bits > ((sizeof(imap_type) << 3) - 2) ||   \
+        bits >= ((sizeof(size_t) << 3) - 1))   \
+      return NULL;   \
+    const size_t capa = (size_t)1 << bits;   \
+    if (capa > (~(size_t)0) / (sizeof(array_type) + sizeof(imap_type)))   \
+      return NULL;   \
     if (bits > (size_t)(FIO_MAP_WARNING_BITSIZE - 1))   \
       FIO_LOG_WARNING(   \
           "The " #array_name "_s map is now using a LOT of memory - %zu Mb!",   \
           (capa >> 20) * (sizeof(array_type) + sizeof(imap_type)));   \
-    size_t old_capa = FIO_NAME(array_name, capa)(a);   \
     array_type *tmp = (array_type *)FIO_TYPEDEF_IMAP_REALLOC(   \
-        a->ary,   \
-        (a->capa_bits ? (old_capa * (sizeof(array_type)) +   \
-                         (old_capa * (sizeof(imap_type))))   \
-                      : 0),   \
+        NULL,   \
+        0,   \
         (capa * (sizeof(array_type)) + (capa * (sizeof(imap_type)))),   \
-        (a->w * (sizeof(array_type))));   \
-    (void)old_capa; /* if unused */   \
-    if (!tmp)   \
-      return -1;   \
-    if (!a->ary)   \
-      FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));   \
-    a->capa_bits = (uint32_t)bits;   \
-    a->ary = tmp;   \
-    if (!FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE) {   \
-      FIO_MEMSET((tmp + a->w), 0, ((capa - a->w) * (sizeof(*tmp))));   \
+        0);   \
+    if (tmp && !FIO_TYPEDEF_IMAP_REALLOC_IS_SAFE)   \
       FIO_MEMSET((tmp + capa), 0, (capa * (sizeof(imap_type))));   \
-    }   \
-    return 0;   \
+    return tmp;   \
   }   \
   /** Returns the index map position and array position of a value, if any. */   \
   FIO_SFUNC FIO_NAME(array_name, seeker_s)   \
@@ -19801,8 +19856,8 @@ _Symbol type:_ `macro`
     const imap_type hash = (imap_type)hash_fn(pobj);   \
     imap_type tester = (hash & hash_mask); /* hides lower bits for `tester` */   \
     imap_type pos = hash + (hash >> a->capa_bits); /* use more bits for pos */   \
-    tester += (imap_type)((!tester) << a->capa_bits);   \
-    tester -= (imap_type)((hash_mask == tester) << a->capa_bits);   \
+    tester += (imap_type)((imap_type)(!tester) << a->capa_bits);   \
+    tester -= (imap_type)((imap_type)(hash_mask == tester) << a->capa_bits);   \
     size_t attempts = 11;   \
     for (;;) {   \
       /* tests up to 3 groups of 4 bytes (uint32_t) within a 64 byte group */   \
@@ -19865,31 +19920,62 @@ _Symbol type:_ `macro`
     a->w = a->count;   \
     return 0;   \
   }   \
-  /** expands the existing array & imap storage capacity. */   \
-  FIO_IFUNC int FIO_NAME(array_name, __expand)(FIO_NAME(array_name, s) * a) {   \
-    for (;;) {   \
-      if (FIO_NAME(array_name, __alloc)(a,   \
-                                        a->capa_bits + 1 + (!a->capa_bits)))   \
+  /** Rebuilds into a new buffer (>= `bits`); `a` is unchanged on failure. */   \
+  FIO_SFUNC int FIO_NAME(array_name, __grow)(FIO_NAME(array_name, s) * a,   \
+                                             size_t bits) {   \
+    if (bits < 3)   \
+      bits = 3;   \
+    /* collision driven retries are bounded (hashes may be attacker chosen) */   \
+    for (size_t retry = 0; retry < 3; ++retry, ++bits) {   \
+      const size_t capa = (size_t)1 << bits;   \
+      if ((size_t)a->count >= capa)   \
+        continue;   \
+      FIO_NAME(array_name, s) n = {0};   \
+      n.ary = FIO_NAME(array_name, __alloc)(bits);   \
+      if (!n.ary)   \
         return -1;   \
-      if (!FIO_NAME(array_name, __fill_imap)(a))   \
+      n.capa_bits = (uint32_t)bits;   \
+      if (a->count == a->w) {   \
+        if (a->w)   \
+          FIO_MEMCPY(n.ary, a->ary, ((size_t)a->w * sizeof(array_type)));   \
+        n.count = a->count;   \
+      } else {   \
+        for (size_t i = 0; i < (size_t)a->w && (size_t)n.count < capa; ++i) {   \
+          if (is_valid_fn((a->ary + i)))   \
+            n.ary[n.count++] = a->ary[i];   \
+        }   \
+      }   \
+      n.w = n.count;   \
+      if (!FIO_NAME(array_name, __fill_imap)(&n)) {   \
+        if (a->ary) {   \
+          const size_t old_capa = (size_t)1 << a->capa_bits;   \
+          FIO_TYPEDEF_IMAP_FREE(a->ary,   \
+                                (old_capa * (sizeof(array_type)) +   \
+                                 (old_capa * (sizeof(imap_type)))));   \
+          (void)old_capa; /* if unused */   \
+        } else   \
+          FIO_LEAK_COUNTER_ON_ALLOC(FIO_NAME(array_name, s));   \
+        *a = n;   \
         return 0;   \
+      }   \
+      FIO_TYPEDEF_IMAP_FREE(   \
+          n.ary,   \
+          (capa * (sizeof(array_type)) + (capa * (sizeof(imap_type)))));   \
     }   \
+    return -1;   \
   }   \
   /** Reserves a minimum imap storage capacity. */   \
   FIO_IFUNC int FIO_NAME(array_name, reserve)(FIO_NAME(array_name, s) * a,   \
                                               imap_type min) {   \
-    imap_type bits = 2;   \
-    if (min > ((imap_type)~0ULL) >> 1)   \
+    size_t bits = 3;   \
+    if (!a)   \
       return -1;   \
-    while ((1ULL << bits) < min)   \
-      ++bits;   \
+    while (((uint64_t)1 << bits) < (uint64_t)min)   \
+      if (++bits > ((sizeof(imap_type) << 3) - 2))   \
+        return -1;   \
     if (bits <= a->capa_bits)   \
       return 0;   \
-    if (FIO_NAME(array_name, __alloc)(a, bits))   \
-      return -1;   \
-    if (!FIO_NAME(array_name, __fill_imap)(a))   \
-      return 0;   \
-    return FIO_NAME(array_name, __expand)(a);   \
+    return FIO_NAME(array_name, __grow)(a, bits);   \
   }   \
   /** Rehashes the array and fills the imap (use after sorting). */   \
   FIO_IFUNC int FIO_NAME(array_name, rehash)(FIO_NAME(array_name, s) * a) {   \
@@ -19899,8 +19985,8 @@ _Symbol type:_ `macro`
     imap_type *imap = FIO_NAME(array_name, imap)(a);   \
     FIO_MEMSET(imap, 0, bytes);   \
     if (!FIO_NAME(array_name, __fill_imap)(a))   \
-      return -1;   \
-    return 0;   \
+      return 0;   \
+    return FIO_NAME(array_name, __grow)(a, (size_t)a->capa_bits + 1);   \
   }   \
   /** Sets an object in the Array. Optionally overwrites existing data. */   \
   FIO_IFUNC array_type *FIO_NAME(array_name, set)(FIO_NAME(array_name, s) * a,   \
@@ -19908,23 +19994,29 @@ _Symbol type:_ `macro`
                                                   int overwrite) {   \
     if (!a || !is_valid_fn((&obj)))   \
       return NULL;   \
-    {   \
-      size_t capa = FIO_NAME(array_name, capa)(a);   \
-      if (a->w == capa)   \
-        FIO_NAME(array_name, __expand)(a);   \
-      else if (a->count != a->w &&   \
-               (a->w + (a->w >> 1)) > FIO_NAME(array_name, capa)(a)) {   \
-        FIO_MEMSET((a->ary + capa), 0, (capa * (sizeof(imap_type))));   \
-        FIO_NAME(array_name, __fill_imap)(a);   \
-      }   \
-    }   \
     for (;;) {   \
-      FIO_NAME(array_name, seeker_s) s = FIO_NAME(array_name, seek)(a, &obj);   \
-      if (s.ipos == (imap_type)(~(imap_type)0)) { /* no room in the imap */   \
-        FIO_NAME(array_name, __expand)(a);   \
+      size_t capa = FIO_NAME(array_name, capa)(a);   \
+      if ((size_t)a->w >= capa ||   \
+          (a->count != a->w && ((size_t)a->w + (a->w >> 1)) > capa)) {   \
+        /* grow when full, otherwise compact freed slots (same capacity) */   \
+        size_t bits = a->capa_bits;   \
+        bits += (((size_t)a->count + (a->count >> 1)) >= capa);   \
+        if (FIO_NAME(array_name, __grow)(a, bits) &&   \
+            (bits == a->capa_bits || /* fallback: compact if possible */   \
+             a->count == a->w ||   \
+             FIO_NAME(array_name, __grow)(a, a->capa_bits)))   \
+          return NULL;   \
         continue;   \
       }   \
-      if (s.pos == a->w) { /* new object */   \
+      FIO_NAME(array_name, seeker_s) s = FIO_NAME(array_name, seek)(a, &obj);   \
+      if (s.ipos == (imap_type)(~(imap_type)0)) { /* no room in the imap */   \
+        /* a sparse map implies colliding hashes, growing will not help */   \
+        if (((size_t)a->count << 3) < capa ||   \
+            FIO_NAME(array_name, __grow)(a, (size_t)a->capa_bits + 1))   \
+          return NULL;   \
+        continue;   \
+      }   \
+      if (s.pos == a->w) { /* new object (`a->w < capa` tested above) */   \
         a->ary[a->w] = obj;   \
         ++a->w;   \
         ++a->count;   \
@@ -19949,15 +20041,16 @@ _Symbol type:_ `macro`
       return NULL;   \
     return a->ary + s.pos;   \
   }   \
-  /** Removes an object in the Array's index map, zeroing out its memory. */   \
+  /** Removes an object (unsupported if a zeroed object is still valid). */   \
   FIO_IFUNC int FIO_NAME(array_name, remove)(FIO_NAME(array_name, s) * a,   \
                                              array_type obj) {   \
-    if (!a || !is_valid_fn((&obj)))   \
+    array_type zeroed_ = (array_type){0};   \
+    if (!a || !is_valid_fn((&obj)) || is_valid_fn((&zeroed_)))   \
       return -1;   \
     FIO_NAME(array_name, seeker_s) s = FIO_NAME(array_name, seek)(a, &obj);   \
     if (s.pos >= a->w)   \
       return -1;   \
-    a->ary[s.pos] = (array_type){0};   \
+    a->ary[s.pos] = zeroed_;   \
     FIO_NAME(array_name, imap)(a)[s.ipos] = (imap_type)(~(imap_type)0);   \
     --a->count;   \
     while (a->w && !is_valid_fn((a->ary + a->w - 1)))   \
@@ -20010,7 +20103,10 @@ inline void fio_math_div(uint64_t *dest, uint64_t *reminder, const uint64_t *a, 
 
 Multi-precision DIV for `len*64` bit long a, b.
 
-This is NOT constant time.
+This is NOT constant time - use only with public values.
+
+Supports up to 1024 words (65,536 bits); longer lengths, like division by
+zero, log an error and fill `dest` and `reminder` with `0xFF` bytes.
 
 The algorithm might be slow, as my math isn't that good and I couldn't
 understand faster division algorithms (such as Newton–Raphson division)... so
@@ -20026,6 +20122,9 @@ inline void fio_math_shr(uint64_t *dest, uint64_t *n, const size_t right_shift_b
 
 Multi-precision shift right for `len` word number `n`.
 
+`dest` and `n` must be the same buffer or not overlap. Shifts of `len * 64`
+bits or more zero `dest`.
+
 _Symbol type:_ `function`
 
 #### `fio_math_shl`
@@ -20036,6 +20135,9 @@ inline void fio_math_shl(uint64_t *dest, uint64_t *n, const size_t left_shift_bi
 
 Multi-precision shift left for `len*64` bit number `n`.
 
+`dest` and `n` must be the same buffer or not overlap. Shifts of `len * 64`
+bits or more zero `dest`.
+
 _Symbol type:_ `function`
 
 #### `fio_math_inv`
@@ -20045,6 +20147,8 @@ inline void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len)
 ```
 
 Multi-precision Inverse for `len*64` bit number `n` (turn `1` into `-1`).
+
+`dest` and `n` must be the same buffer or not overlap.
 
 _Symbol type:_ `function`
 
@@ -20072,7 +20176,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-002-random-h"></a> `./fio-stl/002 random.h`
 
-15 public symbols.
+19 public symbols.
 
 ### Macros
 
@@ -20147,6 +20251,26 @@ Reseeds the random engine using system state (rusage / jitter).
 
 _Symbol type:_ `function`
 
+#### `fio_rand_on_fork`
+
+```c
+void fio_rand_on_fork(void *is_null)
+```
+
+Reseeds the random engine (call in forked children).
+
+_Symbol type:_ `function`
+
+#### `fio_rand_reset`
+
+```c
+void fio_rand_reset(void)
+```
+
+Resets the random engine state to its default seed (testing only).
+
+_Symbol type:_ `function`
+
 #### `fio_risky_hash`
 
 ```c
@@ -20205,11 +20329,14 @@ fio_u256 fio_risky256(const void *data, uint64_t len)
 
 Computes a 256-bit non-cryptographic hash (RiskyHash 256).
 
-Based on the A3 (Zero-Copy ILP) design: 2-state multiply-fold with
-cross-lane mixing, 128 bytes/iteration, zero-copy XOR from input.
+2-lane multiply-fold with cross-lane mixing and per-block feed-forward,
+128 bytes/iteration, single pass, constant time where 64x64 multiply is.
 
-Returns a `fio_u256` (32 bytes). Passes strict avalanche (50.0%),
-collision, differential, and length independence tests.
+Unseeded: anyone can compute it, so it offers no protection against chosen
+inputs (e.g., hash flooding). Use fio_risky256_keyed with a secret key for
+attacker-influenced data.
+
+Returns a `fio_u256` (32 bytes). Outputs may change between versions.
 
 _Symbol type:_ `function`
 
@@ -20221,11 +20348,40 @@ fio_u512 fio_risky512(const void *data, uint64_t len)
 
 Computes a 512-bit non-cryptographic hash (RiskyHash 512).
 
-SHAKE-style extension of fio_risky256: the first 256 bits of the 512-bit
-output are identical to fio_risky256 (truncation-safe). The second 256 bits
-come from an additional squeeze round.
+The first 256 bits are identical to fio_risky256 (truncation-safe). The
+second 256 bits come from an additional squeeze round.
 
 Returns a `fio_u512` (64 bytes).
+
+_Symbol type:_ `function`
+
+#### `fio_risky256_keyed`
+
+```c
+fio_u256 fio_risky256_keyed(const void *key, uint64_t key_len, const void *data, uint64_t len)
+```
+
+Computes a keyed 256-bit RiskyHash (fast keyed hash / KDF).
+
+All 16 state words (both lanes) are seeded from the key, its length and the
+data length. Keys of up to 64 bytes are used as-is (zero padded, length
+separated); longer keys are first hashed with fio_risky512. Single pass,
+costs about one fio_risky256 call plus one (parallel) round.
+
+The key should hold at least 128 bits of secret entropy. Not a vetted
+cryptographic primitive.
+
+_Symbol type:_ `function`
+
+#### `fio_risky512_keyed`
+
+```c
+fio_u512 fio_risky512_keyed(const void *key, uint64_t key_len, const void *data, uint64_t len)
+```
+
+Computes a keyed 512-bit RiskyHash.
+
+The first 256 bits are identical to fio_risky256_keyed (same key / data).
 
 _Symbol type:_ `function`
 
@@ -20235,13 +20391,16 @@ _Symbol type:_ `function`
 fio_u256 fio_risky256_hmac(const void *key, uint64_t key_len, const void *msg, uint64_t msg_len)
 ```
 
-Computes HMAC-RiskyHash-256 (RFC 2104 construction, 32-byte digest).
+Computes HMAC-RiskyHash-256 (nested keyed hash, 32-byte digest).
 
-Uses fio_risky256 as the underlying hash with a 64-byte block size.
-If `key_len > 64`, the key is hashed first with fio_risky256.
+    tag = Keyed(key, outer, Keyed(key, inner, msg))
 
-NOTE: The underlying hash is non-cryptographic, so standard HMAC
-security proofs do not apply. For cryptographic HMAC, use blake2.
+`inner` / `outer` are domain separation tweaks, so the tag differs from
+fio_risky256_keyed. Not RFC 2104 (both lanes are keyed instead of padding a
+key block); the inner digest is never exposed.
+
+NOTE: The underlying hash is non-cryptographic and unvetted. For
+cryptographic MACs use blake2 or Poly1305.
 
 _Symbol type:_ `function`
 
@@ -20251,13 +20410,9 @@ _Symbol type:_ `function`
 fio_u512 fio_risky512_hmac(const void *key, uint64_t key_len, const void *msg, uint64_t msg_len)
 ```
 
-Computes HMAC-RiskyHash-512 (RFC 2104 construction, 64-byte digest).
+Computes HMAC-RiskyHash-512 (nested keyed hash, 64-byte digest).
 
-Uses fio_risky512 as the underlying hash with a 64-byte block size.
-If `key_len > 64`, the key is hashed first with fio_risky512.
-
-NOTE: The underlying hash is non-cryptographic, so standard HMAC
-security proofs do not apply. For cryptographic HMAC, use blake2.
+Same construction as fio_risky256_hmac with 512-bit inner and outer digests.
 
 _Symbol type:_ `function`
 
@@ -20330,7 +20485,10 @@ _Symbol type:_ `type`
 int fio_signal_monitor(fio_signal_monitor_args_s args)
 ```
 
-Starts to monitor for the specified signal, setting an optional callback.
+Monitors a signal; NULL callback ignores delivery. Returns 0 or -1 on error.
+Immediate callbacks / propagated handlers must be async-signal-safe and
+must not call this API. Register, update and forget only outside signal
+delivery; run review on a single thread.
 
 _Symbol type:_ `function`
 
@@ -20363,7 +20521,8 @@ _Symbol type:_ `function`
 int fio_signal_forget(int sig)
 ```
 
-Stops monitoring the specified signal.
+Stops monitoring the specified signal, restoring the handler that was
+installed before `fio_signal_monitor` (if ours is still installed).
 
 _Symbol type:_ `function`
 
@@ -20505,7 +20664,7 @@ _Symbol type:_ `type`
 inline fio_thread_pid_t fio_thread_fork(void)
 ```
 
-Should behave the same as the POSIX system call `fork`.
+POSIX fork; native Windows returns (fio_thread_pid_t)-1 with ENOSYS.
 
 _Symbol type:_ `function`
 
@@ -20525,7 +20684,7 @@ _Symbol type:_ `function`
 inline int fio_thread_kill(fio_thread_pid_t pid, int sig)
 ```
 
-Should behave the same as the POSIX system call `kill`.
+POSIX kill; native Windows supports positive PIDs only (no groups).
 
 _Symbol type:_ `function`
 
@@ -20535,7 +20694,8 @@ _Symbol type:_ `function`
 inline int fio_thread_waitpid(fio_thread_pid_t pid, int *stat_loc, int options)
 ```
 
-Should behave the same as the POSIX system call `waitpid`.
+POSIX waitpid. Native Windows supports snapshot-visible children with
+options 0 or WNOHANG only; no POSIX reaping or durable zombie status.
 
 _Symbol type:_ `function`
 
@@ -20545,7 +20705,8 @@ _Symbol type:_ `function`
 inline int fio_thread_create(fio_thread_t *t, void *(*fn)(void *), void *arg)
 ```
 
-Starts a new thread, returns 0 on success and -1 on failure.
+Starts fn(arg); returns 0 or -1 with errno on failure. On success t owns
+one join/detach obligation. Keep arg alive until the callback stops using it.
 
 _Symbol type:_ `function`
 
@@ -20555,7 +20716,8 @@ _Symbol type:_ `function`
 inline int fio_thread_join(fio_thread_t *t)
 ```
 
-Waits for the thread to finish.
+Waits for a created, joinable thread. Zero means completion; nonzero is an
+error, not completion. Do not concurrently join/detach the same thread.
 
 _Symbol type:_ `function`
 
@@ -20720,7 +20882,9 @@ _Symbol type:_ `function`
 inline int fio_thread_cond_timedwait(fio_thread_cond_t *c, fio_thread_mutex_t *m, size_t milliseconds)
 ```
 
-Waits on a conditional variable (MUST be previously locked).
+Waits with m locked. Returns 0 on wake, nonzero on timeout/error. POSIX
+uses CLOCK_REALTIME and rejects unrepresentable deadlines; Windows clamps
+finite durations to INFINITE-1 milliseconds rather than wrapping.
 
 _Symbol type:_ `function`
 
@@ -20978,6 +21142,10 @@ Supported forms:
   - Decimal: `&#digits;`
   - Hex:     `&#xhex;` or `&#Xhex;`
 
+Numeric forms require digits only (no signs, dividers, or extra prefixes).
+Zero and surrogate code points are replaced with U+FFFD; values above
+U+10FFFF are rejected. No source terminator or readable guard is required.
+
 _Symbol type:_ `function`
 
 -----------------------------------------------------
@@ -21124,10 +21292,10 @@ Creates a temporary file, returning its file descriptor (or -1 on error).
 
 The file is created in the folder named by the `TMPDIR`, `TMP` or `TEMP`
 environment variables (or `P_tmpdir`, or the current folder) and is
-anonymous: it has no name once this function returns (`O_TMPFILE`, or
-unlinked right after it is opened on POSIX systems; delete-on-close
-`O_TEMPORARY` on Windows). The file is removed when `fd` is closed (or the
-process exits), so no temporary files are left behind.
+anonymous on POSIX when creation succeeds (`O_TMPFILE`, or unlinked right
+after opening). If unlink fails, closes the descriptor and returns -1 with
+the unlink error; the empty named file may remain. Windows uses delete-on-
+close `O_TEMPORARY` (the name may remain until close / process exit).
 
 _Symbol type:_ `function`
 
@@ -21145,10 +21313,15 @@ Removes the file / link or folder at `path`.
   content (like `rm -r`). If `path` isn't a folder, the `recursive` flag
   is ignored and `path` is removed as a file / link.
 
-Links are removed, never followed into.
+Links at the final component and within the removed tree are removed, never
+followed into, including paths with trailing separators. Parent components
+use normal OS path resolution: this is not a path confinement API. Concurrent
+renames may cause failure; callers must control the containing directory if
+they require the entry itself to remain fixed.
 
-Uses a fixed size stack buffer (zero allocations); over-long paths fail
-with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
+Uses a fixed size path buffer; over-long paths fail with
+`errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`). Directory enumeration
+uses OS resources per depth (including libc's directory-stream buffers).
 
 Returns 0 on success and -1 on error. Recursive removal stops on the first
 error (some content may remain).
@@ -21215,11 +21388,15 @@ home folder (on Windows, also testing for `"~\"`), as in `fio_filename_open`.
 The data is written to a new sibling file in the target's folder
 (`<filename>.fio-tmp-<random>`, created with `O_CREAT | O_EXCL`, mode `0666`
 minus the `umask`), flushed to storage (`fsync`) and renamed over
-`filename` (`MoveFileExA` on Windows). Exactly one `fsync` (the file, not
-the folder): a crash right after saving may leave the previous version.
+`filename` (`MoveFileExA` on Windows). Existing ownership, permissions, ACLs
+and extended attributes are not preserved; use only where new-file metadata
+is appropriate (including inherited permissions / ACLs).
+Exactly one `fsync` (the file, not the folder): a crash right after saving
+may leave the previous version.
 
 Returns -1 on error or 0 on success. On error, any existing `filename` is
-left untouched, the sibling file is removed and `errno` is preserved.
+left untouched and `errno` is preserved from the primary error. Sibling
+cleanup is attempted; a filesystem or permission error can leave it behind.
 
 Uses fixed size stack buffers (zero allocations); over-long paths fail with
 `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
@@ -21447,7 +21624,41 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-004-multipart-h"></a> `./fio-stl/004 multipart.h`
 
-6 public symbols.
+8 public symbols.
+
+### Macros
+
+#### `FIO_MULTIPART_MAX_HEADER_SIZE`
+
+```c
+#define FIO_MULTIPART_MAX_HEADER_SIZE 8192
+```
+
+Maximum length of a part's headers (excluding the CRLFCRLF), also limiting
+the spaces/tabs after a closing delimiter's two hyphens (which do not count
+toward this limit).
+
+_Symbol type:_ `macro`
+
+#### `FIO_MULTIPART_MAX_BOUNDARY`
+
+```c
+#define FIO_MULTIPART_MAX_BOUNDARY 250
+```
+
+Maximum boundary length (RFC 2046 allows up to 70 characters).
+
+_Symbol type:_ `macro`
+
+#### `FIO_MULTIPART_ERROR_GENERIC`
+
+```c
+#define FIO_MULTIPART_ERROR_GENERIC (-1)
+```
+
+Malformed or truncated input (callback errors are returned unchanged).
+
+_Symbol type:_ `macro`
 
 ### Types
 
@@ -21455,66 +21666,50 @@ _Symbol type:_ `macro`
 
 ```c
 typedef struct {
-/**
-* Called for each regular form field (no filename).
-* Returns user-defined context (can be NULL).
-*
-* Note: If on_field_start is provided, this callback is ignored and the
-* streaming field callbacks (on_field_start/on_field_data/on_field_end)
-* are used instead.
-*/
-void *(*on_field)(void *udata,
-fio_buf_info_s name,
+/** A complete regular form field. A missing Content-Type has a NULL buf. */
+int (*on_string)(void *udata,
+fio_buf_info_s key,
 fio_buf_info_s value,
 fio_buf_info_s content_type);
 /**
-* Called when a large field starts (optional).
-* If NULL but on_field exists, on_field is used instead (backward
-* compatible). Returns context for this field (passed to
-* on_field_data/on_field_end).
+* A complete file part (a `filename` attribute, possibly empty). `headers`
+* holds the raw part headers (without the terminating CRLFCRLF).
 */
-void *(*on_field_start)(void *udata,
-fio_buf_info_s name,
-fio_buf_info_s content_type);
-/**
-* Called with field data chunk.
-* May be called multiple times per field for streaming.
-* Returns non-zero to abort parsing.
-*/
-int (*on_field_data)(void *udata, void *field_ctx, fio_buf_info_s data);
-/**
-* Called when field ends.
-*/
-void (*on_field_end)(void *udata, void *field_ctx);
-/**
-* Called when a file part starts, including an empty filename attribute.
-* headers borrows the raw part headers without the terminating CRLFCRLF;
-* it is valid only during this call.
-* Returns context for this file (passed to on_file_data/on_file_end).
-*/
-void *(*on_file_start)(void *udata,
-fio_buf_info_s name,
+int (*on_file)(void *udata,
+fio_buf_info_s key,
 fio_buf_info_s filename,
 fio_buf_info_s content_type,
-fio_buf_info_s headers);
-/**
-* Called with file data chunk.
-* May be called multiple times per file for streaming.
-* Returns non-zero to abort parsing.
-*/
-int (*on_file_data)(void *udata, void *file_ctx, fio_buf_info_s data);
-/**
-* Called when file upload ends.
-*/
-void (*on_file_end)(void *udata, void *file_ctx);
-/**
-* Called on parse error (optional).
-*/
-void (*on_error)(void *udata);
+fio_buf_info_s headers,
+fio_buf_info_s data);
 } fio_multipart_parser_callbacks_s
 ```
 
-The MIME multipart parser callbacks.
+The MIME multipart parser callbacks (both optional: a NULL callback is
+replaced by a no-op that skips its parts, which are still validated).
+
+All arguments are borrowed only during the callback. Returning non-zero
+aborts parsing; the value is returned unchanged in `err`.
+
+_Symbol type:_ `type`
+
+#### `fio_multipart_s`
+
+```c
+typedef struct {
+/** Bytes of the pending part already searched. */
+size_t peek;
+/** Offset of the pending part's body (0 until its headers are complete). */
+size_t body;
+/** Parser state flags. */
+uint16_t flags;
+/** Length of `marker` ("\r\n--" + boundary). */
+uint16_t marker_len;
+/** The delimiter: "\r\n--" + boundary. */
+char marker[FIO_MULTIPART_MAX_BOUNDARY + 4];
+} fio_multipart_s
+```
+
+The parser state, set by `fio_multipart_init`. All fields are private.
 
 _Symbol type:_ `type`
 
@@ -21522,13 +21717,9 @@ _Symbol type:_ `type`
 
 ```c
 typedef struct {
-/** Number of bytes consumed from the input buffer. */
+/** Bytes consumed (complete parts). Zero without an error: more data. */
 size_t consumed;
-/** Number of form fields parsed. */
-size_t field_count;
-/** Number of files parsed. */
-size_t file_count;
-/** Error code: 0 = success, -1 = error, -2 = need more data. */
+/** 0, FIO_MULTIPART_ERROR_GENERIC or an unchanged callback error. */
 int err;
 } fio_multipart_result_s
 ```
@@ -21537,75 +21728,41 @@ The MIME multipart parse result type.
 
 _Symbol type:_ `type`
 
-#### `fio_multipart_stream_s`
+### Functions
+
+#### `fio_multipart_init`
 
 ```c
-typedef struct {
-void *file_ctx;
-int in_file;
-} fio_multipart_stream_s
+int fio_multipart_init(fio_multipart_s *parser, fio_buf_info_s boundary)
 ```
 
-Streaming state for `fio_multipart_stream_parse`.
+Initializes (or resets) a parser for `boundary` (without the leading "--"),
+copying the boundary.
 
-Zero-initialize before the first call. All fields are private.
+Returns -1 if the boundary is empty or longer than
+`FIO_MULTIPART_MAX_BOUNDARY` (the parser then fails every call).
 
-_Symbol type:_ `type`
-
-### Functions
+_Symbol type:_ `function`
 
 #### `fio_multipart_parse`
 
 ```c
-fio_multipart_result_s fio_multipart_parse(const fio_multipart_parser_callbacks_s *callbacks, void *udata, fio_buf_info_s boundary, const char *data, size_t len)
+fio_multipart_result_s fio_multipart_parse(fio_multipart_s *parser, const fio_multipart_parser_callbacks_s *callbacks, void *udata, const char *data, size_t len, int eof)
 ```
 
-Parse MIME multipart data.
+Parses MIME multipart data, reporting each complete part.
 
-`callbacks` contains the callback functions (should be static const).
-`udata` is user data passed to all callbacks.
-`boundary` is the multipart boundary string (without leading "--").
-`data` is the data to parse.
-`len` is the length of the data.
+`data` must start at the first byte not yet consumed (unconsumed bytes are
+kept and new data appended). Bytes already searched aren't searched again.
 
-Returns a result struct containing:
-- `consumed`: Number of bytes consumed from the buffer
-- `field_count`: Number of form fields parsed
-- `file_count`: Number of files parsed
-- `err`: 0 = success, -1 = error, -2 = need more data
+`eof` marks the end of the input: a closing delimiter may end with the data
+and anything incomplete is an error (truncation). Without `eof`, a result
+with `!consumed && !err` means more data is required.
 
-For streaming, call again with remaining data appended to unconsumed data.
-Note: each part must fit in the buffer; use `fio_multipart_stream_parse` to
-stream large file uploads in bounded memory.
+After the closing delimiter, the rest of the data (the epilogue) is
+consumed and ignored. After an error, every call fails.
 
-_Symbol type:_ `function`
-
-#### `fio_multipart_stream_parse`
-
-```c
-fio_multipart_result_s fio_multipart_stream_parse(fio_multipart_stream_s *stream, const fio_multipart_parser_callbacks_s *callbacks, void *udata, fio_buf_info_s boundary, const char *data, size_t len)
-```
-
-Parses MIME multipart data like `fio_multipart_parse`, except that file
-contents are streamed: `on_file_data` is called with each chunk of a file as
-it arrives, so a file part doesn't have to fit in the buffer.
-
-On `err == -2`, keep `data + consumed ... data + len`, append more data and
-call again with the same `stream`. Regular fields must still fit in the
-buffer.
-
-If the input ends while `err == -2`, call `fio_multipart_stream_close`.
-
-_Symbol type:_ `function`
-
-#### `fio_multipart_stream_close`
-
-```c
-int fio_multipart_stream_close( fio_multipart_stream_s *stream, const fio_multipart_parser_callbacks_s *callbacks, void *udata)
-```
-
-Ends a stream early (i.e., truncated input), calling `on_file_end` for any
-open file. Returns -1 if a file was open (incomplete), otherwise 0.
+Not reentrant per `parser`: callbacks must not use the same `parser`.
 
 _Symbol type:_ `function`
 
@@ -21848,13 +22005,15 @@ uint8_t error;
 uint8_t streaming_string;
 /** Streaming string type (FIO_RESP3_BLOB_STR, FIO_RESP3_BLOB_ERR, etc.) */
 uint8_t streaming_string_type;
-/** Streamed fixed-length blob: trailing CRLF bytes pending (0...2) */
+/** Streamed blob or chunk: trailing CRLF bytes pending (0...2) */
 uint8_t streaming_blob_crlf;
+/** Non-zero for `$?`: complete each chunk without completing the string. */
+uint8_t streaming_chunked;
 /** Context for streaming string (from on_start_string) */
 void *streaming_string_ctx;
 /**
-* Streamed fixed-length blob: data bytes remaining to stream.
-* Zero when inactive or in `$?` (chunked) streaming mode.
+* Data bytes remaining in the current fixed-length blob or `$?` chunk.
+* Zero when inactive or awaiting the next chunk header.
 */
 int64_t streaming_remaining;
 /** Stack for nested structures */
@@ -22009,7 +22168,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-004-sock-h"></a> `./fio-stl/004 sock.h`
 
-35 public symbols.
+37 public symbols.
 
 ### Macros
 
@@ -22098,7 +22257,8 @@ _Symbol type:_ `macro`
 
 ```c
 #define FIO_SOCK_IS_OPEN(fd)   \
-  (!(fio_sock_wait_io(fd, (POLLOUT | POLLRDHUP), 0) &   \
+  (FIO_SOCK_FD_ISVALID(fd) &&   \
+   !(fio_sock_wait_io(fd, (POLLOUT | POLLRDHUP), 0) &   \
      (POLLRDHUP | POLLHUP | POLLNVAL)))
 ```
 
@@ -22324,20 +22484,31 @@ Frees the pointer returned by `fio_sock_address_new`.
 
 _Symbol type:_ `function`
 
+#### `fio_sock_addr`
+
+```c
+fio_buf_info_s fio_sock_addr(fio_socket_i s, bool with_port)
+```
+
+Returns the socket's local numeric host, or host:port when with_port is true
+(IPv6 endpoints use [host]:port). Unix sockets return their pathname without
+a port, regardless of with_port. On error, returns a NULL buffer with zero
+length. Results share the 128-slot static ring with fio_sock_peer_addr;
+copy the result to retain it.
+
+_Symbol type:_ `function`
+
 #### `fio_sock_peer_addr`
 
 ```c
-fio_buf_info_s fio_sock_peer_addr(fio_socket_i s)
+fio_buf_info_s fio_sock_peer_addr(fio_socket_i s, bool with_port)
 ```
 
-Returns a human readable address representation of the socket's peer address.
-
-On error, returns a NULL buffer with zero length.
-
-Buffer lengths are limited to 63 bytes.
-
-Results use a ring of 128 static 64-byte slots: the 129th call reuses the
-first slot. Copy the result if you need to keep it.
+Returns the socket's peer numeric host, or host:port when with_port is true
+(IPv6 endpoints use [host]:port). Unix sockets return their pathname without
+a port, regardless of with_port. On error, returns a NULL buffer with zero
+length. Results share a ring of 128 static 128-byte slots with fio_sock_addr;
+the 129th call reuses the first slot. Copy the result to retain it.
 
 _Symbol type:_ `function`
 
@@ -22381,6 +22552,16 @@ Sets a file descriptor / socket to non blocking state.
 
 _Symbol type:_ `function`
 
+#### `fio_sock_error`
+
+```c
+int fio_sock_error(fio_socket_i fd)
+```
+
+Returns the pending socket error (`SO_ERROR`), 0 if none, -1 on failure.
+
+_Symbol type:_ `function`
+
 #### `fio_sock_maximize_limits`
 
 ```c
@@ -22411,7 +22592,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-004-state-callbacks-h"></a> `./fio-stl/004 state callbacks.h`
 
-4 public symbols.
+5 public symbols.
 
 ### Types
 
@@ -22495,6 +22676,16 @@ int fio_state_callback_remove(fio_state_event_type_e, void (*func)(void *), void
 ```
 
 Removes a callback from the list of callbacks to be called for the event.
+
+_Symbol type:_ `function`
+
+#### `fio_state_callback_clear`
+
+```c
+void fio_state_callback_clear(fio_state_event_type_e)
+```
+
+Clears all the existing callbacks for the event.
 
 _Symbol type:_ `function`
 
@@ -23438,7 +23629,7 @@ The number of blocks per system allocation.
 More blocks protect against fragmentation, but lower the maximum number that
 can be allocated without reverting to mmap.
 
-Range: 0-4
+Range: 0-5
 Recommended: depends on object allocation sizes, usually 1 or 2.
 
 _Symbol type:_ `macro`
@@ -23973,7 +24164,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-011-string-core-h"></a> `./fio-stl/011 string core.h`
 
-106 public symbols.
+107 public symbols.
 
 ### Macros
 
@@ -24064,7 +24255,7 @@ _Symbol type:_ `macro`
   ((fio_string_write_s){.klass = 6, .info.f = (double)(num)})
 ```
 
-A macro to add a float (double) to `fio_string_write2`.
+A macro to add a float (double) to `fio_string_write2` (uses `fio_ftoa`).
 
 _Symbol type:_ `macro`
 
@@ -24194,6 +24385,7 @@ union {
 struct {
 size_t len;
 const char *buf;
+size_t offset;
 } str;
 double f;
 int64_t i;
@@ -24258,7 +24450,7 @@ _Symbol type:_ `type`
 #### `fio_string_write`
 
 ```c
-FIO_SFUNC int fio_string_write(fio_str_info_s *dest, fio_string_realloc_fn reallocate, const void *restrict src, size_t len)
+FIO_SFUNC int fio_string_write(fio_str_info_s *dest, fio_string_realloc_fn reallocate, const void *src, size_t len)
 ```
 
 Writes data to the end of the string in the `fio_string_s` struct,
@@ -24333,7 +24525,7 @@ _Symbol type:_ `function`
 #### `fio_string_write2`
 
 ```c
-int fio_string_write2(fio_str_info_s *restrict dest, fio_string_realloc_fn reallocate, const fio_string_write_s srcs[])
+int fio_string_write2(fio_str_info_s *dest, fio_string_realloc_fn reallocate, fio_string_write_s srcs[])
 ```
 
 Writes a group of objects (strings, numbers, etc') to `dest`.
@@ -24482,7 +24674,10 @@ _Symbol type:_ `function`
 int fio_string_write_base32enc(fio_str_info_s *dest, fio_string_realloc_fn reallocate, const void *raw, size_t raw_len)
 ```
 
-Writes data to String using base64 encoding.
+Writes data to String using RFC 4648 Base32 encoding (padded with `=` to a
+multiple of 8 characters).
+
+Returns 0 on success or -1 on error (no partial encoding).
 
 _Symbol type:_ `function`
 
@@ -24492,7 +24687,15 @@ _Symbol type:_ `function`
 int fio_string_write_base32dec(fio_str_info_s *dest, fio_string_realloc_fn reallocate, const void *encoded, size_t encoded_len)
 ```
 
-Writes decoded base64 data to String.
+Writes decoded RFC 4648 Base32 data to String.
+
+Case insensitive; whitespace (` \t\n\v\f\r\b`) is ignored and any amount of
+trailing `=` padding (including none) is accepted. Non-zero trailing bits are
+ignored. Empty (whitespace / padding only) input decodes to nothing.
+
+Returns 0 on success or -1 on error (invalid character, data after padding
+or 1, 3 or 6 trailing symbols, whose bits can't form a byte). On error
+`dest` is left unchanged.
 
 _Symbol type:_ `function`
 
@@ -24512,7 +24715,16 @@ _Symbol type:_ `function`
 int fio_string_write_base64dec(fio_str_info_s *dest, fio_string_realloc_fn reallocate, const void *encoded, size_t encoded_len)
 ```
 
-Writes decoded base64 data to String.
+Writes decoded RFC 4648 Base64 data to String.
+
+Accepts both the standard (`+/`) and URL-safe (`-_`) alphabets, ignores
+whitespace (` \t\n\v\f\r\b`) and accepts any amount of trailing `=`
+padding (including none). Non-zero trailing bits are ignored. Empty
+(whitespace / padding only) input decodes to nothing.
+
+Returns 0 on success or -1 on error (invalid character, data after padding
+or a single trailing symbol, whose bits can't form a byte). On error `dest`
+is left unchanged.
 
 _Symbol type:_ `function`
 
@@ -24636,6 +24848,16 @@ inline size_t fio_string_capa4len(size_t new_len)
 ```
 
 
+
+_Symbol type:_ `function`
+
+#### `fio_string_sys_reallocate`
+
+```c
+int fio_string_sys_reallocate(fio_str_info_s *dst, size_t len)
+```
+
+reallocation callback implementation using libc `realloc`.
 
 _Symbol type:_ `function`
 
@@ -24907,7 +25129,7 @@ _Symbol type:_ `function`
 #### `fio_bstr_write`
 
 ```c
-inline char *fio_bstr_write(char *bstr, const void *restrict src, size_t len)
+inline char *fio_bstr_write(char *bstr, const void *src, size_t len)
 ```
 
 Writes data to a fio_bstr, returning the address of the new fio_bstr.
@@ -24928,7 +25150,7 @@ _Symbol type:_ `function`
 #### `fio_bstr_write2`
 
 ```c
-inline char *fio_bstr_write2(char *bstr, const fio_string_write_s srcs[])
+inline char *fio_bstr_write2(char *bstr, fio_string_write_s srcs[])
 ```
 
 Writes data to a fio_bstr, returning the address of the new fio_bstr.
@@ -25252,8 +25474,8 @@ _Symbol type:_ `macro`
 ```c
 #define FIO_DATA_INIT   \
   {   \
-    .buf = NULL, .len = 0, .pos = 0, .limit = 0, .capa = 0, .fd = -1,   \
-    .err = 0, .map = 0   \
+    .buf = NULL, .len = 0, .pos = 0, .limit = 0, .capa = 0, .woff = 0,   \
+    .wlen = 0, .fd = -1, .err = 0, .map = 0   \
   }
 ```
 
@@ -25277,6 +25499,10 @@ size_t pos;
 size_t limit;
 /** Once spilled: bytes mapped (if `map == 1`) or read buffer capacity. */
 size_t capa;
+/** Heap read buffer window: file offset of the bytes held in `buf`. */
+size_t woff;
+/** Heap read buffer window: file bytes held in `buf` (0 = none). */
+size_t wlen;
 /** Temporary file descriptor (-1 while the data is in RAM). */
 int fd;
 /** Sticky error flag (set when a write fails; cleared by destroy). */
@@ -25402,7 +25628,8 @@ Reads up to `len` bytes from the reading position; returns nothing at EOF.
 
 Use `(size_t)-1` to read all the remaining data. Once spilled, data is read
 through a memory mapping of the temporary file; if mapping isn't available,
-through a heap buffer of the requested size.
+through a heap buffer of (at least) the requested size, which remembers the
+file range it holds: overlapping reads only read the bytes not yet held.
 
 If that buffer can't be allocated, or the file returns fewer bytes than
 requested (a short read: an I/O error or a file truncated by someone else;
@@ -25443,8 +25670,9 @@ void fio_data_expect(fio_data_s *d, size_t len)
 Prepares for `len` more bytes: reserves RAM, or moves the data to a
 temporary file early if the expected size crosses the RAM limit.
 
-This is only a hint: if no temporary file can be created, the data stays in
-RAM (no error state is set; a later write past the limit will fail).
+This is only a hint: if RAM can't be reserved or no temporary file can be
+created, the data stays intact and no error state is set. A later write
+retries the allocation or spill and reports failure if it can't proceed.
 
 _Symbol type:_ `function`
 
@@ -25457,10 +25685,11 @@ int fio_data_write(fio_data_s *d, const void *data, size_t len)
 Appends `len` bytes from `data`, spilling to a temporary file once the RAM
 limit would be exceeded.
 
-Returns 0 on success or -1 on error. Failed file writes are retried for as
-long as they make progress; after two consecutive attempts that store
-nothing, the store enters a (sticky) error state: only the data actually
-stored is kept (`fio_data_len`) and all later writes fail (see
+Returns 0 on success or -1 on error. RAM allocation failure keeps the
+previous data intact and enters the sticky error state. Failed file writes
+are retried while they make progress; after two consecutive attempts that
+store nothing, the store enters a (sticky) error state: only the data
+actually stored is kept (`fio_data_len`) and all later writes fail (see
 `fio_data_is_error`). RAM never grows past the RAM limit.
 
 _Symbol type:_ `function`
@@ -25708,7 +25937,8 @@ fio_json_obj_result_s (*map_push)(void *udata,
 void *map,
 fio_buf_info_s key,
 void *value);
-/** Appends `value` (owned, taken even on error). Returns non-zero on error. */
+/** Appends `value` (owned, taken even on error). Returns non-zero on error.
+*/
 int (*array_push)(void *udata, void *array, void *value);
 /** Returns non-zero if `obj` is an array (optional). */
 int (*is_array)(void *udata, void *obj);
@@ -25781,20 +26011,21 @@ _Symbol type:_ `function`
 #### `fio_json_resolve_on_map`
 
 ```c
-fio_json_obj_result_s fio_json_resolve_on_map( const fio_json_parser_callbacks_s *cb, void *udata, void *parent, fio_buf_info_s key)
+fio_json_obj_result_s fio_json_resolve_on_map(const fio_json_parser_callbacks_s *cb, void *udata, void *parent, fio_buf_info_s key)
 ```
 
 Opens a map via `cb->on_map` and resolves a returned `old` value using the
 default conflict rules. Returns the opened map (borrowed, owned at the root).
 Requires on_map, on_array, map_push, array_push, free_unused_object; missing
-is_map / is_array callbacks are treated as always false.
+is_map / is_array callbacks are treated as always false. Conflict descent
+is bounded by FIO_JSON_MAX_DEPTH, returning FIO_JSON_ERROR_NESTING.
 
 _Symbol type:_ `function`
 
 #### `fio_json_resolve_on_array`
 
 ```c
-fio_json_obj_result_s fio_json_resolve_on_array( const fio_json_parser_callbacks_s *cb, void *udata, void *parent, fio_buf_info_s key)
+fio_json_obj_result_s fio_json_resolve_on_array(const fio_json_parser_callbacks_s *cb, void *udata, void *parent, fio_buf_info_s key)
 ```
 
 Opens an array via `cb->on_array`, resolving `old` like
@@ -25888,6 +26119,7 @@ Parses URL-encoded data, calling `on_pair` with each decoded name and value.
 `callbacks` is borrowed for the call. If `callbacks` or `on_pair` is NULL,
 pairs are only counted: nothing is decoded and nothing is allocated.
 `udata` is passed to `on_pair` unchanged. `data[0..len)` is not modified.
+`data` may be NULL only when `len` is zero; empty input returns all zeros.
 
 Parsing rules:
 - Pairs are separated by `&`; empty pairs (`&&`) are skipped
@@ -25895,8 +26127,8 @@ Parsing rules:
 - `name=` and `name` both have an empty value; `=value` has an empty name
 
 Names and values are decoded once using `fio_string_write_url_dec`, including
-'+' to spaces. Invalid percent escapes remain literal. Long fields may
-allocate temporary memory, freed after the callback.
+legacy %uXXXX escapes and '+' to spaces. Invalid percent escapes remain
+literal. Long fields may allocate temporary memory, freed after the callback.
 
 On error, parsing stops before the failed pair: `consumed` and `count` cover
 only the pairs processed without error. `err` is -1 if a temporary buffer
@@ -25908,9 +26140,19 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-102-poll-api-h"></a> `./fio-stl/102 poll api.h`
 
-16 public symbols.
+17 public symbols.
 
 ### Macros
+
+#### `FIO_POLL_EXIT_ON_SYSERR`
+
+```c
+#define FIO_POLL_EXIT_ON_SYSERR 1
+```
+
+
+
+_Symbol type:_ `macro`
 
 #### `FIO_POLL_POSSIBLE_FLAGS`
 
@@ -26022,10 +26264,13 @@ _Symbol type:_ `type`
 #### `fio_poll_init`
 
 ```c
-inline void fio_poll_init(fio_poll_s *p, fio_poll_settings_s)
+int fio_poll_init(fio_poll_s *p, fio_poll_settings_s)
 ```
 
 Initializes the polling object, allocating its resources.
+Returns 0 on success, -1 on failure (errno set). With
+FIO_POLL_EXIT_ON_SYSERR=1, backend syscall failure terminates the process
+instead. On a returned failure, the poller may be safely destroyed.
 
 _Symbol type:_ `function`
 
@@ -26045,7 +26290,7 @@ _Symbol type:_ `macro`
 #### `fio_poll_destroy`
 
 ```c
-inline void fio_poll_destroy(fio_poll_s *p)
+void fio_poll_destroy(fio_poll_s *p)
 ```
 
 Destroys the polling object, freeing its resources.
@@ -26879,7 +27124,7 @@ _Symbol type:_ `macro`
 #### `fio_crypto_enc_fn`
 
 ```c
-typedef void(fio_crypto_enc_fn)(void *restrict mac, void *restrict data, size_t len, const void *ad, /* additional data */ size_t adlen, const void *key, const void *nonce)
+typedef int(fio_crypto_enc_fn)(void *restrict mac, void *restrict data, size_t len, const void *ad, /* additional data */ size_t adlen, const void *key, const void *nonce)
 ```
 
 
@@ -26900,7 +27145,7 @@ _Symbol type:_ `type`
 
 ## <a id="fio-stl-152-blake2-h"></a> `./fio-stl/152 blake2.h`
 
-14 public symbols.
+16 public symbols.
 
 ### Types
 
@@ -26943,7 +27188,7 @@ _Symbol type:_ `type`
 #### `fio_blake2b`
 
 ```c
-inline fio_u512 fio_blake2b(const void *data, uint64_t len)
+fio_u512 fio_blake2b(const void *data, uint64_t len)
 ```
 
 One-shot BLAKE2b hash with max-length (64 byte) digest.
@@ -26960,7 +27205,9 @@ Flexible-output BLAKE2b hash.
 
 `out` must point to a buffer of at least `outlen` bytes.
 `outlen` must be between 1 and 64 (default 64 if 0).
-`key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
+`key` and `keylen` are optional (set to NULL/0 for unkeyed hashing; a NULL
+`key` is unkeyed regardless of `keylen`). Keys over 64 bytes are replaced
+by BLAKE2b-512(key) (non-standard, HMAC-like; never truncated).
 
 _Symbol type:_ `function`
 
@@ -26981,6 +27228,21 @@ fio_blake2b_s fio_blake2b_init(size_t outlen, const void *key, size_t keylen)
 ```
 
 Initialize a BLAKE2b streaming context. outlen: 1-64 (default 64).
+A NULL `key` is unkeyed regardless of `keylen`. The context (holding the
+padded key) is built in the returned object - initialize a new variable
+with it (`fio_blake2b_s h = fio_blake2b_init(...)`) to avoid key copies,
+or use fio_blake2b_init_at. Keys over 64 bytes: see fio_blake2b_hash.
+
+_Symbol type:_ `function`
+
+#### `fio_blake2b_init_at`
+
+```c
+void fio_blake2b_init_at(fio_blake2b_s *h, size_t outlen, const void *key, size_t keylen)
+```
+
+Initializes `h` in place (same arguments as fio_blake2b_init). The padded
+key is written only to `h`, so no key copy is left elsewhere on the stack.
 
 _Symbol type:_ `function`
 
@@ -27007,7 +27269,7 @@ _Symbol type:_ `function`
 #### `fio_blake2s`
 
 ```c
-inline fio_u256 fio_blake2s(const void *data, uint64_t len)
+fio_u256 fio_blake2s(const void *data, uint64_t len)
 ```
 
 One-shot BLAKE2s hash with max-length (32 byte) digest.
@@ -27024,7 +27286,9 @@ Flexible-output BLAKE2s hash.
 
 `out` must point to a buffer of at least `outlen` bytes.
 `outlen` must be between 1 and 32 (default 32 if 0).
-`key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
+`key` and `keylen` are optional (set to NULL/0 for unkeyed hashing; a NULL
+`key` is unkeyed regardless of `keylen`). Keys over 32 bytes are replaced
+by BLAKE2s-256(key) (non-standard, HMAC-like; never truncated).
 
 _Symbol type:_ `function`
 
@@ -27045,6 +27309,18 @@ fio_blake2s_s fio_blake2s_init(size_t outlen, const void *key, size_t keylen)
 ```
 
 Initialize a BLAKE2s streaming context. outlen: 1-32 (default 32).
+A NULL `key` is unkeyed regardless of `keylen` (see fio_blake2b_init).
+Keys over 32 bytes: see fio_blake2s_hash.
+
+_Symbol type:_ `function`
+
+#### `fio_blake2s_init_at`
+
+```c
+void fio_blake2s_init_at(fio_blake2s_s *h, size_t outlen, const void *key, size_t keylen)
+```
+
+Initializes `h` in place (see fio_blake2b_init_at).
 
 _Symbol type:_ `function`
 
@@ -27072,14 +27348,14 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-152-chacha20poly1305-h"></a> `./fio-stl/152 chacha20poly1305.h`
 
-7 public symbols.
+8 public symbols.
 
 ### Functions
 
 #### `fio_chacha20_poly1305_enc`
 
 ```c
-void fio_chacha20_poly1305_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, /* additional data */ size_t adlen, const void *key, const void *nonce)
+int fio_chacha20_poly1305_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, /* additional data */ size_t adlen, const void *key, const void *nonce)
 ```
 
 Performs an in-place encryption of `data` using ChaCha20 with additional
@@ -27090,6 +27366,12 @@ data, producing a 16 byte message authentication code (MAC) using Poly1305.
 * `ad`     MAY be omitted, will NOT be encrypted.
 * `data`   MAY be omitted, WILL be encrypted.
 * `mac`    MUST point to a buffer with (at least) 16 available bytes.
+
+A key/nonce pair MUST NEVER be reused.
+
+Returns `0` on success or `-1` if `len` exceeds the AEAD limit of
+(2^32 - 1) * 64 bytes. On error no keystream is used: `data` and `mac` are
+zeroed (no plaintext or valid tag is left behind).
 
 _Symbol type:_ `function`
 
@@ -27108,27 +27390,47 @@ the message authentication code (MAC) using Poly1305.
 * `data`   MAY be omitted, WILL be decrypted.
 * `mac`    MUST point to a buffer where the 16 byte MAC is placed.
 
-Returns `-1` on error (authentication failed).
+Returns `-1` on error (authentication failed or `len` exceeds the AEAD
+limit of (2^32 - 1) * 64 bytes).
+
+_Symbol type:_ `function`
+
+#### `fio_chacha20_poly1305_auth`
+
+```c
+int fio_chacha20_poly1305_auth(void *restrict mac, void *restrict data, size_t len, const void *ad, /* additional data */ size_t adlen, const void *key, const void *nonce)
+```
+
+Computes the 16 byte ChaCha20Poly1305 MAC of already encrypted `data`
+without decrypting it (the caller compares it with the received MAC).
+
+Returns `0` on success or `-1` on invalid arguments (see above) or if `len`
+exceeds the AEAD limit of (2^32 - 1) * 64 bytes. On error a writable `mac`
+is zeroed; callers MUST reject the message on `-1` and never compare it.
 
 _Symbol type:_ `function`
 
 #### `fio_xchacha20_poly1305_enc`
 
 ```c
-void fio_xchacha20_poly1305_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, /* additional data */ size_t adlen, const void *key, const void *nonce)
+int fio_xchacha20_poly1305_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, /* additional data */ size_t adlen, const void *key, const void *nonce)
 ```
 
 Performs an in-place encryption of `data` using XChaCha20 with additional
 data, producing a 16 byte message authentication code (MAC) using Poly1305.
 
-XChaCha20 uses a 192-bit (24 byte) nonce, making it safe to use with
-randomly-generated nonces without risk of nonce collision.
+XChaCha20 uses a 192-bit (24 byte) nonce, large enough for nonces generated
+by a cryptographically secure RNG (collision odds are negligible, ~2^-96
+after 2^48 messages). A key/nonce pair MUST NEVER be reused.
 
 * `key`    MUST point to a 256 bit long memory address (32 Bytes).
 * `nonce`  MUST point to a 192 bit long memory address (24 Bytes).
 * `ad`     MAY be omitted, will NOT be encrypted.
 * `data`   MAY be omitted, WILL be encrypted.
 * `mac`    MUST point to a buffer with (at least) 16 available bytes.
+
+Returns `0` on success or `-1` if `len` exceeds the AEAD limit of
+(2^32 - 1) * 64 bytes (`data` and `mac` are zeroed on error).
 
 _Symbol type:_ `function`
 
@@ -27147,31 +27449,36 @@ authenticating the message authentication code (MAC) using Poly1305.
 * `data`   MAY be omitted, WILL be decrypted.
 * `mac`    MUST point to a buffer where the 16 byte MAC is placed.
 
-Returns `-1` on error (authentication failed).
+Returns `-1` on error (authentication failed or `len` exceeds the AEAD
+limit of (2^32 - 1) * 64 bytes).
 
 _Symbol type:_ `function`
 
 #### `fio_xchacha20`
 
 ```c
-void fio_xchacha20(void *restrict data, size_t len, const void *key, const void *nonce, uint32_t counter)
+int fio_xchacha20(void *restrict data, size_t len, const void *key, const void *nonce, uint32_t counter)
 ```
 
 Performs an in-place encryption/decryption of `data` using XChaCha20.
 
-XChaCha20 uses a 192-bit (24 byte) nonce, making it safe to use with
-randomly-generated nonces without risk of nonce collision.
+XChaCha20 uses a 192-bit (24 byte) nonce, large enough for nonces generated
+by a cryptographically secure RNG (collision odds are negligible, ~2^-96
+after 2^48 messages). A key/nonce pair MUST NEVER be reused.
 
 * `key`     MUST point to a 256 bit long memory address (32 Bytes).
 * `nonce`   MUST point to a 192 bit long memory address (24 Bytes).
 * `counter` is the block counter, usually 0 unless `data` is mid-cyphertext.
+
+Returns `0` on success or `-1` if the block counter would wrap
+(`counter + ceil(len / 64)` exceeds 2^32); `data` is zeroed on error.
 
 _Symbol type:_ `function`
 
 #### `fio_chacha20`
 
 ```c
-void fio_chacha20(void *restrict data, size_t len, const void *key, const void *nonce, uint32_t counter)
+int fio_chacha20(void *restrict data, size_t len, const void *key, const void *nonce, uint32_t counter)
 ```
 
 Performs an in-place encryption/decryption of `data` using ChaCha20.
@@ -27180,12 +27487,16 @@ Performs an in-place encryption/decryption of `data` using ChaCha20.
 * `nonce` MUST point to a  96 bit long memory address (12 Bytes).
 * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
 
+Returns `0` on success or `-1` if the block counter would wrap
+(`counter + ceil(len / 64)` exceeds 2^32). On error no keystream is reused:
+`data` is zeroed (it may hold plaintext the caller ignored the error for).
+
 _Symbol type:_ `function`
 
 #### `fio_poly1305_auth`
 
 ```c
-void fio_poly1305_auth(void *restrict mac_dest, void *restrict message, size_t len, const void *ad, size_t ad_len, const void *key256bits)
+int fio_poly1305_auth(void *restrict mac_dest, void *restrict message, size_t len, const void *ad, size_t ad_len, const void *key256bits)
 ```
 
 Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
@@ -27194,7 +27505,13 @@ poly message and additional data into `mac_dest`.
 * `mac_dest` MUST point to a buffer with (at least) 16 available bytes.
 * `message`  MAY be omitted.
 * `ad`       MAY be omitted (additional data).
-* `key`      MUST point to a 256 bit long memory address (32 Bytes).
+* `key`      MUST point to a 256 bit long memory address (32 Bytes); a
+              Poly1305 key MUST only be used once (one-time key).
+
+Returns `0` on success or `-1` on invalid arguments (`NULL` `mac_dest` or
+`key`, or `NULL` `message` / `ad` with a non-zero length). On error nothing
+is read and a writable `mac_dest` is zeroed (never a MAC computed with a
+fallback key); callers MUST reject the message on `-1` and never compare it.
 
 _Symbol type:_ `function`
 
@@ -27202,7 +27519,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-152-sha1-h"></a> `./fio-stl/152 sha1.h`
 
-4 public symbols.
+5 public symbols.
 
 ### Types
 
@@ -27239,6 +27556,16 @@ require it's use (i.e., WebSockets), so it's here for your convenience.
 
 _Symbol type:_ `function`
 
+#### `fio_sha1_hmac`
+
+```c
+fio_sha1_s fio_sha1_hmac(const void *key, uint64_t key_len, const void *msg, uint64_t msg_len)
+```
+
+HMAC-SHA1, resulting in a 20 byte authentication code.
+
+_Symbol type:_ `function`
+
 #### `fio_sha1_len`
 
 ```c
@@ -27263,7 +27590,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-152-sha2-h"></a> `./fio-stl/152 sha2.h`
 
-14 public symbols.
+17 public symbols.
 
 ### Types
 
@@ -27425,6 +27752,43 @@ Returns a fio_u512 of which the first 48 bytes hold the SHA-384 hash.
 
 _Symbol type:_ `function`
 
+#### `fio_sha256_hmac`
+
+```c
+fio_u256 fio_sha256_hmac(const void *key, uint64_t key_len, const void *msg, uint64_t msg_len)
+```
+
+HMAC-SHA256, resulting in a 32 byte authentication code.
+
+Keys longer than the 64 byte block size are hashed first (per RFC 2104).
+
+_Symbol type:_ `function`
+
+#### `fio_sha512_hmac`
+
+```c
+fio_u512 fio_sha512_hmac(const void *key, uint64_t key_len, const void *msg, uint64_t msg_len)
+```
+
+HMAC-SHA512, resulting in a 64 byte authentication code.
+
+Keys longer than the 128 byte block size are hashed first (per RFC 2104).
+
+_Symbol type:_ `function`
+
+#### `fio_sha384_hmac`
+
+```c
+fio_u512 fio_sha384_hmac(const void *key, uint64_t key_len, const void *msg, uint64_t msg_len)
+```
+
+HMAC-SHA-384, resulting in a 48 byte authentication code.
+
+Returns a fio_u512 of which the first 48 bytes hold the HMAC-SHA-384 code.
+NOTE: HMAC-SHA-384 is NOT an HMAC-SHA-512 truncated to 48 bytes.
+
+_Symbol type:_ `function`
+
 -----------------------------------------------------
 
 ## <a id="fio-stl-152-sha2z-hkdf-h"></a> `./fio-stl/152 sha2z hkdf.h`
@@ -27458,7 +27822,7 @@ _Symbol type:_ `macro`
 #### `fio_hkdf_extract`
 
 ```c
-void fio_hkdf_extract(void *restrict prk, const void *restrict salt, size_t salt_len, const void *restrict ikm, size_t ikm_len, int use_sha384)
+int fio_hkdf_extract(void *restrict prk, const void *restrict salt, size_t salt_len, const void *restrict ikm, size_t ikm_len, int use_sha384)
 ```
 
 HKDF-Extract: PRK = HMAC-Hash(salt, IKM)
@@ -27469,16 +27833,19 @@ Extracts a pseudorandom key (PRK) from input keying material (IKM).
 - `prk` - Output buffer (32 bytes for SHA-256, 48 for SHA-384)
 - `salt` - Optional salt (if NULL, uses zeros of hash length)
 - `salt_len` - Salt length in bytes
-- `ikm` - Input keying material
+- `ikm` - Input keying material (may be NULL only if `ikm_len` is 0)
 - `ikm_len` - IKM length in bytes
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
+
+**Returns:**
+- 0 on success; -1 (PRK untouched) if `prk` is NULL or `ikm` is NULL with a non-zero `ikm_len`.
 
 _Symbol type:_ `function`
 
 #### `fio_hkdf_expand`
 
 ```c
-void fio_hkdf_expand(void *restrict okm, size_t okm_len, const void *restrict prk, size_t prk_len, const void *restrict info, size_t info_len, int use_sha384)
+int fio_hkdf_expand(void *restrict okm, size_t okm_len, const void *restrict prk, size_t prk_len, const void *restrict info, size_t info_len, int use_sha384)
 ```
 
 HKDF-Expand: OKM = HKDF-Expand(PRK, info, L)
@@ -27488,18 +27855,21 @@ Expands a pseudorandom key (PRK) into output keying material (OKM).
 **Parameters:**
 - `okm` - Output keying material buffer
 - `okm_len` - Desired output length (max 255 * hash_len)
-- `prk` - Pseudorandom key from Extract (32 or 48 bytes)
+- `prk` - Pseudorandom key from Extract (at least hash_len bytes)
 - `prk_len` - PRK length (32 for SHA-256, 48 for SHA-384)
-- `info` - Optional context/application info
+- `info` - Optional context/application info (NULL is empty info)
 - `info_len` - Info length in bytes
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
+
+**Returns:**
+- 0 on success; -1 (OKM untouched) if `okm_len > 255 * hash_len`, `prk_len < hash_len`, or a required pointer is NULL.
 
 _Symbol type:_ `function`
 
 #### `fio_hkdf`
 
 ```c
-void fio_hkdf(void *restrict okm, size_t okm_len, const void *restrict salt, size_t salt_len, const void *restrict ikm, size_t ikm_len, const void *restrict info, size_t info_len, int use_sha384)
+int fio_hkdf(void *restrict okm, size_t okm_len, const void *restrict salt, size_t salt_len, const void *restrict ikm, size_t ikm_len, const void *restrict info, size_t info_len, int use_sha384)
 ```
 
 Combined HKDF (Extract + Expand) - RFC 5869 Section 2.
@@ -27511,11 +27881,14 @@ Derives keying material from input keying material using HKDF.
 - `okm_len` - Desired output length (max 255 * hash_len)
 - `salt` - Optional salt (if NULL, uses zeros of hash length)
 - `salt_len` - Salt length in bytes
-- `ikm` - Input keying material
+- `ikm` - Input keying material (may be NULL only if `ikm_len` is 0)
 - `ikm_len` - IKM length in bytes
-- `info` - Optional context/application info
+- `info` - Optional context/application info (NULL is empty info)
 - `info_len` - Info length in bytes
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
+
+**Returns:**
+- 0 on success; -1 (OKM untouched) on invalid arguments.
 
 _Symbol type:_ `function`
 
@@ -27719,7 +28092,7 @@ _Symbol type:_ `function`
 #### `fio_aes128_gcm_enc`
 
 ```c
-void fio_aes128_gcm_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, size_t adlen, const void *key, const void *nonce)
+int fio_aes128_gcm_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, size_t adlen, const void *key, const void *nonce)
 ```
 
 Performs in-place AES-128-GCM encryption with authentication.
@@ -27729,6 +28102,12 @@ Performs in-place AES-128-GCM encryption with authentication.
 * `nonce`  MUST point to a 96 bit nonce (12 Bytes).
 * `ad`     MAY be omitted, will NOT be encrypted.
 * `data`   MAY be omitted, WILL be encrypted.
+
+A key/nonce pair MUST NEVER be reused. `len` MUST NOT exceed 2^36 - 32 bytes
+and `adlen` MUST be below 2^61 bytes. `mac`, `key` and `nonce` MUST NOT be
+NULL; `data` / `ad` MAY be NULL only when their length is 0. Otherwise
+encryption fails safely: returns `-1` and zeroes the (non-NULL) `mac` and
+`data` (no plaintext or valid tag is produced). Returns `0` on success.
 
 _Symbol type:_ `function`
 
@@ -27746,14 +28125,17 @@ Performs in-place AES-128-GCM decryption with authentication verification.
 * `ad`     MAY be omitted ONLY IF originally omitted.
 * `data`   MAY be omitted, WILL be decrypted.
 
-Returns `-1` on error (authentication failed).
+Returns `-1` on error (authentication failed, `len` / `adlen` exceed the
+GCM limits of 2^36 - 32 / 2^61 - 1 bytes, `mac` / `key` / `nonce` is NULL,
+or `data` / `ad` is NULL with a non-zero length). `data` is untouched on
+error.
 
 _Symbol type:_ `function`
 
 #### `fio_aes256_gcm_enc`
 
 ```c
-void fio_aes256_gcm_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, size_t adlen, const void *key, const void *nonce)
+int fio_aes256_gcm_enc(void *restrict mac, void *restrict data, size_t len, const void *ad, size_t adlen, const void *key, const void *nonce)
 ```
 
 Performs in-place AES-256-GCM encryption with authentication.
@@ -27763,6 +28145,12 @@ Performs in-place AES-256-GCM encryption with authentication.
 * `nonce`  MUST point to a 96 bit nonce (12 Bytes).
 * `ad`     MAY be omitted, will NOT be encrypted.
 * `data`   MAY be omitted, WILL be encrypted.
+
+A key/nonce pair MUST NEVER be reused. `len` MUST NOT exceed 2^36 - 32 bytes
+and `adlen` MUST be below 2^61 bytes. `mac`, `key` and `nonce` MUST NOT be
+NULL; `data` / `ad` MAY be NULL only when their length is 0. Otherwise
+encryption fails safely: returns `-1` and zeroes the (non-NULL) `mac` and
+`data` (no plaintext or valid tag is produced). Returns `0` on success.
 
 _Symbol type:_ `function`
 
@@ -27780,7 +28168,10 @@ Performs in-place AES-256-GCM decryption with authentication verification.
 * `ad`     MAY be omitted ONLY IF originally omitted.
 * `data`   MAY be omitted, WILL be decrypted.
 
-Returns `-1` on error (authentication failed).
+Returns `-1` on error (authentication failed, `len` / `adlen` exceed the
+GCM limits of 2^36 - 32 / 2^61 - 1 bytes, `mac` / `key` / `nonce` is NULL,
+or `data` / `ad` is NULL with a non-zero length). `data` is untouched on
+error.
 
 _Symbol type:_ `function`
 
@@ -27865,6 +28256,9 @@ int fio_ed25519_verify(const uint8_t signature[64], const void *message, size_t 
 Verifies an Ed25519 signature.
 
 Returns 0 on success (valid signature), -1 on failure (invalid signature).
+
+Strict: rejects non-canonical / small-order public keys, small-order R and
+S >= L (no identity-key forgeries, no malleability).
 
 _Symbol type:_ `function`
 
@@ -27960,7 +28354,7 @@ Total ciphertext size = message_len + 48 bytes
 - `recipient_pk` - The recipient's X25519 public key (32 bytes)
 
 **Returns:**
-- 0 on success, -1 on failure
+- 0 on success, -1 on failure (output is zeroed on cipher failure)
 
 _Symbol type:_ `function`
 
@@ -27980,7 +28374,7 @@ Decrypts a message using the recipient's X25519 secret key.
 - `recipient_sk` - The recipient's X25519 secret key (32 bytes)
 
 **Returns:**
-- 0 on success, -1 on failure (authentication failed or invalid input)
+- 0 on success, -1 on failure (authentication failed or invalid input; plaintext output is zeroed on authentication failure)
 
 _Symbol type:_ `function`
 
@@ -27988,7 +28382,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-154-p256-h"></a> `./fio-stl/154 p256.h`
 
-5 public symbols.
+6 public symbols.
 
 ### Functions
 
@@ -28004,11 +28398,11 @@ Verifies an ECDSA P-256 signature.
 - `sig` - DER-encoded signature (SEQUENCE { r INTEGER, s INTEGER })
 - `sig_len` - Length of signature in bytes
 - `msg_hash` - SHA-256 hash of the message (32 bytes)
-- `pubkey` - Uncompressed public key (65 bytes: 0x04 || x || y)
-- `pubkey_len` - Length of public key (must be 65)
+- `pubkey` - SEC 1 public key: uncompressed (65 bytes: 0x04 || x || y) or compressed (33 bytes: 0x02/0x03 || x)
+- `pubkey_len` - Length of public key (65 or 33)
 
 **Returns:**
-- 0 on success (valid signature), -1 on failure (invalid signature)
+- 0 on success (valid signature), -1 on failure (invalid signature or an invalid / off-curve public key)
 
 _Symbol type:_ `function`
 
@@ -28069,6 +28463,25 @@ Generates a P-256 keypair for ECDHE key exchange.
 
 _Symbol type:_ `function`
 
+#### `fio_p256_public_key`
+
+```c
+int fio_p256_public_key(uint8_t public_key[65], const uint8_t secret_key[32])
+```
+
+Derives the P-256 public key for an existing secret key (`Q = d * G`).
+
+Uses the constant-time scalar multiplication ladder.
+
+**Parameters:**
+- `public_key` - Output: 65-byte uncompressed public key (0x04 || x || y)
+- `secret_key` - 32-byte secret key (scalar, big-endian), in [1, n-1]
+
+**Returns:**
+- 0 on success, -1 on NULL arguments or an out-of-range scalar (`public_key`, when not NULL, is zeroed on failure).
+
+_Symbol type:_ `function`
+
 #### `fio_p256_shared_secret`
 
 ```c
@@ -28092,7 +28505,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-154-p384-h"></a> `./fio-stl/154 p384.h`
 
-2 public symbols.
+5 public symbols.
 
 ### Functions
 
@@ -28108,11 +28521,11 @@ Verifies an ECDSA P-384 signature.
 - `sig` - DER-encoded signature (SEQUENCE { r INTEGER, s INTEGER })
 - `sig_len` - Length of signature in bytes
 - `msg_hash` - SHA-384 hash of the message (48 bytes)
-- `pubkey` - Uncompressed public key (97 bytes: 0x04 || x || y)
-- `pubkey_len` - Length of public key (must be 97)
+- `pubkey` - SEC 1 public key: uncompressed (97 bytes: 0x04 || x || y) or compressed (49 bytes: 0x02/0x03 || x)
+- `pubkey_len` - Length of public key (97 or 49)
 
 **Returns:**
-- 0 on success (valid signature), -1 on failure (invalid signature)
+- 0 on success (valid signature), -1 on failure (invalid signature or an invalid / off-curve public key)
 
 _Symbol type:_ `function`
 
@@ -28133,6 +28546,62 @@ Verifies an ECDSA P-384 signature with raw r,s values.
 
 **Returns:**
 - 0 on success (valid signature), -1 on failure (invalid signature)
+
+_Symbol type:_ `function`
+
+#### `fio_ecdsa_p384_sign`
+
+```c
+int fio_ecdsa_p384_sign(uint8_t *sig, size_t *sig_len, size_t sig_capacity, const uint8_t msg_hash[48], const uint8_t secret_key[48])
+```
+
+Signs a message hash using ECDSA P-384 (random nonce).
+
+**Parameters:**
+- `sig` - Output: DER-encoded signature (max 104 bytes)
+- `sig_len` - Output: actual signature length
+- `sig_capacity` - Capacity of signature buffer (must be >= 104)
+- `msg_hash` - SHA-384 hash of the message (48 bytes)
+- `secret_key` - 48-byte secret key (scalar, big-endian), in [1, n-1]
+
+**Returns:**
+- 0 on success, -1 on failure (NULL arguments, a small buffer or an out-of-range secret key)
+
+_Symbol type:_ `function`
+
+#### `fio_p384_public_key`
+
+```c
+int fio_p384_public_key(uint8_t public_key[97], const uint8_t secret_key[48])
+```
+
+Derives the P-384 public key for an existing secret key (`Q = d * G`).
+
+Uses the constant-time scalar multiplication ladder.
+
+**Parameters:**
+- `public_key` - Output: 97-byte uncompressed public key (0x04 || x || y)
+- `secret_key` - 48-byte secret key (scalar, big-endian), in [1, n-1]
+
+**Returns:**
+- 0 on success, -1 on NULL arguments or an out-of-range scalar (`public_key`, when not NULL, is zeroed on failure).
+
+_Symbol type:_ `function`
+
+#### `fio_p384_keypair`
+
+```c
+int fio_p384_keypair(uint8_t secret_key[48], uint8_t public_key[97])
+```
+
+Generates a random P-384 keypair.
+
+**Parameters:**
+- `secret_key` - Output: 48-byte secret key (scalar, big-endian)
+- `public_key` - Output: 97-byte uncompressed public key (0x04 || x || y)
+
+**Returns:**
+- 0 on success, -1 on failure
 
 _Symbol type:_ `function`
 
@@ -28243,6 +28712,15 @@ const uint8_t *fio_der_parse(fio_der_element_s *elem, const uint8_t *data, size_
 
 Parse one ASN.1 element from DER-encoded data.
 
+Parses exactly one element and returns the position after it, so callers
+decide whether trailing data is an error (stop-at-boundary). Lenient where
+the decode is unambiguous: non-minimal definite lengths and long-form tag
+numbers are accepted (DER canonicality of signed data, if required, is the
+caller's check, e.g. via `fio_der_element_total_len` vs. the minimal
+header size). Rejected: indefinite lengths, truncated data, tag numbers
+above 255 (not representable in `tag_number`) and lengths overflowing
+`size_t`.
+
 **Parameters:**
 - `elem` - Output structure to fill with parsed element info
 - `data` - Pointer to DER-encoded data
@@ -28278,9 +28756,13 @@ int fio_der_parse_integer(const fio_der_element_s *elem, uint64_t *value)
 
 Parse an ASN.1 INTEGER element.
 
-For small integers (<= 64-bit), sets *value.
-For large integers (RSA modulus), use elem->data/len directly.
-Leading zero bytes for positive numbers are handled correctly.
+Lenient: non-minimal encodings (redundant leading 0x00 / 0xFF bytes) are
+accepted; empty content is rejected. Callers that need DER canonicality
+(e.g. signed structures) must check `elem->data` themselves.
+
+If `value` is set, the INTEGER must be non-negative and fit in 64 bits
+(leading zero bytes are skipped). For large integers (RSA modulus), pass
+NULL and use elem->data/len directly (sign is not checked then).
 
 **Parameters:**
 - `elem` - Parsed element (must be INTEGER type)
@@ -28337,6 +28819,11 @@ int fio_der_parse_time(const fio_der_element_s *elem, int64_t *unix_time)
 ```
 
 Parse an ASN.1 time (UTC Time or Generalized Time) to Unix timestamp.
+
+Lenient (BER / X.680 forms): minutes and seconds are optional, a fraction
+of a second ('.' or ',') is truncated, and the zone may be 'Z' or +hhmm /
+-hhmm. Rejected: local time (no zone), fractions of minutes/hours,
+impossible dates and trailing data (the time must fill the element).
 
 **Parameters:**
 - `elem` - Parsed element (must be UTC_TIME or GENERALIZED_TIME type)
@@ -28440,6 +28927,12 @@ inline int fio_der_is_tag(const fio_der_element_s *elem, uint8_t tag)
 
 Check if an element is a specific tag type.
 
+Compares the full identifier octet (class, constructed bit, tag number).
+Universal tag numbers (e.g., `FIO_DER_INTEGER`, `FIO_DER_SEQUENCE`) imply
+the DER form: SEQUENCE, SET, EXTERNAL and EMBEDDED PDV are constructed, all
+other universal types are primitive. Full identifier bytes (e.g., `0x30`,
+`FIO_DER_CONTEXT_0`) are compared as-is.
+
 **Parameters:**
 - `elem` - Parsed element
 - `tag` - Expected tag (e.g., FIO_DER_INTEGER)
@@ -28455,11 +28948,18 @@ _Symbol type:_ `function`
 inline int fio_der_is_context_tag(const fio_der_element_s *elem, uint8_t tag_num)
 ```
 
-Check if an element is a context-specific tag.
+Check if an element is a context-specific tag `[tag_num]`, in either form.
+
+Context tags may be EXPLICIT (constructed) or IMPLICIT (primitive, or
+constructed when the underlying type is), so the form isn't implied by the
+number and this check ignores the constructed bit. When the form matters
+(it usually does, for DER), compare the full identifier with
+`fio_der_is_tag` instead, e.g. `fio_der_is_tag(e, FIO_DER_CONTEXT_0)` for
+constructed `[0]` (0xA0) or `fio_der_is_tag(e, 0x82)` for primitive `[2]`.
 
 **Parameters:**
 - `elem` - Parsed element
-- `tag_num` - Context tag number (0-31)
+- `tag_num` - Context tag number (0-255, high-tag form supported)
 
 **Returns:**
 - 1 if match, 0 otherwise
@@ -28555,6 +29055,9 @@ RSA public key for signature verification.
 The modulus (n) and exponent (e) are stored as big-endian byte arrays.
 This matches the DER encoding used in X.509 certificates.
 
+Leading zero bytes are ignored. Keys are rejected (-1) unless n is odd and
+256..512 bytes long and e is odd, >= 3 and at most 64 bits.
+
 _Symbol type:_ `type`
 
 #### `fio_rsa_privkey_s`
@@ -28590,8 +29093,10 @@ may be provided. When CRT parameters are available, signing uses CRT with
 message blinding for better side-channel resistance. When only n and d are
 available, signing falls back to a non-CRT (still constant-time) path.
 
-All optional fields are indicated by a non-zero length. Missing CRT
-parameters may be derived from p, q, and d when p and q are present.
+All optional fields are indicated by a non-zero length. CRT signing requires
+all five CRT fields and e. When e is provided, every signature is verified
+before it is returned, so faults or inconsistent keys return -1 instead of
+emitting a signature.
 
 _Symbol type:_ `type`
 
@@ -28671,14 +29176,14 @@ This implementation uses:
 
 **Parameters:**
 - `signature` - Output buffer for signature (must be key->n_len bytes)
-- `sig_len` - Output: actual signature length (equals key->n_len)
+- `sig_len` - Output: signature length (modulus length without leading zeros); unchanged on error
 - `msg_hash` - Pre-computed hash of the message to sign
 - `hash_len` - Hash length (32, 48, or 64 bytes)
 - `hash_alg` - Hash algorithm (FIO_RSA_HASH_SHA256, etc.)
 - `key` - RSA private key
 
 **Returns:**
-- 0 on success, -1 on error
+- 0 on success, -1 on error (invalid input or key, failed self-check)
 
 _Symbol type:_ `function`
 
@@ -28817,7 +29322,7 @@ int fio_mlkem768_encaps(uint8_t ct[1088], uint8_t ss[32], const uint8_t pk[1184]
 Encapsulate: generate ciphertext and shared secret from public key.
 
 Uses system CSPRNG for randomness.
-Returns 0 on success, -1 on failure.
+Returns 0 on success, -1 on failure (NULL or malformed pk: coefficient >= q).
 
 _Symbol type:_ `function`
 
@@ -28830,7 +29335,7 @@ int fio_mlkem768_encaps_derand(uint8_t ct[1088], uint8_t ss[32], const uint8_t p
 Encapsulate with deterministic randomness.
 
 The coins buffer must be exactly 32 bytes.
-Returns 0 on success, -1 on failure.
+Returns 0 on success, -1 on failure (NULL or malformed pk: coefficient >= q).
 
 _Symbol type:_ `function`
 
@@ -28847,6 +29352,9 @@ shared secret is returned (derived from the secret key and ciphertext)
 rather than an error, preventing chosen-ciphertext attacks.
 
 Returns 0 on success (always succeeds for well-formed inputs).
+
+`sk` is trusted (from fio_mlkem768_keypair*); the FIPS 203 H(ek) key check
+is not repeated per call - validate imported keys separately.
 
 _Symbol type:_ `function`
 
@@ -28903,9 +29411,69 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-156-x509-h"></a> `./fio-stl/156 x509.h`
 
-57 public symbols.
+71 public symbols.
 
 ### Macros
+
+#### `FIO_X509_EXT_EKU`
+
+```c
+#define FIO_X509_EXT_EKU              0x01 /**< Extended Key Usage present */
+```
+
+`fio_x509_cert_s.ext_flags` bits (set by fio_x509_parse)
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_EXT_EKU_SERVER`
+
+```c
+#define FIO_X509_EXT_EKU_SERVER       0x02 /**< EKU lists serverAuth */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_EXT_EKU_CLIENT`
+
+```c
+#define FIO_X509_EXT_EKU_CLIENT       0x04 /**< EKU lists clientAuth */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_EXT_EKU_ANY`
+
+```c
+#define FIO_X509_EXT_EKU_ANY          0x08 /**< EKU lists anyExtendedKeyUsage */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_EXT_UNKNOWN_CRITICAL`
+
+```c
+#define FIO_X509_EXT_UNKNOWN_CRITICAL 0x10 /**< unrecognized critical ext. */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_PATH_LEN_NONE`
+
+```c
+#define FIO_X509_PATH_LEN_NONE 0xFF
+```
+
+`fio_x509_cert_s.path_len` value when no pathLenConstraint is present
+
+_Symbol type:_ `macro`
 
 #### `FIO_X509_OID_SHA256_WITH_RSA`
 
@@ -29000,6 +29568,50 @@ _Symbol type:_ `macro`
 ```c
 #define FIO_X509_OID_ED448   \
   ((fio_u128){.u8 = {0x2B, 0x65, 0x71, [15] = 3}}) /* 1.3.101.113 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_MGF1`
+
+```c
+#define FIO_X509_OID_MGF1   \
+  ((fio_u128){.u8 = {0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x08, [15] = 9}}) /* 1.2.840.113549.1.1.8 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SHA256`
+
+```c
+#define FIO_X509_OID_SHA256   \
+  ((fio_u128){.u8 = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, [15] = 9}}) /* 2.16.840.1.101.3.4.2.1 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SHA384`
+
+```c
+#define FIO_X509_OID_SHA384   \
+  ((fio_u128){.u8 = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, [15] = 9}}) /* 2.16.840.1.101.3.4.2.2 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_SHA512`
+
+```c
+#define FIO_X509_OID_SHA512   \
+  ((fio_u128){.u8 = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, [15] = 9}}) /* 2.16.840.1.101.3.4.2.3 */
 ```
 
 
@@ -29116,6 +29728,17 @@ _Symbol type:_ `macro`
 
 _Symbol type:_ `macro`
 
+#### `FIO_X509_OID_NAME_CONSTRAINTS`
+
+```c
+#define FIO_X509_OID_NAME_CONSTRAINTS   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x1E, [15] = 3}}) /* 2.5.29.30 */
+```
+
+
+
+_Symbol type:_ `macro`
+
 #### `FIO_X509_OID_BASIC_CONSTRAINTS`
 
 ```c
@@ -29187,6 +29810,17 @@ _Symbol type:_ `macro`
 ```c
 #define FIO_X509_OID_EKU_CLIENT_AUTH   \
   ((fio_u128){.u8 = {0x2B, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x02, [15] = 8}}) /* 1.3.6.1.5.5.7.3.2 */
+```
+
+
+
+_Symbol type:_ `macro`
+
+#### `FIO_X509_OID_EKU_ANY`
+
+```c
+#define FIO_X509_OID_EKU_ANY   \
+  ((fio_u128){.u8 = {0x55, 0x1D, 0x25, 0x00, [15] = 4}}) /* 2.5.29.37.0 */
 ```
 
 
@@ -29358,10 +29992,28 @@ FIO_X509_ERR_NO_TRUST_ANCHOR = -7, /**< Certificate not in trust store */
 FIO_X509_ERR_HOSTNAME_MISMATCH = -8, /**< Hostname doesn't match cert */
 FIO_X509_ERR_EMPTY_CHAIN = -9, /**< Empty certificate chain */
 FIO_X509_ERR_CHAIN_TOO_LONG = -10, /**< Chain exceeds maximum depth */
+FIO_X509_ERR_KEY_USAGE = -11, /**< (Extended) Key Usage forbids this use */
+FIO_X509_ERR_PATH_LENGTH = -12, /**< Basic Constraints pathLen exceeded */
+FIO_X509_ERR_NAME_CONSTRAINTS = -13, /**< Name outside CA's constraints */
+FIO_X509_ERR_CRITICAL_EXTENSION = -14, /**< Unknown critical extension */
 } fio_x509_error_e
 ```
 
 X.509 chain validation error codes
+
+_Symbol type:_ `type`
+
+#### `fio_x509_purpose_e`
+
+```c
+typedef enum {
+FIO_X509_PURPOSE_TLS = 0, /**< TLS server OR client authentication */
+FIO_X509_PURPOSE_SERVER = 1, /**< TLS server authentication (serverAuth) */
+FIO_X509_PURPOSE_CLIENT = 2, /**< TLS client authentication (clientAuth) */
+} fio_x509_purpose_e
+```
+
+Certificate purpose for chain validation (Extended Key Usage).
 
 _Symbol type:_ `type`
 
@@ -29414,7 +30066,9 @@ fio_ubuf_info_s n; /**< RSA modulus (big-endian) */
 fio_ubuf_info_s e; /**< RSA exponent (big-endian) */
 } rsa;
 struct {
-fio_ubuf_info_s point; /**< Uncompressed EC point (04 || x || y) */
+/** SEC 1 EC point: uncompressed (04 || x || y) or compressed
+* (02/03 || x); not validated by the parser. */
+fio_ubuf_info_s point;
 } ecdsa;
 struct {
 fio_ubuf_info_s key; /**< 32-byte Ed25519 public key */
@@ -29430,6 +30084,8 @@ fio_buf_info_s san_dns;
 fio_ubuf_info_s san_ext;
 /** Subject Alternative Name: first IP address (if present) */
 fio_ubuf_info_s san_ip;
+/** Name Constraints extension value (raw NameConstraints SEQUENCE TLV) */
+fio_ubuf_info_s name_constraints;
 /** Validity period (Unix timestamps) */
 int64_t not_before;
 int64_t not_after;
@@ -29457,6 +30113,11 @@ uint8_t version;
 uint8_t is_ca;
 /** Key Usage extension present */
 uint8_t has_key_usage;
+/** Basic Constraints pathLenConstraint (FIO_X509_PATH_LEN_NONE if absent;
+* values above 254 are clamped to 254) */
+uint8_t path_len;
+/** Extension flags (FIO_X509_EXT_* bits) */
+uint8_t ext_flags;
 }
 ```
 
@@ -29512,7 +30173,7 @@ fio_buf_info_s ou; /**< Subject Organizational Unit (optional) */
 fio_buf_info_s country; /**< Subject Country (optional, 2 chars) */
 int64_t not_before; /**< Validity start (Unix timestamp, 0 = now) */
 int64_t not_after; /**< Validity end (Unix timestamp, 0 = +1 year) */
-const fio_buf_info_s *san_dns; /**< Subject Alternative Names (DNS) */
+const fio_buf_info_s *san_dns; /**< SAN DNS names (IP literal: iPAddress) */
 size_t san_dns_count; /**< Number of SAN DNS entries */
 int is_ca; /**< Set CA:TRUE in BasicConstraints */
 uint16_t key_usage; /**< Key Usage bits (0 = default for type) */
@@ -29558,6 +30219,14 @@ void fio_x509_fingerprint(fio_x509_cert_s *cert)
 
 Computes the SHA-256 fingerprint of the certificate's DER data, storing
 the raw 32-byte hash in `cert->fingerprint`.
+
+This is the standard fingerprint: it identifies the exact certificate bytes
+(`cert->der`), not an issuer/serial or public-key identity. One signed
+certificate may have several valid encodings (non-minimal headers outside
+the signed TBS, or an ECDSA signature (r, s) that is also valid as
+(r, n - s)), so do not blocklist by fingerprint;
+use issuer + serial or an SPKI hash. Pinning (allow-listing) by fingerprint
+fails closed.
 
 Call after fio_x509_parse. This is a lazy (on-demand) operation so that
 parsing alone never pays the hashing cost.
@@ -29643,8 +30312,14 @@ Validation performs:
   3. Verify hostname matches end-entity certificate (if hostname provided)
   4. Verify each certificate's signature using the next certificate's key
   5. Verify issuer DNs match subject DNs in the chain
-  6. Verify intermediate/root certificates have CA:TRUE
-  7. Verify the chain terminates at a trusted root (if trust store provided)
+  6. Verify issuers are CAs (CA:TRUE, keyCertSign when Key Usage is
+     present, pathLenConstraint and DNS/IP/directoryName Name Constraints)
+  7. Reject unrecognized critical extensions; enforce the leaf's
+     digitalSignature Key Usage and the Extended Key Usage purpose
+  8. Verify the chain terminates at a trusted root (if trust store provided)
+
+The purpose is FIO_X509_PURPOSE_SERVER when `hostname` is set, otherwise
+FIO_X509_PURPOSE_TLS (see fio_x509_verify_chain_purpose).
 
 **Parameters:**
 - `certs` - Array of DER-encoded certificate views
@@ -29658,15 +30333,29 @@ Validation performs:
 
 _Symbol type:_ `function`
 
+#### `fio_x509_verify_chain_purpose`
+
+```c
+int fio_x509_verify_chain_purpose(const fio_ubuf_info_s *certs, size_t cert_count, const char *hostname, int64_t current_time, fio_x509_trust_store_s *trust_store, fio_x509_purpose_e purpose)
+```
+
+Same as fio_x509_verify_chain, with an explicit Extended Key Usage purpose.
+
+_Symbol type:_ `function`
+
 #### `fio_x509_is_trusted`
 
 ```c
 int fio_x509_is_trusted(const fio_x509_cert_s *cert, fio_x509_trust_store_s *trust_store)
 ```
 
-Check if a certificate is in the trust store.
+Check if a certificate is trusted by the trust store.
 
-Comparison is done by matching subject DN.
+Trusted means the certificate is byte-identical to a trust anchor, or a
+trust anchor whose subject DN equals the certificate's issuer DN verifies
+the certificate's signature. DN equality alone never establishes trust.
+No validity, purpose or chain policy is checked; prefer
+fio_x509_verify_chain for trust decisions.
 
 **Parameters:**
 - `cert` - Certificate to check
@@ -29691,6 +30380,10 @@ TLS 1.3 Certificate message format (RFC 8446):
     CertificateEntry:
       cert_data<1..2^24-1>
       extensions<0..2^16-1>
+
+The whole message must be consumed exactly (no trailing bytes). A message
+holding more than `max_entries` certificates is an error (never a silently
+truncated chain).
 
 **Parameters:**
 - `entries` - Output array for certificate entries
@@ -29796,7 +30489,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-157-pem-h"></a> `./fio-stl/157 pem.h`
 
-8 public symbols.
+9 public symbols.
 
 ### Types
 
@@ -29808,6 +30501,7 @@ FIO_PEM_KEY_UNKNOWN = 0,
 FIO_PEM_KEY_RSA = 1,
 FIO_PEM_KEY_ECDSA_P256 = 2,
 FIO_PEM_KEY_ED25519 = 3,
+FIO_PEM_KEY_ECDSA_P384 = 4,
 } fio_pem_key_type_e
 ```
 
@@ -29856,9 +30550,20 @@ size_t qInv_len;
 } rsa;
 struct {
 uint8_t private_key[32]; /**< P-256 scalar (32 bytes) */
-uint8_t public_key[65]; /**< Uncompressed point (optional, can derive) */
+/** Embedded SEC 1 public key (optional, can derive): the first
+* `public_key_len` bytes, 65 (04 || x || y) or 33 (02/03 || x). */
+uint8_t public_key[65];
 int has_public_key; /**< 1 if public_key is populated */
+size_t public_key_len; /**< 65 or 33 when populated, otherwise 0 */
 } ecdsa_p256;
+struct {
+uint8_t private_key[48]; /**< P-384 scalar (48 bytes) */
+/** Embedded SEC 1 public key (optional, can derive): the first
+* `public_key_len` bytes, 97 (04 || x || y) or 49 (02/03 || x). */
+uint8_t public_key[97];
+int has_public_key; /**< 1 if public_key is populated */
+size_t public_key_len; /**< 97 or 49 when populated, otherwise 0 */
+} ecdsa_p384;
 struct {
 uint8_t private_key[32]; /**< Ed25519 seed (32 bytes) */
 uint8_t public_key[32]; /**< Ed25519 public key (optional) */
@@ -29885,6 +30590,10 @@ Parse a single PEM block from data.
 Finds the next -----BEGIN <label>----- and -----END <label>----- markers,
 base64 decodes the content between them, and returns the DER data.
 
+The Base64 body may use the standard or URL-safe alphabet, any whitespace
+and optional padding; undecodable bytes (e.g. encrypted-PEM headers) or
+data after padding are rejected.
+
 **Parameters:**
 - `out` - Output structure to fill with parsed PEM block info
 - `der_buf` - Buffer to store decoded DER data (caller-provided)
@@ -29893,7 +30602,7 @@ base64 decodes the content between them, and returns the DER data.
 - `pem_len` - Length of PEM data
 
 **Returns:**
-- Number of bytes consumed from pem_data, or 0 on error
+- Number of bytes consumed from pem_data (through the END marker and any whitespace following it), or 0 on error
 
 _Symbol type:_ `function`
 
@@ -29907,6 +30616,9 @@ Parse certificate from PEM file content.
 
 Handles "CERTIFICATE" label and parses the X.509 certificate.
 
+On success the certificate owns a heap copy of its DER data (`cert->der`);
+release it with `fio_pem_certificate_free`. On error nothing is retained.
+
 **Parameters:**
 - `cert` - Output certificate structure (from fio_x509.h)
 - `pem_data` - PEM-encoded certificate data
@@ -29914,6 +30626,19 @@ Handles "CERTIFICATE" label and parses the X.509 certificate.
 
 **Returns:**
 - 0 on success, -1 on error
+
+_Symbol type:_ `function`
+
+#### `fio_pem_certificate_free`
+
+```c
+void fio_pem_certificate_free(fio_x509_cert_s *cert)
+```
+
+Releases the DER buffer owned by a certificate that was successfully
+parsed with `fio_pem_parse_certificate` and zeroes the structure.
+
+Do NOT call this for certificates parsed with `fio_x509_parse` directly.
 
 _Symbol type:_ `function`
 
@@ -29929,6 +30654,10 @@ Supports:
 - "PRIVATE KEY" (PKCS#8 PrivateKeyInfo)
 - "RSA PRIVATE KEY" (PKCS#1 RSAPrivateKey)
 - "EC PRIVATE KEY" (SEC1 ECPrivateKey)
+
+EC keys may be P-256 (`FIO_PEM_KEY_ECDSA_P256`) or P-384
+(`FIO_PEM_KEY_ECDSA_P384`); the curve comes from the namedCurve OID or,
+when a legacy SEC1 key omits it, from the scalar length (32 / 48 bytes).
 
 **Parameters:**
 - `key` - Output private key structure
@@ -30013,7 +30742,7 @@ fio_buf_info_s ad;
 uint32_t t_cost;
 /** Memory cost in KiB (minimum 8*parallelism). */
 uint32_t m_cost;
-/** Degree of parallelism (number of lanes, minimum 1). */
+/** Degree of parallelism (number of lanes, 1 to 2^24-1). */
 uint32_t parallelism;
 /** Desired output (tag) length in bytes (minimum 4, default 32). */
 uint32_t outlen;
@@ -30040,6 +30769,10 @@ Supports Argon2d, Argon2i, and Argon2id variants.
 Output is written to the returned buffer (up to 64 bytes via fio_u512).
 For outlen > 64, use fio_argon2_hash() instead.
 
+On error (invalid arguments, allocation failure) the result is all zeros.
+When the output is used as a key (KDF), use fio_argon2_hash() and check its
+return value.
+
 Use `fio_ct_is_eq` to compare output hashes in constant time.
 
 _Symbol type:_ `function`
@@ -30063,8 +30796,12 @@ int fio_argon2_hash(void *out, fio_argon2_args_s args)
 ```
 
 Computes Argon2 password hash into a caller-provided buffer.
-Supports arbitrary output lengths (minimum 4 bytes).
-Returns 0 on success, -1 on error.
+Supports arbitrary output lengths (minimum 4 bytes; 0 selects 32). `out`
+must hold `outlen` bytes.
+
+Returns 0 on success, -1 on error: NULL `out`, `outlen` 1-3, invalid `type`,
+`parallelism` above 2^24-1, an input longer than 2^32-1 bytes, a memory
+matrix exceeding the address space, or allocation failure (`out` untouched).
 
 _Symbol type:_ `function`
 
@@ -30128,6 +30865,9 @@ Matches the reference C implementation (nPARALLEL==1, SPONGE==0, RHO==1).
 Output is written to the returned buffer (up to 512 bytes via fio_u512).
 For outlen > 64, use fio_lyra2_hash() instead.
 
+On error (invalid arguments, allocation failure) the result is all zeros.
+When the output is used as a key, use fio_lyra2_hash() and check its return.
+
 Use `fio_ct_is_eq` to compare output hashes in constant time.
 
 _Symbol type:_ `function`
@@ -30151,8 +30891,8 @@ int fio_lyra2_hash(void *out, fio_lyra2_args_s args)
 ```
 
 Computes Lyra2 password hash into a caller-provided buffer.
-Supports arbitrary output lengths.
-Returns 0 on success, -1 on error.
+Supports output lengths up to 2^32-1 bytes.
+Returns 0 on success, -1 on error (leaving `out` untouched).
 
 _Symbol type:_ `function`
 
@@ -30173,7 +30913,19 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-159-otp-h"></a> `./fio-stl/159 otp.h`
 
-7 public symbols.
+8 public symbols.
+
+### Macros
+
+#### `FIO_OTP_ERROR`
+
+```c
+#define FIO_OTP_ERROR ((uint32_t)0xFFFFFFFFUL)
+```
+
+Returned by `fio_otp` / `fio_otp_at` on error (never a valid OTP).
+
+_Symbol type:_ `macro`
 
 ### Types
 
@@ -30218,6 +30970,11 @@ inline size_t fio_otp_print_key(char *dest, uint8_t *key, size_t len)
 
 Prints out an OTP secret (big endian number) as a Byte32 encoded String.
 
+`dest` must hold `len * 2 + 1` bytes; if `key` is NULL a new 16 byte key is
+generated (`len` is ignored) and `dest` must hold 33 bytes.
+
+Returns the encoded length, or 0 on error.
+
 _Symbol type:_ `function`
 
 #### `fio_otp`
@@ -30227,6 +30984,9 @@ uint32_t fio_otp(fio_buf_info_s secret, fio_otp_settings_s settings)
 ```
 
 Returns a TOTP based on `secret` and the otp settings.
+
+Returns `FIO_OTP_ERROR` for an invalid secret encoding, a decoded secret
+longer than 128 bytes or `digits` above 10.
 
 _Symbol type:_ `function`
 
@@ -30342,11 +31102,13 @@ Decompresses Brotli-compressed data (RFC 7932).
 
 Returns:
  - On success: decompressed byte count (<= out_len).
- - On buffer too small: the REQUIRED buffer size (> out_len).
+ - On buffer too small: a required-size lower bound (> out_len).
  - On corrupt/invalid data: 0.
  - When out==NULL or out_len==0: performs a header scan summing MLEN
    values and returns the required size (0 if data is corrupt).
-   This allows callers to query the decompressed size without allocating.
+   Header-only results do not validate compressed bodies. Multiple compressed
+   meta-blocks require decoding with temporary, growing storage. Untrusted
+   streams should be decoded into a caller-bounded output buffer instead.
 
 _Symbol type:_ `function`
 
@@ -30356,7 +31118,8 @@ _Symbol type:_ `function`
 inline size_t fio_brotli_decompress_bound(size_t in_len)
 ```
 
-Conservative upper bound on decompressed size for a Brotli stream.
+Practical allocation estimate, NOT an upper bound for arbitrary streams.
+Use bounded decoding or fio_brotli_decompress(NULL, 0, ...) for sizing.
 
 _Symbol type:_ `function`
 
@@ -30426,7 +31189,7 @@ _Symbol type:_ `function`
 #### `fio_deflate_decompress_bound`
 
 ```c
-inline size_t fio_deflate_decompress_bound(size_t in_len)
+size_t fio_deflate_decompress_bound(size_t in_len)
 ```
 
 Conservative upper bound on decompressed size.
@@ -30449,7 +31212,7 @@ _Symbol type:_ `function`
 #### `fio_deflate_compress_bound`
 
 ```c
-inline size_t fio_deflate_compress_bound(size_t in_len)
+size_t fio_deflate_compress_bound(size_t in_len)
 ```
 
 Upper bound on compressed output size.
@@ -30570,7 +31333,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-190-tls13-h"></a> `./fio-stl/190 tls13.h`
 
-60 public symbols.
+61 public symbols.
 
 ### Macros
 
@@ -30733,6 +31496,16 @@ _Symbol type:_ `macro`
 ```
 
 HelloRetryRequest magic random value (RFC 8446 Section 4.1.3)
+
+_Symbol type:_ `macro`
+
+#### `FIO_TLS13_MAX_HANDSHAKE_MSG`
+
+```c
+#define FIO_TLS13_MAX_HANDSHAKE_MSG 65536
+```
+
+Largest accepted handshake message body (reassembled across records).
 
 _Symbol type:_ `macro`
 
@@ -30924,7 +31697,7 @@ fio_ubuf_info_s authorities; /* Raw CA DNs data (view into message) */
 size_t context_len; /* Context length (0-255) */
 size_t algo_count; /* Number of signature algorithms */
 size_t cert_algos_count; /* Number of cert sig algos */
-uint16_t algos[16]; /* Required signature algorithms */
+uint16_t algos[16]; /* Supported schemes offered (first 16) */
 uint16_t cert_algos[16]; /* Cert chain sig algos (optional) */
 uint8_t context[255]; /* Opaque context */
 } fio_tls13_certificate_request_s
@@ -30999,7 +31772,7 @@ _Symbol type:_ `type`
 #### `fio_tls13_hkdf_expand_label`
 
 ```c
-void fio_tls13_hkdf_expand_label(void *restrict out, size_t out_len, const void *restrict secret, size_t secret_len, const char *label, size_t label_len, const void *restrict context, size_t context_len, int use_sha384)
+int fio_tls13_hkdf_expand_label(void *restrict out, size_t out_len, const void *restrict secret, size_t secret_len, const char *label, size_t label_len, const void *restrict context, size_t context_len, int use_sha384)
 ```
 
 TLS 1.3 HKDF-Expand-Label function.
@@ -31017,12 +31790,15 @@ Derives keying material using the TLS 1.3 specific label format.
 - `context_len` - Context length (max 255)
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
 
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_derive_secret`
 
 ```c
-void fio_tls13_derive_secret(void *restrict out, const void *restrict secret, size_t secret_len, const char *label, size_t label_len, const void *restrict transcript_hash, size_t hash_len, int use_sha384)
+int fio_tls13_derive_secret(void *restrict out, const void *restrict secret, size_t secret_len, const char *label, size_t label_len, const void *restrict transcript_hash, size_t hash_len, int use_sha384)
 ```
 
 TLS 1.3 Derive-Secret function.
@@ -31039,12 +31815,15 @@ Derives a secret from a base secret and transcript hash.
 - `hash_len` - Hash length (32 or 48)
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
 
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_derive_early_secret`
 
 ```c
-void fio_tls13_derive_early_secret(void *restrict early_secret, const void *restrict psk, size_t psk_len, int use_sha384)
+int fio_tls13_derive_early_secret(void *restrict early_secret, const void *restrict psk, size_t psk_len, int use_sha384)
 ```
 
 Derive the Early Secret from PSK.
@@ -31057,12 +31836,15 @@ Early Secret = HKDF-Extract(salt=0, IKM=PSK)
 - `psk_len` - PSK length (0 if no PSK)
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
 
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_derive_handshake_secret`
 
 ```c
-void fio_tls13_derive_handshake_secret(void *restrict handshake_secret, const void *restrict early_secret, const void *restrict ecdhe_secret, size_t ecdhe_len, int use_sha384)
+int fio_tls13_derive_handshake_secret(void *restrict handshake_secret, const void *restrict early_secret, const void *restrict ecdhe_secret, size_t ecdhe_len, int use_sha384)
 ```
 
 Derive the Handshake Secret from ECDHE shared secret.
@@ -31079,12 +31861,15 @@ Handshake Secret = HKDF-Extract(
 - `ecdhe_len` - ECDHE secret length (32 for X25519)
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
 
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_derive_master_secret`
 
 ```c
-void fio_tls13_derive_master_secret(void *restrict master_secret, const void *restrict handshake_secret, int use_sha384)
+int fio_tls13_derive_master_secret(void *restrict master_secret, const void *restrict handshake_secret, int use_sha384)
 ```
 
 Derive the Master Secret.
@@ -31099,12 +31884,15 @@ Master Secret = HKDF-Extract(
 - `handshake_secret` - The handshake secret
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
 
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_derive_traffic_keys`
 
 ```c
-void fio_tls13_derive_traffic_keys(void *restrict key, size_t key_len, void *restrict iv, const void *restrict traffic_secret, int use_sha384)
+int fio_tls13_derive_traffic_keys(void *restrict key, size_t key_len, void *restrict iv, const void *restrict traffic_secret, int use_sha384)
 ```
 
 Derive traffic keys and IV from a traffic secret.
@@ -31116,12 +31904,15 @@ Derive traffic keys and IV from a traffic secret.
 - `traffic_secret` - The traffic secret (client/server handshake/app)
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
 
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_derive_finished_key`
 
 ```c
-void fio_tls13_derive_finished_key(void *restrict finished_key, const void *restrict traffic_secret, int use_sha384)
+int fio_tls13_derive_finished_key(void *restrict finished_key, const void *restrict traffic_secret, int use_sha384)
 ```
 
 Derive the Finished key from a traffic secret.
@@ -31132,6 +31923,9 @@ finished_key = HKDF-Expand-Label(BaseKey, "finished", "", Hash.length)
 - `finished_key` - Output buffer (32 or 48 bytes)
 - `traffic_secret` - The handshake traffic secret
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
+
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
 
 _Symbol type:_ `function`
 
@@ -31156,7 +31950,7 @@ _Symbol type:_ `function`
 #### `fio_tls13_update_traffic_secret`
 
 ```c
-void fio_tls13_update_traffic_secret(void *restrict new_secret, const void *restrict current_secret, int use_sha384)
+int fio_tls13_update_traffic_secret(void *restrict new_secret, const void *restrict current_secret, int use_sha384)
 ```
 
 Update application traffic secret for key update.
@@ -31170,12 +31964,15 @@ Hash.length)
 - `current_secret` - Current application traffic secret
 - `use_sha384` - If non-zero, use SHA-384; otherwise SHA-256
 
+**Returns:**
+- 0 on success, -1 on invalid arguments (output untouched)
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_build_nonce`
 
 ```c
-inline void fio_tls13_build_nonce(uint8_t nonce[12], const uint8_t iv[12], uint64_t seq)
+void fio_tls13_build_nonce(uint8_t nonce[12], const uint8_t iv[12], uint64_t seq)
 ```
 
 Build per-record nonce by XORing sequence number with IV.
@@ -31282,12 +32079,15 @@ Initialize record keys structure.
 - `iv` - IV material (12 bytes)
 - `cipher_type` - Cipher type (fio_tls13_cipher_type_e)
 
+A key length that doesn't match the cipher (or a NULL key) makes every
+later fio_tls13_record_encrypt / fio_tls13_record_decrypt call fail.
+
 _Symbol type:_ `function`
 
 #### `fio_tls13_record_keys_clear`
 
 ```c
-inline void fio_tls13_record_keys_clear(fio_tls13_record_keys_s *keys)
+void fio_tls13_record_keys_clear(fio_tls13_record_keys_s *keys)
 ```
 
 Clear sensitive key material from memory.
@@ -31740,7 +32540,7 @@ _Symbol type:_ `function`
 #### `fiobj_str_dealloc`
 
 ```c
-inline void fiobj_str_dealloc(void *ptr)
+void fiobj_str_dealloc(void *ptr)
 ```
 
 Frees the pointer returned by `detach`.
@@ -32141,7 +32941,7 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-202-array-h"></a> `./fio-stl/202 array.h`
 
-30 public symbols.
+31 public symbols.
 
 ### Macros
 
@@ -32229,23 +33029,15 @@ _Symbol type:_ `macro`
 #### `FIO_ARRAY_EACH`
 
 ```c
-#define FIO_ARRAY_EACH(array_name, array, pos)   \
-  for (FIO_NAME(array_name, ____type_t)   \
-           *first___ai = NULL,   \
-           *pos = FIO_NAME(array_name, each_next)((array), &first___ai, NULL);   \
-       pos;   \
-       pos = FIO_NAME(array_name, each_next)((array), &first___ai, pos))
+#define FIO_ARRAY_EACH(array_name, array, i)   \
+  for (FIO_NAME(array_name, iterator_s) i = FIO_NAME(array_name, each_next)(   \
+           (array),   \
+           (FIO_NAME(array_name, iterator_s)){0});   \
+       i.p;   \
+       i = FIO_NAME(array_name, each_next)((array), i))
 ```
 
-Iterates through the array using a `for` loop.
-
-Access the object with the pointer `pos`. The `pos` variable can be named
-however you please.
-
-Avoid editing the array during a FOR loop, although I hope it's possible, I
-wouldn't count on it.
-
-**Note**: this variant supports automatic pointer tagging / untagging.
+Iterates using an index-based iterator; access the element through i.p.
 
 _Symbol type:_ `macro`
 
@@ -32298,6 +33090,19 @@ uint64_t padding;
 ```
 
 Iteration information structure passed to the callback.
+
+_Symbol type:_ `type`
+
+#### `fiobj_array_iterator_s`
+
+```c
+struct fiobj_array_iterator_s {
+size_t i;
+FIO_ARRAY_TYPE *p;
+}
+```
+
+Index-based iterator; p is valid only until the next array mutation.
 
 _Symbol type:_ `type`
 
@@ -32546,26 +33351,16 @@ _Symbol type:_ `function`
 #### `fiobj_array_each_next`
 
 ```c
-inline FIO_ARRAY_TYPE *fiobj_array_each_next(FIO_ARRAY_PTR ary, FIO_ARRAY_TYPE **first, FIO_ARRAY_TYPE *pos)
+inline fiobj_array_each_next FIO_NAME(FIO_ARRAY_NAME, each_next)(FIO_ARRAY_PTR ary, FIO_NAME(FIO_ARRAY_NAME, iterator_s) previous)
 ```
 
-Returns a pointer to the (next) object in the array.
-
-Returns a pointer to the first object if `pos == NULL` and there are objects
-in the array.
-
-The first pointer is automatically set and it allows object insertions and
-memory effecting functions to be called from within the loop.
-
-If the object in `pos` (or an object before it) were removed, consider
-passing `pos-1` to the function, to avoid skipping any elements while
-looping.
-
-Returns the next object if both `first` and `pos` are valid.
-
-Returns NULL if `pos` was the last object or no object exist.
-
-Returns the first object if either `first` or `pos` are invalid.
+Returns the next iterator by value. A zero-initialized iterator starts at
+index zero; a non-NULL p advances i and reacquires p from current storage.
+A NULL result p means out of bounds or invalid; it does not reset i.
+The saved index survives reserve/compact;
+insertions/removals can change which element follows. A saved p must not be
+dereferenced after mutation. Destroying the array during iteration is
+invalid.
 
 _Symbol type:_ `function`
 
@@ -32634,6 +33429,7 @@ _Symbol type:_ `type`
 struct fiobj_hash_s {
 uint32_t bits;
 uint32_t count;
+uint32_t generation; /* invalidates iterators on any mutation */
 FIO_NAME(FIO_MAP_NAME, node_s) * map;
 #if FIO_MAP_ORDERED
 FIO_INDEXED_LIST32_HEAD head;
@@ -32664,7 +33460,8 @@ uint64_t hash;
 struct { /* internal usage, do not access */
 uint32_t index; /* the index in the internal map */
 uint32_t pos; /* the position in the ordering scheme */
-uintptr_t map_validator; /* map mutation guard */
+uintptr_t map_validator; /* allocation guard */
+uint32_t generation; /* mutation guard */
 } private_;
 } fiobj_hash_iterator_s
 ```
@@ -32956,53 +33753,6 @@ inline fiobj_hash_iterator2node * FIO_NAME(FIO_MAP_NAME, iterator2node)(FIO_MAP_
 Returns a pointer to the node object in the internal map.
 
 _Symbol type:_ `function`
-
------------------------------------------------------
-
-## <a id="fio-stl-210-map2-h"></a> `./fio-stl/210 map2.h`
-
-3 public symbols.
-
-### Macros
-
-#### `FIO_MAP2_INIT`
-
-```c
-#define FIO_MAP2_INIT   \
-  { 0 }
-```
-
-
-
-_Symbol type:_ `macro`
-
-#### `FIO_MAP2_EACH`
-
-```c
-#define FIO_MAP2_EACH(map_name, map_ptr, i)   \
-  for (FIO_NAME(map_name, iterator_s)   \
-           i = FIO_NAME(map_name, get_next)(map_ptr, NULL);   \
-       FIO_NAME(map_name, iterator_is_valid)(&i);   \
-       i = FIO_NAME(map_name, get_next)(map_ptr, &i))
-```
-
-Iterates through the map using an iterator object.
-
-_Symbol type:_ `macro`
-
-#### `FIO_MAP2_EACH_REVERSED`
-
-```c
-#define FIO_MAP2_EACH_REVERSED(map_name, map_ptr, i)   \
-  for (FIO_NAME(map_name, iterator_s)   \
-           i = FIO_NAME(map_name, get_prev)(map_ptr, NULL);   \
-       FIO_NAME(map_name, iterator_is_valid)(&i);   \
-       i = FIO_NAME(map_name, get_prev)(map_ptr, &i))
-```
-
-Iterates through the map using an iterator object.
-
-_Symbol type:_ `macro`
 
 -----------------------------------------------------
 
@@ -33962,7 +34712,9 @@ inline FIOBJ fiobj2json(FIOBJ dest, FIOBJ o, uint8_t beautify)
 Returns a JSON valid FIOBJ String, representing the object.
 
 If `dest` is an existing String, the formatted JSON data will be appended to
-the existing string.
+the existing string. Returns FIOBJ_INVALID on allocation failure; an existing
+destination keeps its original length. Bytes past that length are
+unspecified.
 
 _Symbol type:_ `function`
 
@@ -33974,9 +34726,10 @@ size_t FIO_NAME(fiobj_hash_update_json, update_json)(FIOBJ hash, fio_str_info_s 
 
 Updates a Hash using JSON data (the JSON root must be an object).
 
-Nested objects merge into existing Hash members and nested arrays append to
-existing Array members; any other conflicting value is overwritten
-(preferring the new over the old).
+With FIOBJ_JSON_APPEND enabled, nested objects merge into existing Hash
+members and nested arrays append to existing Array members. Otherwise nested
+containers replace existing members. Other conflicting values are
+overwritten.
 
 On a parsing error, members merged before the error remain in the Hash. A
 non-object root changes nothing.
@@ -34071,8 +34824,8 @@ inline FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx)
 
 Builds a Mustache template using a FIOBJ context (usually a Hash).
 
-Returns a FIOBJ String with the rendered template. May return `FIOBJ_INVALID`
-if nothing was written.
+Returns a FIOBJ String with the rendered template. Returns FIOBJ_INVALID
+if nothing was written or allocation fails.
 
 _Symbol type:_ `function`
 
@@ -34086,8 +34839,10 @@ Builds a Mustache template using a FIOBJ context (usually a Hash).
 
 Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
 
-Returns `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was
-written and `dest` was empty.
+Returns `dest` (or a new String). Returns `FIOBJ_INVALID` on allocation
+failure; a caller-owned destination retains its original length (bytes past
+that length are unspecified). An empty result returns `dest` if supplied,
+or `FIOBJ_INVALID` otherwise.
 
 _Symbol type:_ `function`
 
@@ -34269,7 +35024,7 @@ const char *url;
 fio_io_protocol_s *protocol;
 /** The default `udata` set for (new) incoming connections. */
 void *udata;
-/** TLS object used for incoming connections (ownership moved to listener). */
+/** TLS settings; the call owns this reference on success and failure. */
 fio_io_tls_s *tls;
 /**
 * Called when the a listening socket starts to listen.
@@ -34323,10 +35078,23 @@ fio_io_protocol_s *protocol;
 void (*on_failed)(fio_io_protocol_s *protocol, void *udata);
 /** Opaque user data (set only once connection was established). */
 void *udata;
-/** TLS builder object for TLS connections. */
+/** TLS builder object for TLS connections (ownership moved to the call). */
 fio_io_tls_s *tls;
 /** Connection timeout in milliseconds (defaults to 30 seconds). */
 uint32_t timeout;
+/**
+* Opt-in peer verification for TLS connections.
+*
+* When set and the connection uses TLS, a TLS object without any trust
+* entries gets the system trust store (same as `?trust=sys` or
+* `fio_io_tls_trust_add(tls, NULL)`). Explicit trust entries are kept.
+*
+* Like URL TLS hints, this updates the `tls` object (if any), which callers
+* keeping a `fio_io_tls_dup` reference will see.
+*
+* Ignored for non-TLS connections (the scheme is never changed).
+*/
+uint8_t verify;
 } fio_io_connect_args_s
 ```
 
@@ -34564,6 +35332,8 @@ int64_t fio_io_last_tick(void)
 
 Returns the last millisecond when the IO reactor polled for events.
 
+While the reactor is stopped, returns the current (monotonic) time.
+
 _Symbol type:_ `function`
 
 #### `fio_io_last_tick_time`
@@ -34575,7 +35345,8 @@ int64_t fio_io_last_tick_time(void)
 Returns a cached real-time (wall-clock) timestamp in milliseconds,
 updated each IO tick alongside `fio_io_last_tick`. Use this to avoid
 repeated `clock_gettime` syscalls when an approximate wall-clock ms is
-sufficient (e.g., HTTP Date headers, access-log timestamps).
+sufficient (e.g., HTTP Date headers, access-log timestamps). While the
+reactor is stopped, returns the current time.
 
 _Symbol type:_ `function`
 
@@ -34588,6 +35359,14 @@ fio_io_listener_s *fio_io_listen(fio_io_listen_args_s args)
 Sets up a network service on a listening socket.
 
 Returns a self-destructible listener handle on success or NULL on error.
+The call releases its `.tls` reference before returning, on every path.
+Pass `fio_io_tls_dup(tls)` to keep your own reference.
+
+TLS is a must when requested: if a TLS object is in effect (`.tls` or TLS
+URL scheme / hints) and `build_context` returns NULL (e.g., a missing
+certificate file), no listener is created and NULL is returned. As with a
+failed bind, `on_stop` (if any) is called so the caller can release
+`protocol` / `udata` state.
 
 NOTE: this schedules a task and should NOT be called within a PRE_START or
 ON_START state callback.
@@ -34684,12 +35463,17 @@ Ownership: calling `fio_io_connect` transfers ownership of `protocol`,
 performed only from `on_failed` (connection never established) or
 `on_close` (established connection closed) - never in response to
 `fio_io_connect` returning `NULL`, as the reactor retains the connecting
-state until the deferred failure task runs.
+state until the deferred failure task runs. `tls` ownership moves too (it
+is released before the call returns; `fio_io_tls_dup` to keep it).
 
 `on_failed` always runs on the IO thread and may fire asynchronously,
 after `fio_io_connect` returns (including when `NULL` is returned). This
 implies the reactor MUST run at some point after a call, or the
 transferred ownership is never released.
+
+TLS is a must when requested: if a TLS object is in effect (`.tls` or TLS
+URL scheme / hints) and `build_context` returns NULL, no socket is opened,
+NULL is returned and `on_failed` runs (as above).
 
 _Symbol type:_ `function`
 
@@ -34710,7 +35494,8 @@ Ownership: calling `fio_io_connect` transfers ownership of `protocol`,
 performed only from `on_failed` (connection never established) or
 `on_close` (established connection closed) - never in response to
 `fio_io_connect` returning `NULL`, as the reactor retains the connecting
-state until the deferred failure task runs.
+state until the deferred failure task runs. `tls` ownership moves too (it
+is released before the call returns; `fio_io_tls_dup` to keep it).
 
 `on_failed` always runs on the IO thread and may fire asynchronously,
 after `fio_io_connect` returns (including when `NULL` is returned). This
@@ -34732,6 +35517,7 @@ Attaches the socket in `fd` to the facio.io engine (reactor).
 * `fd` should point to a valid socket.
 
 * `protocol` may be the existing protocol or NULL (for partial hijack).
+  With NULL, `tls` must come from the default TLS backend.
 
 * `udata` is opaque user data and may be any value, including NULL.
 
@@ -34741,10 +35527,17 @@ Attaches the socket in `fd` to the facio.io engine (reactor).
 Returns NULL on error. the `fio_io_s` pointer must NOT be used except
 within proper callbacks.
 
-Ownership of `tls` transfers to the reactor when `fio_io_attach_fd` is
-called, whether the call succeeds or fails - callers must not use or free
-it afterwards. On failure the reactor releases it with the TLS
-implementation's `free_context` (never the per-connection `cleanup`).
+`tls` is a context reference returned by the TLS implementation's
+`build_context` or `dup_context`. Ownership of `fd` and `tls` transfers to
+the reactor whether the call succeeds or fails - callers must not use or
+free either afterwards (`dup_context` first to keep a reference).
+
+On success, the IO owns the reference: `start` may replace it with
+per-connection state (`fio_io_tls_set`) that takes over the reference, and
+`cleanup` releases whatever `tls` the IO holds once it closes. On failure
+(allocation failure or the socket can't be made non-blocking) a valid `fd`
+is closed, `tls` is released with `free_context` and the protocol's
+`on_close` is scheduled.
 
 _Symbol type:_ `function`
 
@@ -35334,6 +36127,13 @@ NOTE: Except for the `tls` and `server_name` arguments, all arguments might
 be `NULL`, which a context builder (`fio_io_functions_s`) should
 treat as a request for a self-signed certificate. It may be silently ignored.
 
+Servers with several certificates select one per handshake by the client's
+SNI: case-insensitive exact match, then a single-label wildcard
+(`*.example.com`). No SNI, an unknown or a malformed name selects the
+default: the certificate added with an empty / `NULL` server name, else the
+first one added. Names are stored lowercased (max 255 bytes); re-adding a
+name replaces its entry.
+
 _Symbol type:_ `function`
 
 #### `fio_io_tls_alpn_add`
@@ -35437,6 +36237,9 @@ Returns the number of `fio_io_tls_trust_add` instructions.
 
 This could be used when deciding if to disable peer verification or not.
 
+A trust instruction that failed to store still counts (fail closed), and
+`fio_io_tls_each` then returns -1 when iterating trust entries.
+
 If `fio_io_tls_trust_add` was never called, zero (0) is returned.
 
 _Symbol type:_ `function`
@@ -35505,7 +36308,8 @@ _Symbol type:_ `function`
 #### `fio_io_async`
 
 ```c
-#define fio_io_async(q_, ...) fio_queue_push((q_)->q, __VA_ARGS__)
+#define fio_io_async(q_, ...)   \
+  fio_queue_push(fio_io_async_queue(q_), __VA_ARGS__)
 ```
 
 Pushes a task to an IO Async Queue (macro helper).
@@ -35556,7 +36360,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-404-ipc-h"></a> `./fio-stl/404 ipc.h`
 
-45 public symbols.
+46 public symbols.
 
 ### Macros
 
@@ -35590,7 +36394,9 @@ _Symbol type:_ `macro`
 ```
 
 A helper macro for composing multiple buffers into the request. Fill with
-fio_buf_info_s - will stop when a buffer has zero length. Use:
+fio_buf_info_s; the macro appends the terminator (`.len == (size_t)-1`),
+which ends the list. Zero-length elements are allowed and skipped; a NULL
+`buf` with a non-zero `len` writes `len` zero-valued bytes. Use:
 
     .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"example:"),
                          FIO_BUF_INFO2(&number, sizeof(number)))
@@ -35687,6 +36493,16 @@ If set, this is an internal ping/keepalive message (not dispatched to user)
 
 _Symbol type:_ `macro`
 
+#### `FIO_IPC_FLAG_HELLO`
+
+```c
+#define FIO_IPC_FLAG_HELLO ((uint16_t)1UL << 7)
+```
+
+Internal connection authentication handshake (not dispatched to user)
+
+_Symbol type:_ `macro`
+
 #### `FIO_IPC_FLAG_TEST`
 
 ```c
@@ -35719,7 +36535,8 @@ uint32_t len; /* Length of data[] (AAD - authenticated, unencrypted) */
 uint16_t flags; /* User settable flags (AAD - authenticated, unencrypted) */
 uint16_t routing_flags; /* Internal (AAD - authenticated, unencrypted) */
 uint64_t timestamp; /* timestamp (unencrypted, used for nonce) */
-uint64_t id; /* 8 random bytes (unencrypted, used for nonce) */
+uint64_t id; /* message ID (unencrypted, used for nonce) */
+uint64_t nonce; /* fresh random bytes per encryption (unencrypted, nonce) */
 union {
 void (*call)(struct fio_ipc_s *); /* function pointer to call (encrypted) */
 uint32_t opcode; /* op-code to execute*/
@@ -35781,7 +36598,7 @@ typedef struct {
 fio_ipc_s *ipc;
 fio_buf_info_s *data;
 uint64_t timestamp; /* (optional) override timestamp, 0 = use current time */
-uint64_t id; /* (optional) override id, 0 = use original request id */
+uint64_t id; /* (optional) override id, 0 = fresh random id */
 uint16_t flags; /* (optional) override flags, 0 = use original request */
 uint8_t done;
 uint8_t flags_set; /* set to 1 if flags should be used (allows flags=0) */
@@ -36072,7 +36889,16 @@ _Symbol type:_ `function`
 void fio_ipc_after_send(fio_ipc_s *ipc, void (*fn)(fio_ipc_s *, void *), void *udata)
 ```
 
+Sets callback to accept memory ownership after sending is complete.
 
+The callback runs when the last reference is released (at most once), and
+receives the decrypted message, which it must free.
+
+Thread note: releases are normally performed by an IO thread task, but if
+that task cannot be queued (no memory) the release, and so the callback,
+runs on the thread calling fio_ipc_free. There is NO guarantee that the
+callback runs on the IO thread, and none that it runs at all if the
+message is discarded (e.g., queued tasks dropped at shutdown).
 
 _Symbol type:_ `function`
 
@@ -36089,7 +36915,7 @@ _Symbol type:_ `function`
 #### `fio_ipc_decrypt`
 
 ```c
-inline int fio_ipc_decrypt(fio_ipc_s *m)
+int fio_ipc_decrypt(fio_ipc_s *m)
 ```
 
 Decrypt IPC message when received.
@@ -36667,7 +37493,7 @@ const char *url;
 const char *auth;
 /** Length of auth string (0 = auto-detect with strlen) */
 size_t auth_len;
-/** Ping interval in seconds (0 = default 300 seconds) */
+/** Ping interval in seconds (0 = default 30 seconds) */
 uint8_t ping_interval;
 /**
 * Cumulative payload budget per top-level Redis message, in bytes.
@@ -36691,17 +37517,18 @@ _Symbol type:_ `type`
 
 ```c
 typedef enum {
-/** The engine stopped after a failed HELLO handshake (or NULL was queried).
-*/
+/** The engine is disabled after a failed HELLO handshake. */
 FIO_REDIS_STATE_ERROR,
 /** No socket is attached, or the RESP3 HELLO handshake is still pending. */
 FIO_REDIS_STATE_CONNECTING,
 /** A socket is attached and its RESP3 HELLO handshake completed. */
 FIO_REDIS_STATE_CONNECTED,
+/** No engine was supplied, or the engine is being destroyed. */
+FIO_REDIS_STATE_STOPPED,
 } fio_redis_state_e
 ```
 
-Redis connection state, observed from the IO thread.
+Redis engine state. A snapshot may become stale immediately.
 
 _Symbol type:_ `type`
 
@@ -36718,9 +37545,12 @@ Creates a Redis pub/sub engine with reference count = 1.
 The engine is active only after the IO reactor starts running.
 
 The caller owns the returned reference and must call fio_redis_free()
-when done. Attaching to pub/sub does NOT transfer ownership.
+when done. Attaching to pub/sub hands one reference to the pub/sub system;
+it is released on detach only if the engine received a subscription (an
+attach without any subscription never releases it - known limitation).
 
-Returns a pointer to the engine or NULL on error.
+Returns a pointer to the engine or NULL on error (allocation failure or
+invalid arguments).
 
 _Symbol type:_ `function`
 
@@ -36757,9 +37587,14 @@ void fio_redis_free(fio_pubsub_engine_s *engine)
 
 Releases the caller's reference to the engine.
 
-This function simply decrements the reference count. If the ref reaches 0
-(no other refs held), fio___redis_destroy() fires immediately:
-sets running=0, closes connections, drains the command queue, frees memory.
+While IO is running, transfers the caller's reference to a release task
+on the main IO queue (no extra dup). Otherwise releases directly; callers
+must be on the main thread, including during shutdown.
+
+When the release drops the count to zero, destroys the engine: marks it
+stopped, closes connections, and drains queued commands with FIOBJ_INVALID
+before freeing memory. Destruction and those callbacks run on the main
+thread.
 
 The engine stays alive as long as any other ref is held (e.g. the pub/sub
 system's ref taken via subscribe/psubscribe). The pub/sub system releases
@@ -36781,8 +37616,9 @@ fio_redis_state_e fio_redis_state(fio_pubsub_engine_s const *engine)
 
 Returns the current Redis connection state.
 
-This function must be called from the IO thread. Commands can be sent in
-every state: they queue until the RESP3 HELLO handshake completes.
+May be called from any thread while the caller holds a live engine
+reference. The snapshot may become stale immediately. Pending commands
+wait until the RESP3 HELLO handshake completes.
 
 _Symbol type:_ `function`
 
@@ -37071,11 +37907,11 @@ Loops over each `/`-separated section of `path`, decoding percent encoding.
 - `pos`: the name of the loop variable, a `fio_buf_info_s` holding the
   decoded, NUL-terminated section. It is valid only for one iteration.
 
-The loop also declares `<pos>_reminder` (the rest of the path) and a 4096
-byte stack buffer named `buf`, which hides any outer `buf` in the loop body.
+The loop also declares `<pos>_reminder` (the rest of the path) and a ~4KB
+stack buffer named `buf`, which hides any outer `buf` in the loop body.
 
-**Note**: the loop stops early if a section is longer than about 4063
-bytes.
+**Note**: the loop stops early if a decoded section is longer than 4063
+bytes (4079 bytes on 32-bit systems).
 
 _Symbol type:_ `macro`
 
@@ -37193,7 +38029,8 @@ int (*on_authenticate_websocket)(fio_http_s *h);
 void (*on_open)(fio_http_s *h);
 /** Called when a WebSocket message is received. */
 void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
-/** Called when an EventSource event is received. */
+/** Called when an EventSource event with data is received. `id` is the last
+* event ID (it persists across events); views are valid during the call. */
 void (*on_eventsource)(fio_http_s *h,
 fio_buf_info_s id,
 fio_buf_info_s event,
@@ -37255,7 +38092,16 @@ fio_str_info_s public_folder;
 */
 size_t max_age;
 /**
-* The maximum size, in bytes, of the request line and all headers combined.
+* Budget for header name and value bytes passed to the HTTP header callback
+* during a message, including forwarded trailers. This limits header
+* processing/storage, not raw bytes read from the connection: it excludes
+* the start line, separators, whitespace trimmed by the parser, line
+* terminators, and internally consumed fields (such as `Expect` and some
+* `Content-Length` / `Transfer-Encoding` fields). A rejected request
+* receives `431`; client responses close the connection.
+*
+* This is not a wire-size limit. Apply a separate input/connection limit
+* if total bytes received before the body must be bounded.
 *
 * Defaults to FIO_HTTP_DEFAULT_MAX_HEADER_SIZE. Raised to `max_line_len` if
 * smaller.
@@ -37295,6 +38141,13 @@ intptr_t reserved2;
 * milliseconds). 0 selects the `fio_io_connect` default.
 */
 uint16_t connect_timeout;
+/**
+* Client mode only: opt-in TLS peer verification, passed to
+* `fio_io_connect` (see `fio_io_connect_args_s.verify`). A TLS connection
+* without trust entries uses the system trust store. Ignored for plain
+* (non-TLS) connections.
+*/
+uint8_t verify;
 /**
 * The HTTP/1.x connection timeout, in seconds.
 *
@@ -37564,28 +38417,29 @@ int (*is_map)(void *udata, void *obj);
 void (*free_unused_object)(void *udata, void *obj);
 /* ===== File Uploads (multipart) ===== */
 /**
-* Called when a file upload starts.
+* Called once for each complete file upload (optional: NULL skips files).
 *
-* Returns an owned object for this file (e.g., fd, stream, buffer); NULL
-* skips the file (`on_file_data` won't be called for it). Once the upload
-* ends, the object is stored at the field name like any other value, or
-* passed to `free_unused_object` if parsing failed (including truncated
-* uploads).
+* `data` holds the whole file. It points into the request body (no copy for
+* bodies in RAM or memory mapped; otherwise the part is read into the body's
+* heap buffer, so the body size limit bounds memory use) and, like all other
+* arguments, is borrowed only during the call: callbacks must not call
+* `fio_http_body_*` functions on the request being parsed.
 *
-* File data is streamed in chunks (the body is never fully loaded), so large
-* uploads can be written to storage as they are parsed. Filename is stripped
-* of path components; empty filenames and empty field names are skipped.
-* Missing Content-Type has a NULL buf. Raw part headers (without the blank
-* line) are borrowed only for this call.
+* Returns an optional owned value (`obj`), stored at the field name like any
+* other value; a NULL `obj` stores nothing (e.g., the file was handled
+* through `udata`). A non-zero `err` aborts parsing and is returned
+* unchanged. Truncated or malformed uploads never reach this callback.
+*
+* Filename is stripped of path components; empty filenames and empty field
+* names are skipped. Missing Content-Type has a NULL buf. `headers` holds the
+* raw part headers (without the blank line).
 */
-void *(*on_file)(void *udata,
+fio_json_obj_result_s (*on_file)(void *udata,
 fio_str_info_s name,
 fio_str_info_s filename,
 fio_str_info_s content_type,
-fio_str_info_s headers);
-/** Called for each chunk of file data. A non-zero return aborts parsing
-* (returned unchanged in `err`); the file object is then freed. */
-int (*on_file_data)(void *udata, void *file, fio_buf_info_s data);
+fio_str_info_s headers,
+fio_buf_info_s data);
 } fio_http_params_parse_callbacks_s
 ```
 
@@ -38510,9 +39364,9 @@ Request header setters. Each copies `value` and returns the stored value.
 - `fio_http_request_header_add` adds `value` to any existing values.
 
 An empty `value` removes the header for `set`. `set_if_missing` ignores it
-and returns the existing value (if any); `add` ignores it. Returns an empty value on error: an empty or invalid `name`
-(longer than 4095 bytes or with forbidden characters) or a `value` that
-contains NUL, CR or LF.
+and returns the existing value (if any); `add` ignores it. Returns an empty
+value on error: an empty or invalid `name` (longer than 4095 bytes or with
+forbidden characters) or a `value` that contains NUL, CR or LF.
 
 _Symbol type:_ `function`
 
@@ -38693,8 +39547,9 @@ Sets a response cookie (a `set-cookie` header).
 Invalid characters in the name or value are percent-encoded (with a one-time
 warning). The new value is also visible to `fio_http_cookie`.
 
-Returns 0 on success, or -1 if `h` is NULL or the response headers were
-already sent.
+Returns 0 on success, or -1 if `h` is NULL, the response headers were
+already sent, or cookie formatting fails (for example, on allocation
+failure).
 
 Note: long cookies only log an error. Many browsers and proxies limit
 cookies to about 4KB (name and value combined).
@@ -39467,10 +40322,11 @@ int fio_http_sse_write(fio_http_s *h, fio_http_sse_write_args_s args)
 ```
 
 Writes an SSE message (UTF-8). Multi-line `data` is sent as one `data:`
-line per line.
+line per line (CR, LF and CRLF end a line; receivers get LF line ends).
 
-Returns 0 on success, or -1 if `data` is empty, `h` is not an upgraded SSE
-handle, or the connection is gone.
+Returns 0 once queued, or -1 if `data` is empty, `id` / `event` contain CR,
+LF or NUL, allocation fails, `h` is not an upgraded SSE handle, or the
+connection is gone.
 
 _Symbol type:_ `function`
 

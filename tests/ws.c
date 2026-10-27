@@ -447,6 +447,35 @@ static void test_explicit_mask(void) {
            "explicit mask: payload unmasked");
 }
 
+static void test_generated_mask_full_width(void) {
+  /* Generated client masks must use all 32 bits (RFC 6455, 5.3): no forced
+   * bits, never zero (zero would emit an unmasked frame), and fresh per frame.
+   * The chance of a correct generator failing this check is ~2^-128. */
+  uint32_t and_all = ~(uint32_t)0, or_all = 0, first = 0;
+  int distinct = 0, zero = 0;
+  for (size_t i = 0; i < 128; ++i) {
+    uint8_t buf[16];
+    uint64_t n =
+        fio_websocket_write_message_client(buf,
+                                           FIO_BUF_INFO2((char *)"x", 1),
+                                           1,
+                                           0,
+                                           0);
+    WS_CHECK(n == 7 && (buf[1] & 0x80), "generated mask: frame is masked");
+    uint32_t mask = fio_buf2u32u(buf + 2);
+    zero |= !mask;
+    and_all &= mask;
+    or_all |= mask;
+    if (!i)
+      first = mask;
+    distinct |= (mask != first);
+  }
+  WS_CHECK(!zero, "generated mask: never zero");
+  WS_CHECK(!and_all, "generated mask: no bit forced on");
+  WS_CHECK(or_all == ~(uint32_t)0, "generated mask: no bit forced off");
+  WS_CHECK(distinct, "generated mask: fresh per frame");
+}
+
 static void test_mask_rotation_across_splits(void) {
   static const char original[] = "0123456789ABCDEF";
   uint8_t buf[64];
@@ -948,6 +977,88 @@ static void test_null_event_pointer(void) {
   WS_CHECK(c == n, "null event: parse accepts NULL event pointer");
 }
 
+static void test_close_null_reason(void) {
+  /* {NULL, len} must emit an empty reason, never stack bytes. */
+  static const size_t lens[] = {1, 123, 124, (size_t)-1};
+  for (size_t i = 0; i < sizeof(lens) / sizeof(lens[0]); ++i) {
+    uint8_t buf[160];
+    memset(buf, 0xA5, sizeof(buf));
+    uint64_t n = fio_websocket_write_close_server(
+        buf, FIO_WEBSOCKET_CLOSE_OK, FIO_BUF_INFO2(NULL, lens[i]));
+    WS_CHECK(n == 4 && buf[0] == 0x88 && buf[1] == 0x02 && buf[2] == 0x03 &&
+                 buf[3] == 0xE8,
+             "close NULL reason (server): code only");
+    WS_CHECK(buf[4] == 0xA5, "close NULL reason (server): no overwrite");
+    memset(buf, 0xA5, sizeof(buf));
+    n = fio_websocket_write_close_client(buf,
+                                         FIO_WEBSOCKET_CLOSE_OK,
+                                         FIO_BUF_INFO2(NULL, lens[i]),
+                                         0x01020304);
+    WS_CHECK(n == 8 && buf[1] == 0x82, "close NULL reason (client): code only");
+    WS_CHECK(buf[8] == 0xA5, "close NULL reason (client): no overwrite");
+  }
+}
+
+static void test_close_reason_boundaries(void) {
+  char reason[200];
+  memset(reason, 'r', sizeof(reason));
+  static const size_t lens[] = {0, 1, 122, 123, 124, 200};
+  for (size_t i = 0; i < sizeof(lens) / sizeof(lens[0]); ++i) {
+    uint8_t buf[160];
+    memset(buf, 0xA5, sizeof(buf));
+    const size_t expect = lens[i] > 123 ? 123 : lens[i];
+    uint64_t n = fio_websocket_write_close_server(
+        buf, FIO_WEBSOCKET_CLOSE_GOING_AWAY, FIO_BUF_INFO2(reason, lens[i]));
+    WS_CHECK(n == 4 + expect && buf[1] == (uint8_t)(2 + expect),
+             "close reason boundary: truncated length");
+    WS_CHECK(!memcmp(buf + 4, reason, expect) && buf[n] == 0xA5,
+             "close reason boundary: exact bytes, no overwrite");
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    fio_websocket_init(&p);
+    size_t c = fio_websocket_parse(&p, FIO_BUF_INFO2((char *)buf, n), &ev);
+    WS_CHECK(c == n && ev.close_code == FIO_WEBSOCKET_CLOSE_GOING_AWAY,
+             "close reason boundary: parses");
+  }
+}
+
+static void test_non_minimal_length_rejected(void) {
+  /* 16-bit marker carrying 125, 64-bit marker carrying 125 and 65535. */
+  static const uint8_t f16[] = {0x82, 0x7E, 0x00, 0x7D};
+  static const uint8_t f64a[] = {0x82, 0x7F, 0, 0, 0, 0, 0, 0, 0x00, 0x7D};
+  static const uint8_t f64b[] = {0x82, 0x7F, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF};
+  const uint8_t *frames[] = {f16, f64a, f64b};
+  const size_t lens[] = {sizeof(f16), sizeof(f64a), sizeof(f64b)};
+  for (size_t i = 0; i < 3; ++i) {
+    uint8_t tmp[16];
+    memcpy(tmp, frames[i], lens[i]);
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    fio_websocket_init(&p);
+    size_t c = fio_websocket_parse(&p, FIO_BUF_INFO2((char *)tmp, lens[i]), &ev);
+    WS_CHECK(c == FIO_WEBSOCKET_PARSE_ERROR &&
+                 ev.close_code == FIO_WEBSOCKET_CLOSE_PROTOCOL_ERROR,
+             "non-minimal length: rejected with 1002");
+  }
+  /* Minimal boundaries 125/126 and 65535/65536 stay valid (header only). */
+  static const uint8_t ok16[] = {0x82, 0x7E, 0x00, 0x7E};
+  static const uint8_t ok16b[] = {0x82, 0x7E, 0xFF, 0xFF};
+  static const uint8_t ok64[] = {0x82, 0x7F, 0, 0, 0, 0, 0, 0x01, 0x00, 0x00};
+  const uint8_t *oks[] = {ok16, ok16b, ok64};
+  const size_t ok_lens[] = {sizeof(ok16), sizeof(ok16b), sizeof(ok64)};
+  for (size_t i = 0; i < 3; ++i) {
+    uint8_t tmp[16];
+    memcpy(tmp, oks[i], ok_lens[i]);
+    fio_websocket_s p;
+    fio_websocket_event_s ev;
+    fio_websocket_init(&p);
+    size_t c =
+        fio_websocket_parse(&p, FIO_BUF_INFO2((char *)tmp, ok_lens[i]), &ev);
+    WS_CHECK(c == ok_lens[i] && p.state == FIO_WEBSOCKET_STATE_PAYLOAD,
+             "minimal length boundary: header accepted");
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* Main                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -970,6 +1081,7 @@ int main(void) {
   test_new_data_while_open();
   test_explicit_mask();
   test_mask_rotation_across_splits();
+  test_generated_mask_full_width();
   test_rsv_bits_surfaced();
   test_rsv_all_bits();
   test_rsv1_on_continuation_rejected();
@@ -989,6 +1101,9 @@ int main(void) {
   test_multiple_frames_one_buffer();
   test_reset_after_error();
   test_null_event_pointer();
+  test_close_null_reason();
+  test_close_reason_boundaries();
+  test_non_minimal_length_rejected();
 
   if (failures) {
     fprintf(stderr, "\n%d test failure(s)\n", failures);

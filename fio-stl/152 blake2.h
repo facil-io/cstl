@@ -48,14 +48,16 @@ BLAKE2b API (64-bit optimized, up to 64-byte digest)
 ***************************************************************************** */
 
 /** One-shot BLAKE2b hash with max-length (64 byte) digest. */
-FIO_IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len);
+IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len);
 
 /**
  * Flexible-output BLAKE2b hash.
  *
  * `out` must point to a buffer of at least `outlen` bytes.
  * `outlen` must be between 1 and 64 (default 64 if 0).
- * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
+ * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing; a NULL
+ * `key` is unkeyed regardless of `keylen`). Keys over 64 bytes are replaced
+ * by BLAKE2b-512(key) (non-standard, HMAC-like; never truncated).
  */
 SFUNC void fio_blake2b_hash(void *restrict out,
                             size_t outlen,
@@ -70,10 +72,25 @@ SFUNC fio_u512 fio_blake2b_hmac(const void *key,
                                 const void *msg,
                                 uint64_t msg_len);
 
-/** Initialize a BLAKE2b streaming context. outlen: 1-64 (default 64). */
+/**
+ * Initialize a BLAKE2b streaming context. outlen: 1-64 (default 64).
+ * A NULL `key` is unkeyed regardless of `keylen`. The context (holding the
+ * padded key) is built in the returned object - initialize a new variable
+ * with it (`fio_blake2b_s h = fio_blake2b_init(...)`) to avoid key copies,
+ * or use fio_blake2b_init_at. Keys over 64 bytes: see fio_blake2b_hash.
+ */
 SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
                                      const void *key,
                                      size_t keylen);
+
+/**
+ * Initializes `h` in place (same arguments as fio_blake2b_init). The padded
+ * key is written only to `h`, so no key copy is left elsewhere on the stack.
+ */
+SFUNC void fio_blake2b_init_at(fio_blake2b_s *h,
+                               size_t outlen,
+                               const void *key,
+                               size_t keylen);
 
 /** Feed data into BLAKE2b hash. */
 SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
@@ -88,14 +105,16 @@ BLAKE2s API (32-bit optimized, up to 32-byte digest)
 ***************************************************************************** */
 
 /** One-shot BLAKE2s hash with max-length (32 byte) digest. */
-FIO_IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len);
+IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len);
 
 /**
  * Flexible-output BLAKE2s hash.
  *
  * `out` must point to a buffer of at least `outlen` bytes.
  * `outlen` must be between 1 and 32 (default 32 if 0).
- * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing).
+ * `key` and `keylen` are optional (set to NULL/0 for unkeyed hashing; a NULL
+ * `key` is unkeyed regardless of `keylen`). Keys over 32 bytes are replaced
+ * by BLAKE2s-256(key) (non-standard, HMAC-like; never truncated).
  */
 SFUNC void fio_blake2s_hash(void *restrict out,
                             size_t outlen,
@@ -110,10 +129,20 @@ SFUNC fio_u256 fio_blake2s_hmac(const void *key,
                                 const void *msg,
                                 uint64_t msg_len);
 
-/** Initialize a BLAKE2s streaming context. outlen: 1-32 (default 32). */
+/**
+ * Initialize a BLAKE2s streaming context. outlen: 1-32 (default 32).
+ * A NULL `key` is unkeyed regardless of `keylen` (see fio_blake2b_init).
+ * Keys over 32 bytes: see fio_blake2s_hash.
+ */
 SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
                                      const void *key,
                                      size_t keylen);
+
+/** Initializes `h` in place (see fio_blake2b_init_at). */
+SFUNC void fio_blake2s_init_at(fio_blake2s_s *h,
+                               size_t outlen,
+                               const void *key,
+                               size_t keylen);
 
 /** Feed data into BLAKE2s hash. */
 SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
@@ -332,42 +361,60 @@ FIO_IFUNC void fio___blake2b_compress(fio_blake2b_s *restrict h,
 
 #undef FIO___BLAKE2B_G
 
-/** Initialize a BLAKE2b streaming context. */
-SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
-                                     const void *key,
-                                     size_t keylen) {
-  fio_blake2b_s h = {0};
+/** Initialize a BLAKE2b context in place (no intermediate key copies). */
+SFUNC void fio_blake2b_init_at(fio_blake2b_s *h,
+                               size_t outlen,
+                               const void *key,
+                               size_t keylen) {
+  FIO_MEMSET(h, 0, sizeof(*h));
 
   /* Validate parameters */
+  if (!key)
+    keylen = 0;
   if (outlen == 0)
     outlen = 64;
   if (outlen > 64)
     outlen = 64;
-  if (keylen > 64)
+  if (keylen > 64) { /* non-standard: key = BLAKE2b-512(key), like HMAC */
+    fio_blake2b_s kh;
+    fio_blake2b_init_at(&kh, 64, NULL, 0);
+    fio_blake2b_consume(&kh, key, keylen);
+    fio_u512 k = fio_blake2b_finalize(&kh); /* finalize wipes `kh` */
+    FIO_MEMCPY(h->buf, k.u8, 64);
+    fio_secure_zero(&k, sizeof(k));
+    key = NULL; /* key block already in place */
     keylen = 64;
-
-  h.outlen = outlen;
-
-  /* Initialize state with IV - unrolled */
-  h.h[0] = fio___blake2b_iv[0];
-  h.h[1] = fio___blake2b_iv[1];
-  h.h[2] = fio___blake2b_iv[2];
-  h.h[3] = fio___blake2b_iv[3];
-  h.h[4] = fio___blake2b_iv[4];
-  h.h[5] = fio___blake2b_iv[5];
-  h.h[6] = fio___blake2b_iv[6];
-  h.h[7] = fio___blake2b_iv[7];
-
-  /* XOR parameter block into state[0] */
-  h.h[0] ^= 0x01010000ULL ^ ((uint64_t)keylen << 8) ^ (uint64_t)outlen;
-
-  /* If keyed, pad key to 128 bytes and process as first block */
-  if (keylen > 0 && key) {
-    FIO_MEMSET(h.buf, 0, 128);
-    FIO_MEMCPY(h.buf, key, keylen);
-    h.buflen = 128;
   }
 
+  h->outlen = outlen;
+
+  /* Initialize state with IV - unrolled */
+  h->h[0] = fio___blake2b_iv[0];
+  h->h[1] = fio___blake2b_iv[1];
+  h->h[2] = fio___blake2b_iv[2];
+  h->h[3] = fio___blake2b_iv[3];
+  h->h[4] = fio___blake2b_iv[4];
+  h->h[5] = fio___blake2b_iv[5];
+  h->h[6] = fio___blake2b_iv[6];
+  h->h[7] = fio___blake2b_iv[7];
+
+  /* XOR parameter block into state[0] */
+  h->h[0] ^= 0x01010000ULL ^ ((uint64_t)keylen << 8) ^ (uint64_t)outlen;
+
+  /* If keyed, the zero-padded key is the first (buffered) block */
+  if (keylen) {
+    if (key)
+      FIO_MEMCPY(h->buf, key, keylen);
+    h->buflen = 128;
+  }
+}
+
+/** Initialize a BLAKE2b streaming context. */
+SFUNC fio_blake2b_s fio_blake2b_init(size_t outlen,
+                                     const void *key,
+                                     size_t keylen) {
+  fio_blake2b_s h; /* sole return object: built in the caller's slot (NRVO) */
+  fio_blake2b_init_at(&h, outlen, key, keylen);
   return h;
 }
 
@@ -382,7 +429,7 @@ SFUNC void fio_blake2b_consume(fio_blake2b_s *restrict h,
   /* If we have buffered data, try to complete a block */
   if (h->buflen > 0) {
     size_t fill = 128 - h->buflen;
-    if (len < fill) {
+    if (len <= fill) { /* keep a full block buffered: it may be the last */
       FIO_MEMCPY(h->buf + h->buflen, p, len);
       h->buflen += len;
       return;
@@ -442,6 +489,7 @@ SFUNC fio_u512 fio_blake2b_finalize(fio_blake2b_s *h) {
     for (size_t j = 0; j < remaining; ++j)
       dst[j] = (uint8_t)(last >> (8 * j));
   }
+  fio_secure_zero(h, sizeof(*h)); /* wipe key material / internal state */
   return r;
 }
 
@@ -452,14 +500,17 @@ SFUNC void fio_blake2b_hash(void *restrict out,
                             size_t len,
                             const void *restrict key,
                             size_t keylen) {
-  fio_blake2b_s h = fio_blake2b_init(outlen, key, keylen);
+  fio_blake2b_s h;
+  fio_blake2b_init_at(&h, outlen, key, keylen); /* no key copies */
+  outlen = h.outlen;                            /* finalize wipes the context */
   fio_blake2b_consume(&h, data, len);
   fio_u512 r = fio_blake2b_finalize(&h);
-  FIO_MEMCPY(out, r.u8, h.outlen);
+  FIO_MEMCPY(out, r.u8, outlen);
+  fio_secure_zero(&r, sizeof(r)); /* digest may be a secret (keyed / KDF) */
 }
 
 /** One-shot BLAKE2b hash with max-length (64 byte) digest. */
-FIO_IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len) {
+IFUNC fio_u512 fio_blake2b(const void *data, uint64_t len) {
   fio_blake2b_s h = fio_blake2b_init(64, NULL, 0);
   fio_blake2b_consume(&h, data, (size_t)len);
   return fio_blake2b_finalize(&h);
@@ -477,6 +528,7 @@ SFUNC fio_u512 fio_blake2b_hmac(const void *key,
     fio_blake2b_consume(&hk, key, (size_t)key_len);
     fio_u512 hashed = fio_blake2b_finalize(&hk);
     fio_memcpy64(&k_padded, hashed.u8);
+    fio_secure_zero(&hashed, sizeof(hashed));
   } else if (key_len) {
     FIO_MEMCPY(&k_padded, key, (size_t)key_len);
   }
@@ -686,42 +738,60 @@ FIO_IFUNC void fio___blake2s_compress(fio_blake2s_s *restrict h,
 
 #undef FIO___BLAKE2S_G
 
-/** Initialize a BLAKE2s streaming context. */
-SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
-                                     const void *key,
-                                     size_t keylen) {
-  fio_blake2s_s h = {0};
+/** Initialize a BLAKE2s context in place (no intermediate key copies). */
+SFUNC void fio_blake2s_init_at(fio_blake2s_s *h,
+                               size_t outlen,
+                               const void *key,
+                               size_t keylen) {
+  FIO_MEMSET(h, 0, sizeof(*h));
 
   /* Validate parameters */
+  if (!key)
+    keylen = 0;
   if (outlen == 0)
     outlen = 32;
   if (outlen > 32)
     outlen = 32;
-  if (keylen > 32)
+  if (keylen > 32) { /* non-standard: key = BLAKE2s-256(key), like HMAC */
+    fio_blake2s_s kh;
+    fio_blake2s_init_at(&kh, 32, NULL, 0);
+    fio_blake2s_consume(&kh, key, keylen);
+    fio_u256 k = fio_blake2s_finalize(&kh); /* finalize wipes `kh` */
+    FIO_MEMCPY(h->buf, k.u8, 32);
+    fio_secure_zero(&k, sizeof(k));
+    key = NULL; /* key block already in place */
     keylen = 32;
-
-  h.outlen = outlen;
-
-  /* Initialize state with IV - unrolled */
-  h.h[0] = fio___blake2s_iv[0];
-  h.h[1] = fio___blake2s_iv[1];
-  h.h[2] = fio___blake2s_iv[2];
-  h.h[3] = fio___blake2s_iv[3];
-  h.h[4] = fio___blake2s_iv[4];
-  h.h[5] = fio___blake2s_iv[5];
-  h.h[6] = fio___blake2s_iv[6];
-  h.h[7] = fio___blake2s_iv[7];
-
-  /* XOR parameter block into state[0] */
-  h.h[0] ^= 0x01010000UL ^ ((uint32_t)keylen << 8) ^ (uint32_t)outlen;
-
-  /* If keyed, pad key to 64 bytes and process as first block */
-  if (keylen > 0 && key) {
-    FIO_MEMSET(h.buf, 0, 64);
-    FIO_MEMCPY(h.buf, key, keylen);
-    h.buflen = 64;
   }
 
+  h->outlen = outlen;
+
+  /* Initialize state with IV - unrolled */
+  h->h[0] = fio___blake2s_iv[0];
+  h->h[1] = fio___blake2s_iv[1];
+  h->h[2] = fio___blake2s_iv[2];
+  h->h[3] = fio___blake2s_iv[3];
+  h->h[4] = fio___blake2s_iv[4];
+  h->h[5] = fio___blake2s_iv[5];
+  h->h[6] = fio___blake2s_iv[6];
+  h->h[7] = fio___blake2s_iv[7];
+
+  /* XOR parameter block into state[0] */
+  h->h[0] ^= 0x01010000UL ^ ((uint32_t)keylen << 8) ^ (uint32_t)outlen;
+
+  /* If keyed, the zero-padded key is the first (buffered) block */
+  if (keylen) {
+    if (key)
+      FIO_MEMCPY(h->buf, key, keylen);
+    h->buflen = 64;
+  }
+}
+
+/** Initialize a BLAKE2s streaming context. */
+SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
+                                     const void *key,
+                                     size_t keylen) {
+  fio_blake2s_s h; /* sole return object: built in the caller's slot (NRVO) */
+  fio_blake2s_init_at(&h, outlen, key, keylen);
   return h;
 }
 
@@ -736,7 +806,7 @@ SFUNC void fio_blake2s_consume(fio_blake2s_s *restrict h,
   /* If we have buffered data, try to complete a block */
   if (h->buflen > 0) {
     size_t fill = 64 - h->buflen;
-    if (len < fill) {
+    if (len <= fill) { /* keep a full block buffered: it may be the last */
       FIO_MEMCPY(h->buf + h->buflen, p, len);
       h->buflen += len;
       return;
@@ -796,6 +866,7 @@ SFUNC fio_u256 fio_blake2s_finalize(fio_blake2s_s *h) {
     for (size_t j = 0; j < remaining; ++j)
       dst[j] = (uint8_t)(last >> (8 * j));
   }
+  fio_secure_zero(h, sizeof(*h)); /* wipe key material / internal state */
   return r;
 }
 
@@ -806,14 +877,17 @@ SFUNC void fio_blake2s_hash(void *restrict out,
                             size_t len,
                             const void *restrict key,
                             size_t keylen) {
-  fio_blake2s_s h = fio_blake2s_init(outlen, key, keylen);
+  fio_blake2s_s h;
+  fio_blake2s_init_at(&h, outlen, key, keylen); /* no key copies */
+  outlen = h.outlen;                            /* finalize wipes the context */
   fio_blake2s_consume(&h, data, len);
   fio_u256 r = fio_blake2s_finalize(&h);
-  FIO_MEMCPY(out, r.u8, h.outlen);
+  FIO_MEMCPY(out, r.u8, outlen);
+  fio_secure_zero(&r, sizeof(r)); /* digest may be a secret (keyed / KDF) */
 }
 
 /** One-shot BLAKE2s hash with max-length (32 byte) digest. */
-FIO_IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len) {
+IFUNC fio_u256 fio_blake2s(const void *data, uint64_t len) {
   fio_blake2s_s h = fio_blake2s_init(32, NULL, 0);
   fio_blake2s_consume(&h, data, (size_t)len);
   return fio_blake2s_finalize(&h);
@@ -831,6 +905,7 @@ SFUNC fio_u256 fio_blake2s_hmac(const void *key,
     fio_blake2s_consume(&hk, key, (size_t)key_len);
     fio_u256 hashed = fio_blake2s_finalize(&hk);
     FIO_MEMCPY(k_padded, hashed.u8, 32);
+    fio_secure_zero(&hashed, sizeof(hashed));
   } else if (key_len) {
     FIO_MEMCPY(k_padded, key, (size_t)key_len);
   }

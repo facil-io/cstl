@@ -24,7 +24,7 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #if defined(FIO_ENTITY) && !defined(H___FIO_ENTITY___H)
 #define H___FIO_ENTITY___H
 
-/* Dependency: fio_atol10u / fio_atol16u for numeric entity parsing. */
+/* Dependency: bounded numeric parsing (fio_stol10u / fio_stol16u). */
 #ifndef H___FIO_ATOL___H
 #define FIO_ATOL
 #define FIO___RECURSIVE_INCLUDE 1
@@ -46,6 +46,10 @@ Copyright and License: see header file (000 copyright.h) or top of file
  *   - Named:   `&name;`   (case-insensitive, ~40 common entities)
  *   - Decimal: `&#digits;`
  *   - Hex:     `&#xhex;` or `&#Xhex;`
+ *
+ * Numeric forms require digits only (no signs, dividers, or extra prefixes).
+ * Zero and surrogate code points are replaced with U+FFFD; values above
+ * U+10FFFF are rejected. No source terminator or readable guard is required.
  */
 SFUNC size_t fio_entity(char *dest, const char *src, size_t len);
 
@@ -64,8 +68,10 @@ typedef struct {
 
 static const fio___entity_s fio___entity_table[] = {
 #define FIO___ENTITY(n, result)                                                \
-  {.name = n, .nlen = (uint8_t)(sizeof(n) - 1),                               \
-   .rlen = (uint8_t)(sizeof(result) - 1), .r = result}
+  {                                                                            \
+    .name = n, .nlen = (uint8_t)(sizeof(n) - 1),                               \
+    .rlen = (uint8_t)(sizeof(result) - 1), .r = result                         \
+  }
     FIO___ENTITY("lt", "<"),
     FIO___ENTITY("gt", ">"),
     FIO___ENTITY("amp", "&"),
@@ -136,14 +142,15 @@ SFUNC size_t fio_entity(char *dest, const char *src, size_t len) {
     p += is_hex;
     char *digits = (char *)p;
     uint64_t codepoint =
-        (is_hex ? fio_atol16u : fio_atol10u)(&digits);
+        is_hex ? fio_stol16u(&digits, end) : fio_stol10u(&digits, end);
     if (digits == (char *)p)
       return 0; /* no digits */
     p = digits;
+    /* Bounded parsers stop before an overflowing digit, so it cannot be ';'. */
     if (p >= end || *p != ';')
       return 0;
-    if (codepoint == 0)
-      codepoint = 0xFFFD; /* replacement char for &#0; */
+    if (codepoint == 0 || (codepoint >= 0xD800 && codepoint <= 0xDFFF))
+      codepoint = 0xFFFD; /* replacement for zero and surrogates */
     if (codepoint > 0x10FFFF)
       return 0;
     size_t written = fio_utf8_write((uint8_t *)dest, (uint32_t)codepoint);
@@ -164,11 +171,11 @@ SFUNC size_t fio_entity(char *dest, const char *src, size_t len) {
     for (size_t i = 0; i < FIO___ENTITY_TABLE_LEN; ++i) {
       if (fio___entity_table[i].nlen != name_len)
         continue;
-      int match = 1;
-      for (uint8_t j = 0; j < name_len; ++j)
-        match &= ((name_start[j] | 32) ==
-                  (fio___entity_table[i].name[j] | 32));
-      if (!match)
+      uint8_t j = 0;
+      while (j < name_len &&
+             fio_ct_tolower(name_start[j]) == fio___entity_table[i].name[j])
+        ++j;
+      if (j != name_len)
         continue;
       uint8_t rlen = fio___entity_table[i].rlen;
       FIO_MEMCPY(dest, fio___entity_table[i].r, rlen);

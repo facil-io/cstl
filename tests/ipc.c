@@ -963,9 +963,10 @@ static void test_ipc_encryption_verification(void) {
 
   fio_ipc_encrypt(msg);
 
-  FIO_ASSERT(FIO_MEMCMP(((char *)msg) + 32,
-                        original + 32,
-                        sizeof(*msg) - 32 + data_len) != 0,
+  FIO_ASSERT(FIO_MEMCMP(((char *)msg) + offsetof(fio_ipc_s, call),
+                        original + offsetof(fio_ipc_s, call),
+                        sizeof(*msg) - offsetof(fio_ipc_s, call) + data_len) !=
+                 0,
              "Encrypted data should differ from original");
 
   char *mac = msg->data + msg->len;
@@ -1006,9 +1007,106 @@ static void test_ipc_encryption_verification(void) {
   int tampered_result = fio_ipc_decrypt(tampered);
   FIO_ASSERT(tampered_result != 0,
              "Decryption should fail for tampered message");
+  fprintf(stderr, "      (expect SECURITY message about decryption failure)\n");
+  FIO_ASSERT(fio_ipc_decrypt(tampered) != 0 &&
+                 (tampered->routing_flags & 1),
+             "Failed decryption is terminal: a retry fails again");
 
   fio___ipc_free(msg);
   fio___ipc_free(tampered);
+}
+
+/* *****************************************************************************
+Test: every encryption uses a fresh nonce
+
+Messages that share `timestamp` and `id` (forced IDs) must still use distinct
+key streams; `timestamp`, `id` and `nonce` are all authenticated (they select
+the key); replies default to a fresh id.
+***************************************************************************** */
+
+static void test_ipc_encryption_nonce_unique(void) {
+  enum { MSG_LEN = 24 };
+  const char *plain[2] = {"AAAAAAAAAAAAAAAAAAAAAAAA",
+                          "BBBBBBBBBBBBBBBBBBBBBBBB"};
+  fio_ipc_s *m[2];
+  uint8_t pt[2][128], ct[2][128];
+  const size_t enc_len =
+      sizeof(fio_ipc_s) - offsetof(fio_ipc_s, call) + MSG_LEN;
+  FIO_ASSERT(enc_len <= sizeof(pt[0]), "test buffer too small");
+  for (size_t i = 0; i < 2; ++i) {
+    m[i] = fio___ipc_new(MSG_LEN + 16);
+    FIO_ASSERT(m[i], "fio___ipc_new should allocate message");
+    m[i]->from = NULL;
+    m[i]->len = MSG_LEN;
+    m[i]->flags = 0;
+    m[i]->routing_flags = 0;
+    m[i]->timestamp = 1700000000123ULL; /* same tick */
+    m[i]->id = 0x1122334455667788ULL;   /* same (forced) id */
+    m[i]->call = fio___test_ipc_call_simple;
+    m[i]->on_reply = fio___test_ipc_on_reply;
+    m[i]->on_done = fio___test_ipc_on_done;
+    m[i]->udata = NULL;
+    FIO_MEMCPY(m[i]->data, plain[i], MSG_LEN);
+    FIO_MEMCPY(pt[i], &m[i]->call, enc_len);
+    fio_ipc_encrypt(m[i]);
+    FIO_MEMCPY(ct[i], &m[i]->call, enc_len);
+  }
+  FIO_ASSERT(m[0]->nonce != m[1]->nonce, "each encryption gets a new nonce");
+  size_t same_stream = 0;
+  for (size_t i = 0; i < enc_len; ++i)
+    same_stream += ((ct[0][i] ^ ct[1][i]) == (pt[0][i] ^ pt[1][i]));
+  FIO_ASSERT(same_stream < enc_len / 2,
+             "repeated timestamp / id must not share a key stream (%zu/%zu)",
+             same_stream,
+             enc_len);
+  for (size_t i = 0; i < 2; ++i) {
+    FIO_ASSERT(!fio_ipc_decrypt(m[i]), "decryption should succeed");
+    FIO_ASSERT(!FIO_MEMCMP(m[i]->data, plain[i], MSG_LEN),
+               "payload should round-trip");
+  }
+  /* the nonce fields are authenticated (they select the key) */
+  for (size_t i = 0; i < 3; ++i) {
+    uint64_t *field = (i == 0)   ? &m[0]->id
+                      : (i == 1) ? &m[0]->timestamp
+                                 : &m[0]->nonce;
+    fio_ipc_encrypt(m[0]);
+    *field ^= 1;
+    fprintf(stderr,
+            "      (expect SECURITY message about decryption failure)\n");
+    FIO_ASSERT(fio_ipc_decrypt(m[0]),
+               "tampered nonce field (%zu) must fail authentication",
+               i);
+  }
+  fio___ipc_free(m[0]);
+  fio___ipc_free(m[1]);
+}
+
+static uint64_t fio___test_reply_ids[3];
+static size_t fio___test_reply_count;
+static void fio___test_reply_id_collect(fio_ipc_s *r) {
+  if (fio___test_reply_count < 3)
+    fio___test_reply_ids[fio___test_reply_count++] = r->id;
+}
+
+static void test_ipc_reply_fresh_id(void) {
+  fio_ipc_s *req = fio_ipc_new(.call = fio___test_ipc_call_simple,
+                               .on_reply = fio___test_reply_id_collect,
+                               .on_done = fio___test_reply_id_collect,
+                               .id = 0x0123456789ABCDEFULL);
+  FIO_ASSERT(req, "allocate request");
+  req->from = NULL; /* local execution path */
+  fio___test_reply_count = 0;
+  fio_ipc_reply(req, .done = 0);
+  fio_ipc_reply(req, .done = 0);
+  fio_ipc_reply(req, .id = 77, .done = 1);
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio___test_reply_count == 3, "replies delivered locally");
+  FIO_ASSERT(fio___test_reply_ids[0] != req->id &&
+                 fio___test_reply_ids[1] != req->id &&
+                 fio___test_reply_ids[0] != fio___test_reply_ids[1],
+             "default reply ids are fresh (unique nonce per reply)");
+  FIO_ASSERT(fio___test_reply_ids[2] == 77, "explicit reply id is kept");
+  fio_ipc_free(req);
 }
 
 /* *****************************************************************************
@@ -1319,7 +1417,7 @@ static void test_ipc_rpc_filter(void) {
   /* Filter rejects duplicate messages */
   {
     fio___ipc_cluster_filter_s filter = {0};
-    uint64_t timestamp = fio_io_last_tick();
+    uint64_t timestamp = fio_io_last_tick_time();
     uint64_t id = fio_rand64();
 
     int result1 = fio___ipc_cluster_filter(&filter, timestamp, id);
@@ -1340,7 +1438,7 @@ static void test_ipc_rpc_filter(void) {
   /* Filter handles many messages */
   {
     fio___ipc_cluster_filter_s filter = {0};
-    uint64_t base_timestamp = fio_io_last_tick();
+    uint64_t base_timestamp = fio_io_last_tick_time();
 
     for (int i = 0; i < 1000; ++i) {
       int result =
@@ -1354,9 +1452,25 @@ static void test_ipc_rpc_filter(void) {
     fio___ipc_cluster_filter_destroy(&filter);
   }
 
+  /* Filter truncation (65536 limit) keeps the newest 16384 IDs */
+  {
+    fio___ipc_cluster_filter_s filter = {0};
+    const uint64_t base = 1000;
+    for (uint64_t i = 1; i <= 65537; ++i)
+      FIO_ASSERT(!fio___ipc_cluster_filter(&filter, base + i, i),
+                 "Unique message %zu should pass filter",
+                 (size_t)i);
+    FIO_ASSERT(filter.count == 16385, "Filter should truncate to keep + 1");
+    for (uint64_t i = 65537 - 16384; i <= 65537; ++i)
+      FIO_ASSERT(fio___ipc_cluster_filter(&filter, base + i, i) == -1,
+                 "Recent message %zu should remain filtered",
+                 (size_t)i);
+    fio___ipc_cluster_filter_destroy(&filter);
+  }
+
   /* Filter time window validation */
   {
-    uint64_t current_tick = fio_io_last_tick();
+    uint64_t current_tick = fio_io_last_tick_time();
 
     int result1 = fio___ipc_cluster_filter_window(current_tick);
     FIO_ASSERT(result1 == 0, "Current timestamp should pass window check");
@@ -1369,6 +1483,10 @@ static void test_ipc_rpc_filter(void) {
 
     int result4 = fio___ipc_cluster_filter_window(current_tick + 31000);
     FIO_ASSERT(result4 == -1, "31s future timestamp should fail window check");
+
+    /* the window is wall-clock: a monotonic (since boot) stamp is foreign */
+    FIO_ASSERT(fio___ipc_cluster_filter_window(fio___ipc_now()) == -1,
+               "monotonic timestamp should fail the wall-clock window");
   }
 }
 
@@ -1385,14 +1503,22 @@ static void test_ipc_udp_discovery_message(void) {
     FIO_ASSERT(FIO_MEMCMP(msg.uuid, FIO___IPC.uuid.u8, 16) == 0,
                "Discovery message should contain our UUID");
 
-    uint64_t timestamp = fio_ntol64(msg.timestamp);
-    uint64_t now = fio_io_last_tick();
+    uint64_t timestamp = fio_ltole64(msg.timestamp);
+    uint64_t now = (uint64_t)fio_io_last_tick_time();
     FIO_ASSERT(timestamp <= now + 1000 && timestamp >= now - 1000,
-               "Discovery message timestamp should be recent");
+               "Discovery message timestamp should be recent (wall-clock)");
 
     int result = fio___ipc_udp_discovery_validate(&msg);
     FIO_ASSERT(result == -1,
                "Self-generated discovery message should fail validation");
+
+    /* the same message, seen by another instance, must validate */
+    fio_u128 saved = FIO___IPC.uuid;
+    FIO___IPC.uuid.u8[0] ^= 0xFF;
+    result = fio___ipc_udp_discovery_validate(&msg);
+    FIO___IPC.uuid = saved;
+    FIO_ASSERT(result == 0,
+               "Discovery message from another instance should validate");
   }
 
   /* Tampered message should fail validation */
@@ -1402,12 +1528,27 @@ static void test_ipc_udp_discovery_message(void) {
 
     msg.uuid[0] ^= 0xFF;
 
-    fprintf(
-        stderr,
-        "      (expect SECURITY message about UDP discovery MAC failure)\n");
     int result = fio___ipc_udp_discovery_validate(&msg);
     FIO_ASSERT(result == -1,
                "Tampered discovery message should fail validation");
+  }
+
+  /* Tampered MAC (first / last byte) must be rejected (constant-time check) */
+  for (size_t i = 0; i < 16; i += 15) {
+    fio___ipc_udp_discovery_s msg;
+    fio___ipc_udp_discovery_compose(&msg);
+    msg.mac[i] ^= 0x01;
+    fio_u128 saved = FIO___IPC.uuid; /* pretend message came from a peer */
+    FIO___IPC.uuid.u8[0] ^= 0xFF;
+    int result = fio___ipc_udp_discovery_validate(&msg);
+    msg.mac[i] ^= 0x01; /* restore: the untampered tag must validate */
+    int restored = fio___ipc_udp_discovery_validate(&msg);
+    FIO___IPC.uuid = saved;
+    FIO_ASSERT(result == -1,
+               "Discovery message with tampered MAC byte %zu should fail",
+               i);
+    FIO_ASSERT(restored == 0,
+               "Discovery message with restored MAC should validate");
   }
 
   /* Message with old timestamp should fail */
@@ -1415,14 +1556,24 @@ static void test_ipc_udp_discovery_message(void) {
     fio___ipc_udp_discovery_s msg;
     fio___ipc_udp_discovery_compose(&msg);
 
-    msg.timestamp = fio_lton64(fio_io_last_tick() - 60000);
+    msg.timestamp = fio_ltole64((uint64_t)fio_io_last_tick_time() - 60000);
 
-    fprintf(
-        stderr,
-        "      (expect SECURITY message about UDP discovery time window)\n");
     int result = fio___ipc_udp_discovery_validate(&msg);
     FIO_ASSERT(result == -1,
                "Old discovery message should fail time window validation");
+  }
+
+  /* Rejection logs are rate limited (unauthenticated floods) */
+  {
+    FIO___IPC.udp_log_time = 0;
+    FIO___IPC.udp_log_skipped = 0;
+    fprintf(stderr, "      (expect one SECURITY message about UDP discovery)\n");
+    for (size_t i = 0; i < 16; ++i)
+      fio___ipc_udp_log_rejected();
+    FIO_ASSERT(FIO___IPC.udp_log_skipped == 15,
+               "UDP rejection log should report once per second");
+    FIO___IPC.udp_log_time = 0;
+    FIO___IPC.udp_log_skipped = 0;
   }
 }
 
@@ -1474,13 +1625,73 @@ static void fio___test_lifecycle_on_detached(fio_ipc_s *event) {
              "detached event contains UUID but no connection");
 }
 
+/* authors an encrypted UUID declaration, as a peer would */
+static fio_ipc_s *fio___test_hello_frame(const fio_u128 *uuid,
+                                         uint8_t role,
+                                         uint64_t timestamp) {
+  const uint32_t len = (role == FIO___IPC_ROLE_CLUSTER) ? 25 : 17;
+  fio_ipc_s *m = fio___ipc_new(len + 16);
+  FIO_ASSERT(m != NULL, "allocate declaration");
+  m->from = NULL;
+  m->len = len;
+  m->flags = 0;
+  m->routing_flags = FIO_IPC_FLAG_HELLO;
+  m->timestamp = timestamp;
+  m->id = fio_rand64();
+  m->call = NULL;
+  m->on_reply = NULL;
+  m->on_done = NULL;
+  m->udata = NULL;
+  FIO_MEMCPY(m->data, uuid->u8, 16);
+  m->data[16] = (char)role;
+  if (len == 25) { /* cluster: the peer's challenge */
+    uint64_t challenge = fio_rand64();
+    FIO_MEMCPY(m->data + 17, &challenge, 8);
+  }
+  fio_ipc_encrypt(m);
+  return m;
+}
+
 static fio_ipc_s *fio___test_lifecycle_hello(const fio_u128 *uuid) {
-  fio_ipc_s *msg = fio_ipc_new(.cluster = 1, .opcode = 0xFFFFFFFFU);
-  FIO_ASSERT(msg != NULL, "allocate hello");
-  fio_memcpy8((char *)(void *)&msg->on_reply, uuid->u8);
-  fio_memcpy8((char *)(void *)&msg->on_done, uuid->u8 + 8);
-  fio_ipc_encrypt(msg);
-  return msg;
+  return fio___test_hello_frame(uuid,
+                                FIO___IPC_ROLE_CLUSTER,
+                                (uint64_t)fio_io_last_tick_time());
+}
+
+/* authors an encrypted cluster challenge proof, as a peer would */
+static fio_ipc_s *fio___test_proof_frame(const fio_u128 *uuid,
+                                         uint64_t challenge) {
+  fio_ipc_s *m = fio___ipc_new(24 + 16);
+  FIO_ASSERT(m != NULL, "allocate challenge proof");
+  FIO_MEMSET(m, 0, sizeof(*m));
+  m->len = 24;
+  m->routing_flags = FIO_IPC_FLAG_HELLO | FIO_IPC_FLAG_REPLY;
+  m->timestamp = (uint64_t)fio_io_last_tick_time();
+  m->id = fio_rand64();
+  FIO_MEMCPY(m->data, uuid->u8, 16);
+  FIO_MEMCPY(m->data + 16, &challenge, 8);
+  fio_ipc_encrypt(m);
+  return m;
+}
+
+/* declares `uuid` on `io` and answers its challenge (full handshake) */
+static void fio___test_lifecycle_declare(fio_io_s *io, const fio_u128 *uuid) {
+  fio___ipc_on_rpc_master(fio___test_lifecycle_hello(uuid), fio_io_dup(io));
+  FIO_ASSERT(fio___ipc_cluster_parser(io)->auth == FIO___IPC_AUTH_PROOF,
+             "declaration awaits the challenge proof");
+  fio___ipc_on_rpc_master(
+      fio___test_proof_frame(uuid, fio___ipc_cluster_parser(io)->challenge),
+      fio_io_dup(io));
+}
+
+/* attaches a fresh cluster connection (sends our declaration on attach) */
+static fio_io_s *fio___test_lifecycle_attach(fio_socket_i fds[2]) {
+  FIO_ASSERT(!fio_sock_socketpair(fds), "create peer sockets");
+  fio___test_lifecycle_io =
+      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc_hello, NULL, NULL);
+  FIO_ASSERT(fio___test_lifecycle_io != NULL, "attach RPC peer");
+  fio_queue_perform_all(fio_io_queue());
+  return fio___test_lifecycle_io;
 }
 
 static void test_ipc_cluster_lifecycle(void) {
@@ -1512,18 +1723,26 @@ static void test_ipc_cluster_lifecycle(void) {
   fio___test_lifecycle_uuid =
       fio_u128_init64(0x1234567890ABCDEFULL, 0xFEDCBA0987654321ULL);
   fio_socket_i fds[2];
-  FIO_ASSERT(!fio_sock_socketpair(fds), "create peer sockets");
-  fio___test_lifecycle_io =
-      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
-  FIO_ASSERT(fio___test_lifecycle_io != NULL, "attach RPC peer");
-  fio_queue_perform_all(fio_io_queue());
+  fio___test_lifecycle_attach(fds);
+  fio_ipc_s *declaration =
+      fio___test_lifecycle_hello(&fio___test_lifecycle_uuid);
+  fio_ipc_s *replay = fio___ipc_copy(declaration); /* same ciphertext */
+  fio___ipc_on_rpc_master(declaration, fio_io_dup(fio___test_lifecycle_io));
+  FIO_ASSERT(!fio___test_lifecycle_attached[0] &&
+                 fio_io_protocol(fio___test_lifecycle_io) ==
+                     &FIO___IPC.protocol_rpc_hello &&
+                 fio___ipc_cluster_parser(fio___test_lifecycle_io)->auth ==
+                     FIO___IPC_AUTH_PROOF,
+             "a (transferable) declaration alone doesn't authenticate");
   fio___ipc_on_rpc_master(
-      fio___test_lifecycle_hello(&fio___test_lifecycle_uuid),
+      fio___test_proof_frame(
+          &fio___test_lifecycle_uuid,
+          fio___ipc_cluster_parser(fio___test_lifecycle_io)->challenge),
       fio_io_dup(fio___test_lifecycle_io));
   FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
                  fio___test_lifecycle_attached[1] == 1 &&
                  !fio___test_lifecycle_detached[0],
-             "both subscribers receive valid handshake");
+             "both subscribers receive a valid declaration");
   FIO_ASSERT(fio___test_lifecycle_saved &&
                  fio___test_lifecycle_saved->from == fio___test_lifecycle_io &&
                  FIO_MEMCMP(fio___test_lifecycle_saved->data,
@@ -1531,6 +1750,9 @@ static void test_ipc_cluster_lifecycle(void) {
                             16) == 0,
              "dup retains UUID and IO, not an outgoing message");
   fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio_io_protocol(fio___test_lifecycle_io) ==
+                 &FIO___IPC.protocol_rpc,
+             "declared peer moves to the broadcast protocol");
   fio_ipc_s *request =
       fio_ipc_new(.cluster = 1,
                   .opcode = 0xCC11U,
@@ -1542,7 +1764,51 @@ static void test_ipc_cluster_lifecycle(void) {
              "normal opcode request dispatches to application handler");
   fio_queue_perform_all(fio_io_queue());
 
-  /* Duplicate handshake closes IO; retained event delays close notification. */
+  /* A replayed declaration (new connection, within the window) is dropped. */
+  {
+    fio_io_s *first = fio___test_lifecycle_io;
+    fio_socket_i rfds[2];
+    fio_io_s *rio = fio___test_lifecycle_attach(rfds);
+    fio___ipc_on_rpc_master(replay, fio_io_dup(rio));
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
+                   fio_io_protocol(rio) == &FIO___IPC.protocol_rpc_hello,
+               "replayed declaration is filtered");
+    fio_io_close_now(rio);
+    fio_queue_perform_all(fio_io_queue());
+    fio_sock_close(rfds[1]);
+    fio___test_lifecycle_io = first;
+  }
+
+  /* A fresh declaration replayed by a third party (unseen here) can't answer
+   * this connection's challenge: a proof for another challenge is refused. */
+  {
+    fio_io_s *first = fio___test_lifecycle_io;
+    const fio_u128 other = fio_u128_init64(0x0102030405060708ULL, 99);
+    fio_socket_i rfds[2];
+    fio_io_s *rio = fio___test_lifecycle_attach(rfds);
+    fio_io_s *hold = fio_io_dup(rio);
+    fio___ipc_on_rpc_master(fio___test_lifecycle_hello(&other),
+                            fio_io_dup(rio));
+    fio___ipc_on_rpc_master(
+        fio___test_proof_frame(&other,
+                               fio___ipc_cluster_parser(rio)->challenge + 1),
+        fio_io_dup(rio));
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
+                   fio_io_protocol(hold) == &FIO___IPC.protocol_rpc_hello &&
+                   !fio_io_is_open(hold) &&
+                   !fio___ipc_cluster_filter_get(
+                       &FIO___IPC.peers,
+                       (fio___ipc_msg_id_s){other.u64[0], other.u64[1]}),
+               "wrong challenge proof is rejected (UUID not registered)");
+    fio_io_free(hold);
+    fio_queue_perform_all(fio_io_queue());
+    fio_sock_close(rfds[1]);
+    fio___test_lifecycle_io = first;
+  }
+
+  /* A second declaration closes the IO; retained event delays detach. */
   fio___ipc_on_rpc_master(
       fio___test_lifecycle_hello(&fio___test_lifecycle_uuid),
       fio_io_dup(fio___test_lifecycle_io));
@@ -1560,43 +1826,48 @@ static void test_ipc_cluster_lifecycle(void) {
              "both detached callbacks arrive after retained event freed");
   fio_sock_close(fds[1]);
 
-  /* Rejected self-identity neither announces nor detaches. */
-  FIO_ASSERT(!fio_sock_socketpair(fds), "create rejected peer sockets");
-  fio___test_lifecycle_io =
-      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
-  fio_queue_perform_all(fio_io_queue());
-  fio___ipc_on_rpc_master(fio___test_lifecycle_hello(&FIO___IPC.uuid),
-                          fio_io_dup(fio___test_lifecycle_io));
-  fio_queue_perform_all(fio_io_queue());
-  FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
-                 fio___test_lifecycle_detached[1] == 1,
-             "failed handshake has no lifecycle callbacks");
-  fio_sock_close(fds[1]);
-
-  /* An ordinary RPC before authentication cannot trigger peer callbacks. */
-  FIO_ASSERT(!fio_sock_socketpair(fds), "create pre-handshake sockets");
-  fio___test_lifecycle_io =
-      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
-  fio_queue_perform_all(fio_io_queue());
-  fio_ipc_s *premature = fio_ipc_new(.cluster = 1, .opcode = 0xCC11U);
-  FIO_ASSERT(premature != NULL, "allocate premature RPC");
-  fio_ipc_encrypt(premature);
-  fio___ipc_on_rpc_master(premature, fio_io_dup(fio___test_lifecycle_io));
-  fio_queue_perform_all(fio_io_queue());
-  FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
-                 fio___test_lifecycle_detached[0] == 1 &&
-                 fio___test_lifecycle_opcode_calls == 1,
-             "pre-handshake RPC never dispatches or announces peer");
-  fio_sock_close(fds[1]);
+  /* Rejected declarations (self, wrong role, ordinary message first, stale)
+   * neither announce nor detach. Rejections close the connection; stale
+   * declarations are dropped (the connection times out). */
+  for (size_t i = 0; i < 4; ++i) {
+    fio_io_s *io = fio___test_lifecycle_attach(fds);
+    fio_io_s *hold = fio_io_dup(io);
+    fio_ipc_s *m;
+    if (i == 0) {
+      m = fio___test_lifecycle_hello(&FIO___IPC.uuid);
+    } else if (i == 1) {
+      m = fio___test_hello_frame(&fio___test_lifecycle_uuid,
+                                 FIO___IPC_ROLE_WORKER,
+                                 (uint64_t)fio_io_last_tick_time());
+    } else if (i == 2) {
+      m = fio_ipc_new(.cluster = 1, .opcode = 0xCC11U);
+      FIO_ASSERT(m != NULL, "allocate premature RPC");
+      fio_ipc_encrypt(m);
+    } else {
+      m = fio___test_hello_frame(&fio___test_lifecycle_uuid,
+                                 FIO___IPC_ROLE_CLUSTER,
+                                 (uint64_t)fio_io_last_tick_time() - 60000);
+    }
+    fio___ipc_on_rpc_master(m, fio_io_dup(io));
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(fio___test_lifecycle_attached[0] == 1 &&
+                   fio___test_lifecycle_detached[1] == 1 &&
+                   fio___test_lifecycle_opcode_calls == 1 &&
+                   fio_io_protocol(hold) == &FIO___IPC.protocol_rpc_hello &&
+                   (i == 3 || !fio_io_is_open(hold)),
+               "invalid declaration (%zu) is rejected",
+               i);
+    if (i == 3)
+      fio_io_close_now(hold);
+    fio_io_free(hold);
+    fio_queue_perform_all(fio_io_queue());
+    fio_sock_close(fds[1]);
+  }
 
   /* Reconnect with same UUID gets a fresh pair of notifications. */
-  FIO_ASSERT(!fio_sock_socketpair(fds), "create reconnected peer sockets");
-  fio___test_lifecycle_io =
-      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_rpc, NULL, NULL);
-  fio_queue_perform_all(fio_io_queue());
-  fio___ipc_on_rpc_master(
-      fio___test_lifecycle_hello(&fio___test_lifecycle_uuid),
-      fio_io_dup(fio___test_lifecycle_io));
+  fio___test_lifecycle_attach(fds);
+  fio___test_lifecycle_declare(fio___test_lifecycle_io,
+                               &fio___test_lifecycle_uuid);
   FIO_ASSERT(fio___test_lifecycle_attached[0] == 2 &&
                  fio___test_lifecycle_attached[1] == 2,
              "reconnected peer announces to both subscribers");
@@ -1612,6 +1883,162 @@ static void test_ipc_cluster_lifecycle(void) {
   FIO_MEMSET(FIO___IPC.on_peer, 0, sizeof(FIO___IPC.on_peer));
   FIO___IPC.on_peer_count = 0; /* test isolation */
   fio_ipc_opcode_register(.opcode = 0xCC11U, .call = NULL);
+}
+
+/* *****************************************************************************
+Test: local connection authentication (UUID declaration)
+***************************************************************************** */
+
+static size_t fio___test_auth_count;
+static void fio___test_auth_call(fio_ipc_s *m) {
+  ++fio___test_auth_count;
+  (void)m;
+}
+
+/* delivers an encrypted local message as if read from `io` */
+static void fio___test_auth_deliver(fio_io_s *io, fio_ipc_s *m) {
+  m->from = fio_io_dup(io);
+  fio___ipc_on_ipc_master(m, m->from);
+}
+static fio_ipc_s *fio___test_auth_msg(void) {
+  fio_ipc_s *m = fio_ipc_new(.call = fio___test_auth_call);
+  FIO_ASSERT(m != NULL, "allocate local message");
+  fio_ipc_encrypt(m);
+  return m;
+}
+
+static void test_ipc_local_auth(void) {
+  fio_socket_i fds[2];
+  const fio_u128 other = fio_u128_init64(1, 2);
+  fio___test_auth_count = 0;
+  /* a valid declaration authenticates; later messages execute in order */
+  FIO_ASSERT(!fio_sock_socketpair(fds), "create local auth sockets");
+  fio_io_s *io =
+      fio_io_attach_fd(fds[0], &FIO___IPC.protocol_ipc_hello, NULL, NULL);
+  FIO_ASSERT(io, "attach local hello connection");
+  fio_queue_perform_all(fio_io_queue());
+  fio___test_auth_deliver(io,
+                          fio___test_hello_frame(&FIO___IPC.uuid,
+                                                 FIO___IPC_ROLE_WORKER,
+                                                 fio___ipc_now()));
+  fio___test_auth_deliver(io, fio___test_auth_msg());
+  fio_queue_perform_all(fio_io_queue());
+  FIO_ASSERT(fio_io_protocol(io) == &FIO___IPC.protocol_ipc,
+             "declared connection moves to the broadcast protocol");
+  FIO_ASSERT(fio___test_auth_count == 1, "post-declaration message executes");
+  fio_io_close_now(io);
+  fio_queue_perform_all(fio_io_queue());
+  fio_sock_close(fds[1]);
+
+  /* message first, reflected role, foreign instance, stale, future: closed */
+  for (size_t i = 0; i < 5; ++i) {
+    FIO_ASSERT(!fio_sock_socketpair(fds), "create rejection sockets");
+    io = fio_io_attach_fd(fds[0], &FIO___IPC.protocol_ipc_hello, NULL, NULL);
+    fio_queue_perform_all(fio_io_queue());
+    const uint64_t now = fio___ipc_parser(io)->opened;
+    fio_io_s *hold = fio_io_dup(io);
+    fio_ipc_s *m =
+        (i == 0)   ? fio___test_auth_msg()
+        : (i == 1) ? fio___test_hello_frame(&FIO___IPC.uuid,
+                                            FIO___IPC_ROLE_MASTER,
+                                            now)
+        : (i == 2) ? fio___test_hello_frame(&other, FIO___IPC_ROLE_WORKER, now)
+        : (i == 3) ? fio___test_hello_frame(&FIO___IPC.uuid,
+                                            FIO___IPC_ROLE_WORKER,
+                                            now - FIO___IPC_LOCAL_DRIFT)
+                   : fio___test_hello_frame(&FIO___IPC.uuid,
+                                            FIO___IPC_ROLE_WORKER,
+                                            now + FIO___IPC_LOCAL_DRIFT);
+    fio___test_auth_deliver(io, m);
+    fio_queue_perform_all(fio_io_queue());
+    FIO_ASSERT(!fio_io_is_open(hold) && fio___test_auth_count == 1 &&
+                   fio_io_protocol(hold) != &FIO___IPC.protocol_ipc,
+               "invalid first message closes the connection (%zu)",
+               i);
+    fio_io_free(hold);
+    fio_queue_perform_all(fio_io_queue());
+    fio_sock_close(fds[1]);
+  }
+}
+
+/* *****************************************************************************
+Test: security regressions (replay window, pre-auth limits, NULL payloads)
+***************************************************************************** */
+
+static void test_ipc_security_regressions(void) {
+  /* NULL buffers with a length publish zeros, never uninitialized memory */
+  {
+    fio_ipc_s *m = fio_ipc_new(.data = FIO_IPC_DATA(FIO_BUF_INFO2(NULL, 16)));
+    FIO_ASSERT(m && m->len == 16, "NULL buffer payload is authored");
+    for (size_t i = 0; i < 16; ++i)
+      FIO_ASSERT(!m->data[i], "NULL buffer payload is zeroed");
+    fio___ipc_free(m);
+  }
+  /* Replay filter: in-window IDs survive compaction; expired IDs are dropped */
+  {
+    fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
+    FIO___IPC.received_floor = 0;
+    FIO___IPC.received_limit = 0;
+    const uint64_t now = (uint64_t)fio_io_last_tick_time();
+    FIO_ASSERT(!fio___ipc_replay_record(now - 1000, 7), "record target ID");
+    for (uint64_t i = 0; i <= FIO___IPC_REPLAY_MIN; ++i)
+      FIO_ASSERT(!fio___ipc_replay_record(now + 1 + (i & 1023), i + 100),
+                 "record newer ID %zu",
+                 (size_t)i);
+    FIO_ASSERT(fio___ipc_replay_seen(now - 1000, 7) &&
+                   fio___ipc_replay_record(now - 1000, 7) == -1,
+               "an in-window ID can't be evicted and replayed");
+    fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
+    FIO___IPC.received_limit = 0;
+    for (uint64_t i = 0; i < FIO___IPC_REPLAY_MIN; ++i)
+      FIO_ASSERT(!fio___ipc_replay_record(now - 60000, i + 1),
+                 "record expired ID");
+    FIO_ASSERT(!fio___ipc_replay_record(now, 1) &&
+                   FIO___IPC.received.count == 1 &&
+                   !FIO___IPC.received_floor,
+               "compaction drops expired IDs only");
+    /* overflow fails closed: older timestamps are refused */
+    fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
+    FIO___IPC.received_limit = 0;
+    for (uint64_t i = 0; i <= FIO___IPC_REPLAY_MAX; ++i)
+      FIO_ASSERT(!fio___ipc_replay_record(now - 20000 + (i >> 5), i + 1),
+                 "record in-window ID %zu",
+                 (size_t)i);
+    FIO_ASSERT(FIO___IPC.received_floor &&
+                   fio___ipc_replay_seen(now - 20000, 1) &&
+                   fio___ipc_replay_record(now - 20000, 0xFFFFFFFFULL) == -1,
+               "replay filter overflow refuses older timestamps");
+    fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
+    FIO___IPC.received_floor = 0;
+    FIO___IPC.received_limit = 0;
+  }
+  /* Unauthenticated peers can't make us allocate large frames */
+  for (size_t i = 0; i < 2; ++i) {
+    fio_socket_i fds[2];
+    FIO_ASSERT(!fio_sock_socketpair(fds), "create pre-auth sockets");
+    fio_io_s *io =
+        fio_io_attach_fd(fds[0], &FIO___IPC.protocol_ipc_hello, NULL, NULL);
+    fio_queue_perform_all(fio_io_queue());
+    fio_io_s *hold = fio_io_dup(io);
+    fio___ipc_parser_s *p = fio___ipc_parser(io);
+    char hdr[8] = {0};
+    fio_u2buf32_le(hdr, (1UL << 20)); /* published length: 1 MiB */
+    if (i) /* pretend a (pending) declaration was already queued */
+      p->first = 1;
+    else
+      fprintf(stderr, "      (expect SECURITY message about IPC length)\n");
+    FIO_ASSERT(fio_sock_write(fds[1], hdr, 8) == 8, "write large header");
+    fio___ipc_on_data_master(io);
+    FIO_ASSERT(!p->msg, "no pre-auth allocation for a large frame (%zu)", i);
+    FIO_ASSERT(i ? (fio_io_is_open(hold) && fio_io_is_suspended(hold))
+                 : !fio_io_is_open(hold),
+               "large first frame closes, later ones wait (%zu)",
+               i);
+    fio_io_close_now(hold);
+    fio_io_free(hold);
+    fio_queue_perform_all(fio_io_queue());
+    fio_sock_close(fds[1]);
+  }
 }
 
 int main(void) {
@@ -1642,6 +2069,9 @@ int main(void) {
   test_ipc_memory_safety();
   test_ipc_multi_buffer_data();
   test_ipc_encryption_verification();
+  test_ipc_encryption_nonce_unique();
+  test_ipc_reply_fresh_id();
+  test_ipc_local_auth();
   test_ipc_rpc_message_creation();
   test_ipc_rpc_opcode_registration();
   test_ipc_rpc_listen_connect_validation();
@@ -1649,6 +2079,7 @@ int main(void) {
   test_ipc_rpc_filter();
   test_ipc_udp_discovery_message();
   test_ipc_cluster_lifecycle();
+  test_ipc_security_regressions();
 
   fprintf(stderr, "=== IPC correctness tests passed ===\n");
   return 0;

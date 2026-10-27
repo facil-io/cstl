@@ -109,15 +109,15 @@ Time Inline Helpers
 
 /** Returns human (watch) time... this value isn't as safe for measurements. */
 FIO_IFUNC struct timespec fio_time_real(void) {
-  struct timespec t;
-  clock_gettime(CLOCK_REALTIME, &t);
+  struct timespec t = {0};
+  (void)clock_gettime(CLOCK_REALTIME, &t);
   return t;
 }
 
 /** Returns monotonic time. */
 FIO_IFUNC struct timespec fio_time_mono(void) {
-  struct timespec t;
-  clock_gettime(CLOCK_MONOTONIC, &t);
+  struct timespec t = {0};
+  (void)clock_gettime(CLOCK_MONOTONIC, &t);
   return t;
 }
 
@@ -150,36 +150,95 @@ FIO_IFUNC int64_t fio_time2micro(struct timespec t) {
 
 /* Normalizes a timespec struct after an `add` or `sub` operation. */
 FIO_IFUNC void fio_time___normalize(struct timespec *t) {
-  const long ns_norm[2] = {0, 1000000000LL};
-  t->tv_nsec += ns_norm[(t->tv_nsec < 0)];
-  t->tv_sec += (t->tv_nsec < 0);
-  t->tv_nsec -= ns_norm[(1000000000LL < t->tv_nsec)];
-  t->tv_sec += (1000000000LL < t->tv_nsec);
+  /* Accept noncanonical inputs as well as the one-second carry from add. */
+  const int64_t carry = (int64_t)t->tv_nsec / 1000000000LL;
+  int64_t ns = (int64_t)t->tv_nsec % 1000000000LL;
+  int64_t sec = (int64_t)t->tv_sec;
+  int64_t adjustment = carry;
+  if (ns < 0) {
+    ns += 1000000000LL;
+    --adjustment;
+  }
+  if (adjustment > 0 && sec > INT64_MAX - adjustment)
+    sec = INT64_MAX;
+  else if (adjustment < 0 && sec < INT64_MIN - adjustment)
+    sec = INT64_MIN;
+  else
+    sec += adjustment;
+  if (sizeof(time_t) < sizeof(int64_t)) {
+    if (sec > INT32_MAX) {
+      sec = INT32_MAX;
+      ns = 999999999;
+    } else if (sec < INT32_MIN) {
+      sec = INT32_MIN;
+      ns = 0;
+    }
+  }
+  t->tv_sec = (time_t)sec;
+  t->tv_nsec = (long)ns;
 }
 
 /** Adds to timespec. */
 FIO_IFUNC struct timespec fio_time_add(struct timespec t, struct timespec t2) {
-  t.tv_sec += t2.tv_sec;
-  t.tv_nsec += t2.tv_nsec;
+  /* Normalize each operand first to avoid overflow of long nanoseconds. */
   fio_time___normalize(&t);
+  fio_time___normalize(&t2);
+  int64_t a = (int64_t)t.tv_sec, b = (int64_t)t2.tv_sec;
+  if (b > 0 && a > INT64_MAX - b)
+    a = INT64_MAX;
+  else if (b < 0 && a < INT64_MIN - b)
+    a = INT64_MIN;
+  else
+    a += b;
+  if (sizeof(time_t) < sizeof(int64_t)) {
+    if (a > INT32_MAX) {
+      a = INT32_MAX;
+      t.tv_nsec = 999999999;
+      t2.tv_nsec = 0;
+    } else if (a < INT32_MIN) {
+      a = INT32_MIN;
+      t.tv_nsec = 0;
+      t2.tv_nsec = 0;
+    }
+  }
+  /* Both normalized nanoseconds fit in int64_t even on a 32-bit long. */
+  const int64_t ns = (int64_t)t.tv_nsec + (int64_t)t2.tv_nsec;
+  if (ns >= 1000000000LL) {
+    if (a == INT64_MAX ||
+        (sizeof(time_t) < sizeof(int64_t) && a == INT32_MAX)) {
+      a = sizeof(time_t) < sizeof(int64_t) ? INT32_MAX : INT64_MAX;
+      t.tv_nsec = 999999999;
+    } else {
+      ++a;
+      t.tv_nsec = (long)(ns - 1000000000LL);
+    }
+  } else {
+    t.tv_nsec = (long)ns;
+  }
+  t.tv_sec = (time_t)a;
   return t;
 }
 
 /** Adds milliseconds to timespec. */
 FIO_IFUNC struct timespec fio_time_add_milli(struct timespec t, int64_t milli) {
-  t.tv_sec += milli >> 10; /* 1024 is close enough, will be normalized */
-  t.tv_nsec += (milli & 1023) * 1000000;
-  fio_time___normalize(&t);
-  return t;
+  const int64_t seconds = milli / 1000;
+  const long nanos = (long)((milli % 1000) * 1000000);
+  /* A 32-bit time_t cannot hold the whole millisecond quotient. Saturate
+   * rather than narrowing an extreme duration into an early deadline. */
+  if (sizeof(time_t) < sizeof(int64_t) && seconds > INT32_MAX)
+    return (struct timespec){.tv_sec = INT32_MAX, .tv_nsec = 999999999};
+  if (sizeof(time_t) < sizeof(int64_t) && seconds < INT32_MIN)
+    return (struct timespec){.tv_sec = INT32_MIN, .tv_nsec = 0};
+  return fio_time_add(
+      t,
+      (struct timespec){.tv_sec = (time_t)seconds, .tv_nsec = nanos});
 }
 
 /** Compares two timespecs. */
 FIO_IFUNC int fio_time_cmp(struct timespec t1, struct timespec t2) {
-  size_t a = (t2.tv_sec < t1.tv_sec) << 1;
-  a |= (t2.tv_nsec < t1.tv_nsec);
-  size_t b = (t1.tv_sec < t2.tv_sec) << 1;
-  b |= (t1.tv_nsec < t2.tv_nsec);
-  return (0 - (a < b)) + (b < a);
+  if (t1.tv_sec != t2.tv_sec)
+    return (t1.tv_sec > t2.tv_sec) - (t1.tv_sec < t2.tv_sec);
+  return (t1.tv_nsec > t2.tv_nsec) - (t1.tv_nsec < t2.tv_nsec);
 }
 
 /* *****************************************************************************
@@ -196,7 +255,7 @@ Time Implementation
  */
 SFUNC struct tm fio_time2gm(time_t timer) {
   struct tm tm;
-  ssize_t a, b;
+  int64_t a, b;
 #if (defined(HAVE_TM_TM_ZONE) && HAVE_TM_TM_ZONE) || defined(BSD)
   tm = (struct tm){
       .tm_isdst = 0,
@@ -211,7 +270,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
   // convert seconds from epoch to days from epoch + extract data
   if (timer >= 0) {
     // for seconds up to weekdays, we reduce the reminder every step.
-    a = (ssize_t)timer;
+    a = (int64_t)timer;
     b = a / 60; // b == time in minutes
     tm.tm_sec = (int)(a - (b * 60));
     a = b / 60; // b == time in hours
@@ -220,10 +279,10 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     tm.tm_hour = (int)(a - (b * 24));
     // b == number of days since epoch
     // day of epoch was a thursday. Add + 4 so sunday == 0...
-    tm.tm_wday = (b + 4) % 7;
+    tm.tm_wday = (int)((b + 4) % 7);
   } else {
     // for seconds up to weekdays, we reduce the reminder every step.
-    a = (ssize_t)timer;
+    a = (int64_t)timer;
     b = a / 60; // b == time in minutes
     if (b * 60 != a) {
       /* seconds passed */
@@ -252,9 +311,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
       tm.tm_hour = 0;
     }
     // day of epoch was a thursday. Add + 4 so sunday == 0...
-    tm.tm_wday = ((b - 3) % 7);
-    if (tm.tm_wday)
-      tm.tm_wday += 7;
+    tm.tm_wday = (int)((b % 7 + 11) % 7);
     /* b == days from epoch */
   }
 
@@ -264,7 +321,7 @@ SFUNC struct tm fio_time2gm(time_t timer) {
   {
     b += 719468L; // adjust to March 1st, 2000 (post leap of 400 year era)
     // 146,097 = days in era (400 years)
-    const size_t era = (b >= 0 ? b : b - 146096) / 146097;
+    const int64_t era = (b >= 0 ? b : b - 146096) / 146097;
     const uint32_t doe = (uint32_t)(b - (era * 146097)); // day of era
     const uint16_t yoe =
         (uint16_t)((doe - doe / 1460 + doe / 36524 - doe / 146096) /
@@ -276,6 +333,10 @@ SFUNC struct tm fio_time2gm(time_t timer) {
     const uint16_t d = (uint16_t)(doy - (153U * mp + 2) / 5 + 1);
     const uint8_t m = (uint8_t)(mp + (mp < 10 ? 2 : -10));
     a += (m <= 1);
+    /* struct tm cannot represent years beyond int; return a safe epoch
+     * fallback instead of narrowing and risking invalid formatter indexes. */
+    if (a - 1900 > INT_MAX || a - 1900 < INT_MIN)
+      return fio_time2gm((time_t)0);
     tm.tm_year = (int)(a - 1900); // tm_year == years since 1900
     tm.tm_mon = m;
     tm.tm_mday = d;
@@ -335,7 +396,7 @@ FIO_SFUNC char *fio_time_write_month(char *dest, const struct tm *tm) {
 }
 
 FIO_SFUNC char *fio_time_write_year(char *dest, const struct tm *tm) {
-  int64_t year = tm->tm_year + 1900;
+  int64_t year = (int64_t)tm->tm_year + 1900;
   const size_t digits = fio_digits10(year);
   fio_ltoa10(dest, year, digits);
   return dest + digits;

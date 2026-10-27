@@ -13,6 +13,47 @@ split out of ./tests/core.c during Stage 4A ownership normalization.
 Functional Tests
 ***************************************************************************** */
 
+/* Check the public destination return, copy direction, and untouched bytes. */
+FIO_SFUNC void fio___test_memcpy_contract(void) {
+  const size_t lengths[] = {0,   1,   2,   3,   4,   7,   8,  9,  15,
+                            16,  17,  24,  31,  32,  33,  63, 64, 65,
+                            127, 128, 129, 255, 256, 257, 512};
+  const size_t gaps[] = {0, 1, 2, 7, 16, 31, 64, 127, 128, 257, 512};
+  unsigned char actual[1056], expected[1056], src[512];
+  for (size_t k = 0; k < sizeof lengths / sizeof *lengths; ++k) {
+    size_t len = lengths[k];
+    /* Separate objects exercise non-overlap classification too. */
+    for (size_t i = 0; i < sizeof src; ++i)
+      src[i] = (unsigned char)(i * 37U + 11U);
+    FIO_ASSERT(fio_memcpy(actual, src, len) == actual,
+               "fio_memcpy destination return, separate objects len=%zu",
+               len);
+    FIO_ASSERT(!memcmp(actual, src, len), "fio_memcpy separate objects");
+    for (size_t offset = 0; offset < 8; ++offset) {
+      for (size_t g = 0; g < sizeof gaps / sizeof *gaps; ++g) {
+        for (size_t reverse = 0; reverse < 2; ++reverse) {
+          size_t dest = offset + (reverse ? gaps[g] : 0);
+          size_t source = offset + (reverse ? 0 : gaps[g]);
+          for (size_t i = 0; i < sizeof actual; ++i)
+            actual[i] = expected[i] = (unsigned char)(i * 37U + 11U);
+          memmove(expected + dest, expected + source, len);
+          FIO_ASSERT(
+              fio_memcpy(actual + dest, actual + source, len) == actual + dest,
+              "fio_memcpy destination return len=%zu gap=%zu reverse=%zu",
+              len,
+              gaps[g],
+              reverse);
+          FIO_ASSERT(!memcmp(actual, expected, sizeof actual),
+                     "fio_memcpy bounds/content len=%zu gap=%zu reverse=%zu",
+                     len,
+                     gaps[g],
+                     reverse);
+        }
+      }
+    }
+  }
+}
+
 FIO_SFUNC void fio___test_memcpy_overlap(void) {
   /* Forward overlap: dest < src < dest+len (should use buffered copy) */
   {
@@ -305,6 +346,69 @@ FIO_SFUNC void fio___test_memset_alignment(void) {
   }
 }
 
+/* Include direct scalar coverage even when the public path uses SIMD.
+ * A token^1 byte before the match exposes borrow propagation on big endian. */
+FIO_SFUNC void fio___test_memchr_borrow_and_bounds(void) {
+  unsigned char storage[320] FIO_ALIGN(32);
+  const unsigned char tokens[] = {0, 1, 0x7f, 0x80, 0xff};
+  for (size_t off = 0; off < 32; ++off) {
+    unsigned char *buf = storage + off;
+    for (size_t len = 0; len <= 257; ++len) {
+      for (size_t t = 0; t < sizeof tokens; ++t) {
+        unsigned char token = tokens[t];
+        memset(buf, token ^ 1U, len);
+        /* A match just outside the search range must not be returned. */
+        buf[len] = token;
+        FIO_ASSERT(!fio_memchr(buf, (char)token, len) &&
+                       !fio___memchr_scalar(buf, (char)token, len),
+                   "memchr absent/bounds off=%zu len=%zu",
+                   off,
+                   len);
+        for (size_t pos = 0; pos < len; ++pos) {
+          buf[pos] = token;
+          if (pos + 1 < len)
+            buf[pos + 1] = token;
+          FIO_ASSERT(
+              fio_memchr(buf, (char)token, len) == buf + pos &&
+                  fio___memchr_scalar(buf, (char)token, len) == buf + pos,
+              "memchr borrow/first match off=%zu len=%zu pos=%zu token=%u",
+              off,
+              len,
+              pos,
+              (unsigned)token);
+          buf[pos] = token ^ 1U;
+          if (pos + 1 < len)
+            buf[pos + 1] = token ^ 1U;
+        }
+      }
+    }
+  }
+}
+
+/* Exact short objects exercise SIMD head/tail bounds under ASan. */
+FIO_SFUNC void fio___test_memchr_exact_objects(void) {
+  for (size_t len = 1; len <= 257; ++len) {
+    for (size_t off = 0; off < 32; ++off) {
+      char *allocation = (char *)malloc(off + len);
+      FIO_ASSERT(allocation, "memchr test allocation failed");
+      memset(allocation, 'X', off + len);
+      char *buf = allocation + off;
+      FIO_ASSERT(!fio_memchr(buf, 'Y', len) &&
+                     !fio___memchr_scalar(buf, 'Y', len),
+                 "memchr exact absent len=%zu off=%zu",
+                 len,
+                 off);
+      buf[len - 1] = 'Y';
+      FIO_ASSERT(fio_memchr(buf, 'Y', len) == buf + len - 1 &&
+                     fio___memchr_scalar(buf, 'Y', len) == buf + len - 1,
+                 "memchr exact match len=%zu off=%zu",
+                 len,
+                 off);
+      free(allocation);
+    }
+  }
+}
+
 FIO_SFUNC void fio___test_memchr_token_position(void) {
   char buf[256];
   FIO_MEMSET(buf, 'X', sizeof(buf));
@@ -456,9 +560,9 @@ FIO_SFUNC void fio___test_memchr_simd_boundaries(void) {
 FIO_SFUNC void fio___test_memcmp_differential(void) {
   enum { MAX_LEN = 4096 };
   unsigned char a_store[MAX_LEN + 16], b_store[MAX_LEN + 16];
-  const size_t lengths[] = {0, 1, 2, 3, 4, 7, 8, 9, 15, 16, 17, 31,
-                            32, 33, 63, 64, 65, 127, 128, 129,
-                            255, 256, 257, 1023, 1024, 1025, 4096};
+  const size_t lengths[] = {0,   1,   2,   3,   4,    7,    8,    9,   15,  16,
+                            17,  24,  31,  32,  33,   63,   64,   65,  127, 128,
+                            129, 255, 256, 257, 1023, 1024, 1025, 4096};
   FIO_ASSERT(fio_memcmp(NULL, NULL, 0) == 0, "empty memcmp");
   for (size_t offset = 0; offset < 8; ++offset) {
     unsigned char *a = a_store + offset;
@@ -468,23 +572,49 @@ FIO_SFUNC void fio___test_memcmp_differential(void) {
     for (size_t k = 0; k < sizeof lengths / sizeof *lengths; ++k) {
       size_t len = lengths[k];
       FIO_ASSERT(fio_memcmp(a, b, len) == 0 && fio_memcmp(a, a, len) == 0,
-                 "memcmp equal len=%zu", len);
+                 "memcmp equal len=%zu",
+                 len);
       for (size_t pos = 0; pos < len; ++pos) {
         unsigned char old = b[pos];
         const unsigned char candidates[] = {0, 0x7f, 0x80, 0xff};
         for (size_t v = 0; v < sizeof candidates; ++v) {
-          if (candidates[v] == a[pos]) continue;
+          if (candidates[v] == a[pos])
+            continue;
           b[pos] = candidates[v];
           int expected = memcmp(a, b, len), got = fio_memcmp(a, b, len);
           int reverse = fio_memcmp(b, a, len);
-          FIO_ASSERT((got > 0) - (got < 0) == (expected > 0) - (expected < 0) &&
-                     (reverse > 0) - (reverse < 0) == (expected < 0) - (expected > 0),
+          FIO_ASSERT(got == (expected > 0) - (expected < 0) &&
+                         reverse == (expected < 0) - (expected > 0),
                      "memcmp len=%zu pos=%zu offset=%zu byte=%u",
-                     len, pos, offset, (unsigned)candidates[v]);
-          FIO_ASSERT(!fio_ct_is_eq(a, b, len), "ct mismatch len=%zu pos=%zu", len, pos);
+                     len,
+                     pos,
+                     offset,
+                     (unsigned)candidates[v]);
+          FIO_ASSERT(!fio_ct_is_eq(a, b, len),
+                     "ct mismatch len=%zu pos=%zu",
+                     len,
+                     pos);
         }
         b[pos] = old;
       }
+    }
+  }
+}
+
+/* Exact heap objects keep the byte after NUL poisoned under ASan. */
+FIO_SFUNC void fio___test_strlen_exact_objects(void) {
+  size_t (*volatile scan)(const char *) = fio_strlen;
+  for (size_t len = 0; len <= 512; ++len) {
+    for (size_t off = 0; off < 16; ++off) {
+      char *allocation = (char *)malloc(off + len + 1);
+      FIO_ASSERT(allocation, "strlen test allocation failed");
+      memset(allocation, 'S', off + len);
+      allocation[off + len] = 0;
+      FIO_ASSERT(scan(allocation + off) == len,
+                 "strlen exact object len=%zu off=%zu",
+                 len,
+                 off);
+      free(allocation);
     }
   }
 }
@@ -647,14 +777,14 @@ FIO_SFUNC void fio___test_memalt_archived(void) {
       memmove(buf, msg, len);
       fio_memcpy(buf + offset, buf, len);
       FIO_ASSERT(!memcmp(buf + offset, msg, len),
-                 "fio_memcpy failed on overlapping data (offset +%d, len %zu)",
+                 "fio_memcpy failed on overlapping data (offset +%zu, len %zu)",
                  offset,
                  len);
       memset(buf, 0, sizeof(buf));
       memmove(buf + offset, msg, len);
       fio_memcpy(buf, buf + offset, len);
       FIO_ASSERT(!memcmp(buf, msg, len),
-                 "fio_memcpy failed on overlapping data (offset -%d, len %zu)",
+                 "fio_memcpy failed on overlapping data (offset -%zu, len %zu)",
                  offset,
                  len);
     }
@@ -693,6 +823,7 @@ Main Test Entry Point
 ***************************************************************************** */
 
 int main(void) {
+  fio___test_memcpy_contract();
   fio___test_memalt_archived();
   fio___test_memcpy_overlap();
   fio___test_memcpy_null_handling();
@@ -701,11 +832,14 @@ int main(void) {
   fio___test_memset_size_boundaries();
   fio___test_memset_data_patterns();
   fio___test_memset_alignment();
+  fio___test_memchr_borrow_and_bounds();
+  fio___test_memchr_exact_objects();
   fio___test_memchr_token_position();
   fio___test_memchr_token_values();
   fio___test_memchr_size_boundaries();
   fio___test_memchr_simd_boundaries();
   fio___test_memcmp_differential();
+  fio___test_strlen_exact_objects();
   fio___test_strlen_lengths();
   fio___test_strlen_null_pointer();
   fio___test_strlen_alignment();

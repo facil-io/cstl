@@ -193,15 +193,32 @@ Compiler Helpers - Deprecation, Alignment, Inlining, Memory Barriers
 #define FIO_COMPILER_GUARD __asm__ volatile("" ::: "memory")
 /** Prevent compiler reordering optimizations. */
 #define FIO_COMPILER_GUARD_INSTRUCTION __asm__ volatile("" :::)
+/**
+ * A memory guard that also treats the memory at `ptr` as read (escaped).
+ *
+ * Use when writes to a local (non-escaping) buffer must be performed, i.e.,
+ * wiping secrets - `FIO_COMPILER_GUARD` only covers memory the compiler
+ * already considers reachable, so stores to a private stack buffer may be
+ * removed as dead stores.
+ */
+#define FIO_COMPILER_GUARD_PTR(ptr) __asm__ volatile("" : : "r"(ptr) : "memory")
 #elif defined(_MSC_VER)
 #include <intrin.h>
 #define FIO_COMPILER_GUARD             _ReadWriteBarrier()
 #define FIO_COMPILER_GUARD_INSTRUCTION _WriteBarrier()
+/* publish the address to a volatile sink (escapes), then fence */
+#define FIO_COMPILER_GUARD_PTR(ptr)                                            \
+  do {                                                                         \
+    static void *volatile fio___compiler_guard_sink;                           \
+    fio___compiler_guard_sink = (void *)(ptr);                                 \
+    FIO_COMPILER_GUARD;                                                        \
+  } while (0)
 #pragma message("Warning: Windows deprecated it's low-level C memory barrier.")
 #else
 #warning Unknown OS / compiler, some macros are poorly defined and errors might occur.
 #define FIO_COMPILER_GUARD             asm volatile("" ::: "memory")
 #define FIO_COMPILER_GUARD_INSTRUCTION asm volatile("" :::)
+#define FIO_COMPILER_GUARD_PTR(ptr)    asm volatile("" : : "r"(ptr) : "memory")
 #endif
 
 /* *****************************************************************************
@@ -226,6 +243,18 @@ Address Sanitizer Detection
 #endif
 #else
 #define FIO___ASAN_AVOID
+#endif
+
+/* Thread Sanitizer Detection (for intentionally lock-free / lossy code) */
+#if defined(__SANITIZE_THREAD__)
+#define FIO___TSAN_AVOID __attribute__((no_sanitize_thread))
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define FIO___TSAN_AVOID __attribute__((no_sanitize("thread")))
+#endif
+#endif /* thread_sanitizer */
+#ifndef FIO___TSAN_AVOID
+#define FIO___TSAN_AVOID
 #endif
 
 /* *****************************************************************************
@@ -320,7 +349,7 @@ OS Specific includes and Macros
 #define fio_getpid _getpid
 
 #ifndef FIO_KILL_SELF
-/** Sends a signal to kill the current process (emulates CTRL + C). */
+/** Interrupts the process group (emulates CTRL + C); define to override. */
 #define FIO_KILL_SELF() GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0)
 #endif
 
@@ -359,7 +388,7 @@ typedef SSIZE_T ssize_t;
 /** Calls the `getpid` provided by the system. */
 #define fio_getpid          getpid
 #ifndef FIO_KILL_SELF
-/** Sends a signal to kill the current process (emulates CTRL + C). */
+/** Interrupts the process group (emulates CTRL + C); define to override. */
 #define FIO_KILL_SELF() kill(0, SIGINT)
 #endif
 
@@ -870,41 +899,10 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 /* Atomic Implementation Selector */
 #elif __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
-#include <stdatomic.h>
-#ifdef _MSC_VER
-#pragma message ("Fallback to C11 atomic header, might be missing some features.")
-#undef FIO_COMPILER_GUARD
-#define FIO_COMPILER_GUARD atomic_thread_fence(memory_order_seq_cst)
-#else
-#warning Fallback to C11 atomic header, might be missing some features.
-#endif /* _MSC_VER */
-/** An atomic load operation, returns value in pointer. */
-#define fio_atomic_load(dest, p_obj)  (dest = atomic_load(p_obj))
-
-/** An atomic compare and exchange operation, returns true if an exchange occurred. `p_expected` MAY be overwritten with the existing value (system specific). */
-#define fio_atomic_compare_exchange_p(p_obj, p_expected, p_desired) atomic_compare_exchange_strong((p_obj), (p_expected), (p_desired))
-/** An atomic exchange operation, returns previous value */
-#define fio_atomic_exchange(p_obj, value) atomic_exchange((p_obj), (value))
-/** An atomic addition operation, returns previous value */
-#define fio_atomic_add(p_obj, value) atomic_fetch_add((p_obj), (value))
-/** An atomic subtraction operation, returns previous value */
-#define fio_atomic_sub(p_obj, value) atomic_fetch_sub((p_obj), (value))
-/** An atomic AND (&) operation, returns previous value */
-#define fio_atomic_and(p_obj, value) atomic_fetch_and((p_obj), (value))
-/** An atomic XOR (^) operation, returns previous value */
-#define fio_atomic_xor(p_obj, value) atomic_fetch_xor((p_obj), (value))
-/** An atomic OR (|) operation, returns previous value */
-#define fio_atomic_or(p_obj, value) atomic_fetch_or((p_obj), (value))
-/** An atomic addition operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
-#define fio_atomic_add_fetch(p_obj, value) (fio_atomic_add((p_obj), (value)) + (value))
-/** An atomic subtraction operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
-#define fio_atomic_sub_fetch(p_obj, value) (fio_atomic_sub((p_obj), (value)) - (value))
-/** An atomic AND (&) operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
-#define fio_atomic_and_fetch(p_obj, value) (fio_atomic_and((p_obj), (value)) & (value))
-/** An atomic XOR (^) operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
-#define fio_atomic_xor_fetch(p_obj, value) (fio_atomic_xor((p_obj), (value)) ^ (value))
-/** An atomic OR (|) operation, returns new value; WINDOWS uses a MACRO, `value` accessed twice! */
-#define fio_atomic_or_fetch(p_obj, value)  (fio_atomic_or((p_obj), (value)) | (value))
+/* No C11 <stdatomic.h> fallback: the C11 generics require `_Atomic` objects,
+ * but `fio_atomic_*` operates on plain (non-`_Atomic`) storage (locks, flags,
+ * counters, pointers). Strict compilers reject this, others yield UB. */
+#error fio_atomic requires GNU-compatible __atomic / __sync builtins or MSVC Interlocked intrinsics; C11 <stdatomic.h> cannot be applied to plain (non-_Atomic) storage.
 
 #elif _MSC_VER
 #pragma message ("Warning: WinAPI atomics have less features, but this is what this compiler has, so...")
@@ -1120,7 +1118,7 @@ FIO_IFUNC void fio_unlock(fio_lock_i *lock) {
 
 /** Returns 1 if the lock is locked, 0 otherwise. */
 FIO_IFUNC uint8_t FIO_NAME_BL(fio, locked)(fio_lock_i *lock) {
-  return *lock & 1;
+  return ((*lock) & 1);
 }
 
 /** Returns 1 if the lock is locked, 0 otherwise. */
@@ -1135,7 +1133,9 @@ Atomic Bit access / manipulation
 
 /** Gets the state of a bit in a bitmap. */
 FIO_IFUNC uint8_t fio_atomic_bit_get(void *map, size_t bit) {
-  return ((((uint8_t *)(map))[(bit) >> 3] >> ((bit)&7)) & 1);
+  return ((fio_atomic_or((uint8_t *)(map) + ((bit) >> 3), (uint8_t)0) >>
+           ((bit)&7)) &
+          1);
 }
 
 /** Sets the a bit in a bitmap (sets to 1). */
@@ -1511,7 +1511,12 @@ FIO_IFUNC unsigned int fio_is_big_endian(void) {
 /* *****************************************************************************
 Security Related macros
 ***************************************************************************** */
-/** Places `pages` x 4096 bytes of zero (`0`) on the stack. */
+/**
+ * Places `pages` x 4096 bytes of zero (`0`) on the stack.
+ *
+ * `pages` MUST be a small compile-time constant (the array is initialized, so
+ * a runtime value fails to compile rather than creating a VLA).
+ */
 #define FIO_MEM_STACK_WIPE(pages)                                              \
   do {                                                                         \
     volatile char stack_mem[(pages) << 12] = {0};                              \
@@ -1840,7 +1845,14 @@ Memory Leak Detection
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
 #ifndef FIO___LEAK_COUNTER_DEF
+/* Deceleration only, to be placed before the `extern` block if needed. */
+#define FIO___LEAK_COUNTER_DEC(name)                                           \
+  size_t FIO_NAME(fio___leak_counter, name)(size_t i);
+
+/* The shared counter + a (once per TU) `FIO_CALL_AFTER_EXIT` leak report. */
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
+  size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
+  void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);                    \
   size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
     static volatile size_t counter = 0;                                        \
     size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
@@ -1852,7 +1864,7 @@ Memory Leak Detection
                "(%d) " FIO_MACRO2STR(name) " `free` after `free` detected!",   \
                fio_getpid());                                                  \
   }                                                                            \
-  static void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {            \
+  void FIO_WEAK FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {          \
     size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
     FIO_LOG_DEBUG2("(%d) testing leaks for " FIO_MACRO2STR(name),              \
                    fio_getpid());                                              \
@@ -2337,8 +2349,8 @@ typedef struct fio_list_node_s {
   } while (0)
 
 /** UNSAFE macro for testing if a list is empty. */
-#define FIO_LIST_IS_EMPTY(head)                                                \
-  ((!(head)) || ((!(head)->next) | ((head)->next == (head))))
+#define FIO_LIST_IS_EMPTY(head) /* uintptr_t: no GCC -Waddress for `&head` */  \
+  ((!(uintptr_t)(head)) || ((!(head)->next) | ((head)->next == (head))))
 
 /* *****************************************************************************
 Indexed Linked Lists Persistent Macros and Types
@@ -2480,20 +2492,23 @@ FIO_IFUNC FIO_CONST uintmax_t fio_ct_if(uintmax_t cond,
   return fio_ct_if_bool(fio_ct_true(cond), a, b);
 }
 
-/** Returns `a` if a >= `b`. */
-FIO_IFUNC FIO_CONST intmax_t fio_ct_max(intmax_t a_, intmax_t b_) {
-  // if b - a is negative, a > b, unless both / one are negative.
-  const uintmax_t a = (uintmax_t)a_, b = (uintmax_t)b_;
-  return (
-      intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, b, a);
+/** Returns 1 if signed `a < b`, 0 otherwise (overflow safe, constant time). */
+FIO_IFUNC FIO_CONST uintmax_t fio___ct_is_lt(intmax_t a_, intmax_t b_) {
+  /* Hacker's Delight: sign of (a-b) ^ ((a^b) & ((a-b)^a)) */
+  const uintmax_t a = (uintmax_t)a_, b = (uintmax_t)b_, d = a - b;
+  return ((d ^ ((a ^ b) & (d ^ a))) >> ((sizeof(a) << 3) - 1)) & 1;
 }
 
-/** Returns `a` if a >= `b`. */
-FIO_IFUNC FIO_CONST intmax_t fio_ct_min(intmax_t a_, intmax_t b_) {
-  // if b - a is negative, a > b, unless both / one are negative.
-  const uintmax_t a = (uintmax_t)a_, b = (uintmax_t)b_;
+/** Returns the bigger of `a` and `b` (constant time). */
+FIO_IFUNC FIO_CONST intmax_t fio_ct_max(intmax_t a, intmax_t b) {
   return (
-      intmax_t)fio_ct_if_bool(((a - b) >> ((sizeof(a) << 3) - 1)) & 1, a, b);
+      intmax_t)fio_ct_if_bool(fio___ct_is_lt(a, b), (uintmax_t)b, (uintmax_t)a);
+}
+
+/** Returns the smaller of `a` and `b` (constant time). */
+FIO_IFUNC FIO_CONST intmax_t fio_ct_min(intmax_t a, intmax_t b) {
+  return (
+      intmax_t)fio_ct_if_bool(fio___ct_is_lt(a, b), (uintmax_t)a, (uintmax_t)b);
 }
 
 /** Returns absolute value. */
@@ -2576,60 +2591,100 @@ FIO_SFUNC _Bool fio_ct_is_eq(const void *a_, const void *b_, size_t bytes) {
   const char *a = (const char *)a_;
   const char *b = (const char *)b_;
   const char *e = a + bytes;
-  /* any uneven bytes? */
-  if (bytes & 63) {
-    /* consume uneven byte head */
-    uint64_t ua[8] FIO_ALIGN(64) = {0};
-    uint64_t ub[8] FIO_ALIGN(64) = {0};
-    /* all these if statements can run in parallel */
-    if (bytes & 32) {
-      fio_memcpy32(ua, a);
-      fio_memcpy32(ub, b);
-    }
-    if (bytes & 16) {
-      fio_memcpy16(ua + 4, a + (bytes & 32));
-      fio_memcpy16(ub + 4, b + (bytes & 32));
-    }
-    if (bytes & 8) {
-      fio_memcpy8(ua + 6, a + (bytes & 48));
-      fio_memcpy8(ub + 6, b + (bytes & 48));
-    }
-    if (bytes & 4) {
-      fio_memcpy4((uint32_t *)ua + 14, a + (bytes & 56));
-      fio_memcpy4((uint32_t *)ub + 14, b + (bytes & 56));
-    }
-    if (bytes & 2) {
-      fio_memcpy2((uint16_t *)ua + 30, a + (bytes & 60));
-      fio_memcpy2((uint16_t *)ub + 30, b + (bytes & 60));
-    }
-    if (bytes & 1) {
-      ((char *)ua)[62] = *(a + (bytes & 62));
-      ((char *)ub)[62] = *(b + (bytes & 62));
-    }
-    for (size_t i = 0; i < 8; ++i)
-      flag |= ua[i] ^ ub[i];
-    a += bytes & 63;
-    b += bytes & 63;
+  switch (bytes) {
+  case 8: return !(fio_buf2u64u(a) ^ fio_buf2u64u(b));
+  case 16:
+    return !((fio_buf2u64u(a) ^ fio_buf2u64u(b)) |
+             (fio_buf2u64u(a + 8) ^ fio_buf2u64u(b + 8)));
+  case 24:
+    return !((fio_buf2u64u(a) ^ fio_buf2u64u(b)) |
+             (fio_buf2u64u(a + 8) ^ fio_buf2u64u(b + 8)) |
+             (fio_buf2u64u(a + 16) ^ fio_buf2u64u(b + 16)));
+  case 32:
+    return !((fio_buf2u64u(a) ^ fio_buf2u64u(b)) |
+             (fio_buf2u64u(a + 8) ^ fio_buf2u64u(b + 8)) |
+             (fio_buf2u64u(a + 16) ^ fio_buf2u64u(b + 16)) |
+             (fio_buf2u64u(a + 24) ^ fio_buf2u64u(b + 24)));
   }
-  while (a < e) {
-    uint64_t ua[8] FIO_ALIGN(64);
-    uint64_t ub[8] FIO_ALIGN(64);
-    fio_memcpy64(ua, a);
-    fio_memcpy64(ub, b);
-    for (size_t i = 0; i < 8; ++i)
-      flag |= ua[i] ^ ub[i];
-    a += 64;
-    b += 64;
+  while (a + 63 < e) {
+    for (size_t i_ = 0; i_ < 2; ++i_) {
+      flag |= ((fio_buf2u64u(a) ^ fio_buf2u64u(b)) |
+               (fio_buf2u64u(a + 8) ^ fio_buf2u64u(b + 8)) |
+               (fio_buf2u64u(a + 16) ^ fio_buf2u64u(b + 16)) |
+               (fio_buf2u64u(a + 24) ^ fio_buf2u64u(b + 24)));
+      a += 32;
+      b += 32;
+    }
   }
+  if ((bytes & 32)) {
+    flag |= ((fio_buf2u64u(a) ^ fio_buf2u64u(b)) |
+             (fio_buf2u64u(a + 8) ^ fio_buf2u64u(b + 8)) |
+             (fio_buf2u64u(a + 16) ^ fio_buf2u64u(b + 16)) |
+             (fio_buf2u64u(a + 24) ^ fio_buf2u64u(b + 24)));
+    a += 32;
+    b += 32;
+  }
+  if ((bytes & 16)) {
+    flag |= ((fio_buf2u64u(a) ^ fio_buf2u64u(b)) |
+             (fio_buf2u64u(a + 8) ^ fio_buf2u64u(b + 8)));
+    a += 16;
+    b += 16;
+  }
+  if ((bytes & 8)) {
+    flag |= (fio_buf2u64u(a) ^ fio_buf2u64u(b));
+    a += 8;
+    b += 8;
+  }
+  if ((bytes & 4)) {
+    flag |= (fio_buf2u32u(a) ^ fio_buf2u32u(b));
+    a += 4;
+    b += 4;
+  }
+  switch (bytes & 3) {
+  case 3: flag |= (fio_buf2u24u(a) ^ fio_buf2u24u(b)); break;
+  case 2: flag |= (fio_buf2u16u(a) ^ fio_buf2u16u(b)); break;
+  case 1: flag |= a[0] ^ b[0]; break;
+  }
+  FIO_COMPILER_GUARD_PTR(flag);
   flag |= (uint64_t)((~flag) + 1);
   flag = ~flag;
   return (uint64_t)((flag >> 63));
 }
 
-/** A timing attack resistant memory zeroing function. */
+/**
+ * Zeroes memory in a way the compiler may not optimize away (dead stores).
+ *
+ * Unaligned-safe word stores, followed by `FIO_COMPILER_GUARD_PTR` (the
+ * buffer's address escapes, so the stores can't be treated as dead).
+ */
 FIO_IFUNC void fio_secure_zero(void *a_, size_t bytes) {
-  volatile uint8_t *buf = (volatile uint8_t *)(a_);
-  FIO_FOR_UNROLL(bytes, 1, i, buf[i] = 0);
+  uint8_t *buf = (uint8_t *)a_;
+  for (; bytes > 31; bytes -= 32, buf += 32) {
+    fio_u2buf64u(buf, 0);
+    fio_u2buf64u(buf + 8, 0);
+    fio_u2buf64u(buf + 16, 0);
+    fio_u2buf64u(buf + 24, 0);
+  }
+  if (bytes & 16) {
+    fio_u2buf64u(buf, 0);
+    fio_u2buf64u(buf + 8, 0);
+    buf += 16;
+  }
+  if (bytes & 8) {
+    fio_u2buf64u(buf, 0);
+    buf += 8;
+  }
+  if (bytes & 4) {
+    fio_u2buf32u(buf, 0);
+    buf += 4;
+  }
+  if (bytes & 2) {
+    fio_u2buf16u(buf, 0);
+    buf += 2;
+  }
+  if (bytes & 1)
+    *buf = 0;
+  FIO_COMPILER_GUARD_PTR(a_);
 }
 
 /* *****************************************************************************
@@ -2686,7 +2741,7 @@ FIO_IFUNC FIO_CONST uint64_t fio_lrot64(uint64_t i, uint8_t bits) {
 }
 #endif
 
-#if __has_builtin(__builtin_rotatrightt8)
+#if __has_builtin(__builtin_rotateright8)
 /** 8Bit right rotation, inlined. */
 #define fio_rrot8(i, bits) __builtin_rotateright8(i, bits)
 #else
@@ -2797,7 +2852,7 @@ FIO_IFUNC FIO_CONST uint32_t fio_xor_rrot2_shr_32(uint32_t x,
                                                   uint8_t a,
                                                   uint8_t b,
                                                   uint8_t c) {
-  return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ (x >> c);
+  return fio_rrot32(x, a) ^ fio_rrot32(x, b) ^ (x >> (c & 31));
 }
 
 /** 64-bit version of double rotation + shift XOR. */
@@ -2805,7 +2860,7 @@ FIO_IFUNC FIO_CONST uint64_t fio_xor_rrot2_shr_64(uint64_t x,
                                                   uint8_t a,
                                                   uint8_t b,
                                                   uint8_t c) {
-  return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ (x >> c);
+  return fio_rrot64(x, a) ^ fio_rrot64(x, b) ^ (x >> (c & 63));
 }
 
 /* *****************************************************************************
@@ -2876,7 +2931,7 @@ FIO_IFUNC void fio_xmask_cpy(char *restrict dest,
     src += 8;
   }
   if (len & 7) {
-    uint64_t tmp;
+    uint64_t tmp = 0;
     fio_memcpy7x(&tmp, src, len);
     tmp ^= mask;
     fio_memcpy7x(dest, &tmp, len);
@@ -3037,9 +3092,8 @@ FIO_IFUNC FIO_CONST uint32_t fio_has_byte32(uint32_t row, uint8_t byte) {
  * The full byte will be be set to 0x80, all other bytes will be 0x0.
  */
 FIO_IFUNC FIO_CONST uint32_t fio_has_full_byte32(uint32_t row) {
-  return fio_has_zero_byte32(row);
-  // return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
-  //        (row & UINT32_C(0x80808080));
+  return ((row & UINT32_C(0x7F7F7F7F)) + UINT32_C(0x01010101)) &
+         (row & UINT32_C(0x80808080));
 }
 
 /**
@@ -3306,16 +3360,28 @@ Fun Primes
 
 /* clang-format on */
 
-/** Perform modular multiplication for numbers with up to 64 bits. */
+/** Overflow safe `(x + y) % mod`, requires `x, y < mod`. */
+FIO_IFUNC uint64_t fio___math_addmod64(uint64_t x, uint64_t y, uint64_t mod) {
+  return (x >= mod - y) ? (x - (mod - y)) : (x + y);
+}
+
+/**
+ * Perform modular multiplication for numbers with up to 64 bits.
+ *
+ * Returns 0 if `mod` is 0.
+ */
 FIO_IFUNC uint64_t fio_math_mod_mul64(uint64_t a, uint64_t b, uint64_t mod) {
+  if (!mod)
+    return 0;
 #if defined(__SIZEOF_INT128__) && !FIO_OS_WIN
   return (uint64_t)(((__uint128_t)a * b) % mod);
 #else
   uint64_t r = 0;
+  a %= mod;
   for (; b; b >>= 1) {
     if (b & 1)
-      r = (r + a) % mod;
-    a = (a + a) % mod;
+      r = fio___math_addmod64(r, a, mod);
+    a = fio___math_addmod64(a, a, mod);
   }
   return r;
 #endif
@@ -3325,7 +3391,9 @@ FIO_IFUNC uint64_t fio_math_mod_mul64(uint64_t a, uint64_t b, uint64_t mod) {
 FIO_IFUNC uint64_t fio_math_mod_expo64(uint64_t base,
                                        uint64_t exp,
                                        uint64_t mod) {
-  uint64_t result = 1;
+  if (!mod)
+    return 0;
+  uint64_t result = 1 % mod; /* mod == 1 => 0 */
   base %= mod;
   for (; exp; exp >>= 1) {
     if ((exp & 1)) { /* if exp is odd, multiply base with result */
@@ -3414,7 +3482,8 @@ FIO_SFUNC bool fio_math_is_uprime(uint64_t n) {
  * For numbers up to 1023 this is deterministic.
  */
 FIO_IFUNC bool fio_math_is_iprime(int64_t n) {
-  return fio_math_is_uprime((n < 0) ? (uint64_t)(0LL - n) : (uint64_t)n);
+  return fio_math_is_uprime((n < 0) ? ((uint64_t)0 - (uint64_t)n)
+                                    : (uint64_t)n);
 }
 
 /* *****************************************************************************
@@ -3895,6 +3964,11 @@ FIO_IFUNC void fio___math_mul_1024(uint64_t *restrict dest,
 #ifndef FIO___MATH_KARATSUBA_THRESHOLD
 #define FIO___MATH_KARATSUBA_THRESHOLD 32
 #endif
+#ifndef FIO___MATH_KARATSUBA_LIMIT
+/* Max Karatsuba `len` (words); bounds its stack scratch to ~(4*len+4)*8 bytes.
+ * Longer inputs use schoolbook multiplication (no scratch memory). */
+#define FIO___MATH_KARATSUBA_LIMIT 256
+#endif
 // clang-format on
 /**
  * Karatsuba multiplication for large multi-precision numbers.
@@ -3928,10 +4002,8 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
                             const uint64_t *a,
                             const uint64_t *b,
                             const size_t len) {
-  if (!len) {
-    dest[0] = 0;
-    return;
-  }
+  if (!len)
+    return; /* zero words: nothing to write */
   if (len == 1) {
     dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
     return;
@@ -3953,8 +4025,9 @@ FIO_IFUNC void fio_math_mul(uint64_t *restrict dest,
   }
   */
 
-  /* Large numbers: use Karatsuba if above threshold */
-  if (len >= FIO___MATH_KARATSUBA_THRESHOLD && !(len & 1)) {
+  /* Large numbers: use Karatsuba if above threshold (bounded stack use) */
+  if (len >= FIO___MATH_KARATSUBA_THRESHOLD &&
+      len <= FIO___MATH_KARATSUBA_LIMIT && !(len & 1)) {
     fio___math_mul_karatsuba(dest, a, b, len);
     return;
   }
@@ -3967,10 +4040,8 @@ FIO_IFUNC void fio___math_mul_norecurse(uint64_t *restrict dest,
                                         const uint64_t *a,
                                         const uint64_t *b,
                                         const size_t len) {
-  if (!len) {
-    dest[0] = 0;
-    return;
-  }
+  if (!len)
+    return; /* zero words: nothing to write */
   if (len == 1) {
     dest[0] = fio_math_mulc64(a[0], b[0], dest + 1);
     return;
@@ -4009,7 +4080,9 @@ FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
   const uint64_t *b_lo = b;
   const uint64_t *b_hi = b + half;
 
-/* Stack allocation for small sizes, otherwise use heap */
+  FIO_ASSERT_DEBUG(len <= FIO___MATH_KARATSUBA_LIMIT,
+                   "Karatsuba length exceeds FIO___MATH_KARATSUBA_LIMIT");
+/* Stack allocation, bounded by FIO___MATH_KARATSUBA_LIMIT (see caller) */
 #if !defined(_MSC_VER) && (!defined(__cplusplus) || __cplusplus > 201402L)
   uint64_t z0_buf[len];         /* a_lo * b_lo result (len words) */
   uint64_t z2_buf[len];         /* a_hi * b_hi result (len words) */
@@ -4023,18 +4096,16 @@ FIO_SFUNC void fio___math_mul_karatsuba(uint64_t *restrict dest,
   uint64_t *sum_b = sum_b_buf;
 #else
   /* MSVC or old C++ - use fixed size with assertion */
-  uint64_t z0_buf[256];
-  uint64_t z2_buf[256];
-  uint64_t z1_buf[258];
-  uint64_t sum_a_buf[129];
-  uint64_t sum_b_buf[129];
+  uint64_t z0_buf[FIO___MATH_KARATSUBA_LIMIT];
+  uint64_t z2_buf[FIO___MATH_KARATSUBA_LIMIT];
+  uint64_t z1_buf[FIO___MATH_KARATSUBA_LIMIT + 2];
+  uint64_t sum_a_buf[(FIO___MATH_KARATSUBA_LIMIT >> 1) + 1];
+  uint64_t sum_b_buf[(FIO___MATH_KARATSUBA_LIMIT >> 1) + 1];
   uint64_t *z0 = z0_buf;
   uint64_t *z2 = z2_buf;
   uint64_t *z1 = z1_buf;
   uint64_t *sum_a = sum_a_buf;
   uint64_t *sum_b = sum_b_buf;
-  FIO_ASSERT(len <= 256,
-             "Karatsuba multiplication overflow at 16384 bit numbers");
 #endif
 
   /* Initialize all buffers to zero */
@@ -4432,7 +4503,8 @@ The loop count is computed dynamically via sizeof, yielding:
     uint##bits##_t t____[sizeof((var)) / sizeof((var)[0])];                    \
     const uint8_t shuf____[sizeof((var)) / sizeof((var)[0])] = {__VA_ARGS__};  \
     for (size_t i___ = 0; i___ < (sizeof((var)) / sizeof((var)[0])); ++i___)   \
-      t____[i___] = (var)[shuf____[i___]];                                     \
+      t____[i___] =                                                            \
+          (var)[shuf____[i___] % (sizeof((var)) / sizeof((var)[0]))];          \
     for (size_t i___ = 0; i___ < (sizeof((var)) / sizeof((var)[0])); ++i___)   \
       (var)[i___] = t____[i___];                                               \
   } while (0)
@@ -4717,22 +4789,24 @@ Vector Helpers - Multi-Precision Math
                                               const fio_u##bits *N,            \
                                               const fio_u##bits *N_dash) {     \
     fio_u##dbl_bits u;                                                         \
-    fio_u##dbl_bits t, mN;                                                     \
+    fio_u##dbl_bits t, m, mN;                                                  \
     /* Step 1: t = a * b  */                                                   \
     fio_u##bits##_mul(&t, a, b);                                               \
     /* Step 2: m = ((t Mod R) * N_dash) mod R */                               \
-    fio_u##bits##_mul(&mN, t.u##bits, N_dash);                                 \
-    /* Step 3: u = (t + m * N) */                                              \
-    fio_u##bits##_mul(&mN, mN.u##bits, N);                                     \
-    uint64_t ignr_ = fio_u##dbl_bits##_add(&u, &t, &mN);                       \
-    (void)ignr_;                                                               \
+    fio_u##bits##_mul(&m, t.u##bits, N_dash);                                  \
+    /* Step 3: u = (t + m * N) (`m` and `mN` never alias: `restrict`) */       \
+    fio_u##bits##_mul(&mN, m.u##bits, N);                                      \
+    /* the carry is bit `2 * bits` of u (u < 2NR may exceed 2^(2*bits)) */     \
+    uint64_t carry_ = fio_u##dbl_bits##_add(&u, &t, &mN);                      \
     /* Step 4: Constant Time select, if u >= N, then u = u - N */              \
-    bool selector = (bool)fio_u##bits##_sub(u.u##bits, u.u##bits + 1, N);      \
-    /* Step 5: Set result */                                                   \
-    /* result is u.u##bits[0] if equal or bigger */                            \
-    /* result is u.u##bits[1] if smaller */                                    \
-    /* TODO: use mask instead of implied `if` selector? memory not hot? */     \
-    *result = u.u##bits[selector];                                             \
+    uint64_t borrow_ = fio_u##bits##_sub(u.u##bits, u.u##bits + 1, N);         \
+    /* Step 5: Set result (masked select, no secret dependent indexing) */     \
+    /* result is u.u##bits[0] (u - N) if the carry is set or no borrow */      \
+    /* result is u.u##bits[1] (u) if smaller */                                \
+    const uint64_t keep_ = (uint64_t)0 - (borrow_ & (carry_ ^ 1));             \
+    for (size_t i = 0; i < (bits / 64); ++i)                                   \
+      result->u64[i] =                                                         \
+          (u.u##bits[1].u64[i] & keep_) | (u.u##bits[0].u64[i] & ~keep_);      \
   }
 
 FIO___VMATH_DEF_LARGE_ADD_SUB(128)
@@ -4877,25 +4951,35 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) {
  * iterations.
  *
  * If `extern` is `static` or `FIO_SFUNC`, static function will be defined.
+ *
+ * The `reseed_log` is a statistical average for a reseeding period.
+ *
+ * Racing threads may collide on the state lanes (by design, adding
+ * randomness), but each call takes a unique atomic sequence number that is
+ * mixed into its output. When seeking deterministic randomness, calls
+ * should be synchronized.
  */
 #define FIO_DEFINE_RANDOM128_FN(extern, name, reseed_log, seed_offset)         \
-  static uint64_t name##___state[9] FIO_ALIGN(64) = {                          \
+  /* [0-3] state lanes, [4] atomic call sequence (no plain stores: racing */   \
+  /* callers always get distinct values), [5],[7] working lanes, [6]     */   \
+  /* unused. One 64 byte block: keep the counter in it. */                     \
+  static uint64_t name##___state[8] FIO_ALIGN(64) = {                          \
       0x9c65875be1fce7b9ULL + seed_offset,                                     \
       0x7cc568e838f6a40dULL,                                                   \
       0x4bb8d885a0fe47d5ULL + seed_offset,                                     \
-      0x95561f0927ad7ecdULL,                                                   \
-      0};                                                                      \
-  extern FIO_MAYBE_UNUSED void name##_reset(void) {                            \
+      0x95561f0927ad7ecdULL};                                                  \
+  extern FIO_MAYBE_UNUSED FIO___TSAN_AVOID void name##_reset(void) {           \
     name##___state[0] = 0x9c65875be1fce7b9ULL + seed_offset;                   \
     name##___state[1] = 0x7cc568e838f6a40dULL;                                 \
     name##___state[2] = 0x4bb8d885a0fe47d5ULL + seed_offset;                   \
     name##___state[3] = 0x95561f0927ad7ecdULL;                                 \
-    name##___state[8] = name##___state[4] = 0;                                 \
+    name##___state[4] = 0;                                                     \
   }                                                                            \
-  extern void name##_reseed(void) {                                            \
+  /** Mixes clock jitter into the state lanes. */                              \
+  extern FIO___TSAN_AVOID void name##_reseed(void) {                           \
     const size_t jitter_samples = 16 | (name##___state[0] & 15);               \
     for (size_t i = 0; i < jitter_samples; ++i) {                              \
-      struct timespec t;                                                       \
+      struct timespec t = {0}; /* defined even if clock_gettime fails */       \
       clock_gettime(CLOCK_MONOTONIC, &t);                                      \
       uint64_t clk[2] = {(uint64_t)(uintptr_t)&clk + (uint64_t)(uintptr_t) &   \
                              (name##_reseed),                                  \
@@ -4912,20 +4996,28 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) {
       name##___state[2] += clk[0] + fio_cycle_counter();                       \
       name##___state[3] += clk[1] + fio_cycle_counter();                       \
     }                                                                          \
-    name##___state[8] += ((name##___state[8] & 7) + (name##___state[0] & 30)); \
   }                                                                            \
-  /** Re-seeds the PNGR so forked processes don't match. */                    \
-  extern FIO_MAYBE_UNUSED void name##_on_fork(void *is_null) {                 \
+  /** Re-seeds the PNGR (call in forked child). */                             \
+  extern FIO_MAYBE_UNUSED FIO___TSAN_AVOID void name##_on_fork(                \
+      void *is_null) {                                                         \
     (void)is_null;                                                             \
     name##_reseed();                                                           \
+    name##___state[4] = 0;                                                     \
+    name##___state[5] = 0;                                                     \
+    name##___state[6] = 0;                                                     \
+    name##___state[7] = 0;                                                     \
   }                                                                            \
   /** Returns a 128 bit pseudo-random number. */                               \
-  extern FIO_MAYBE_UNUSED fio_u128 name##128(void) {                           \
+  extern FIO_MAYBE_UNUSED FIO___TSAN_AVOID fio_u128 name##128(void) {          \
     fio_u128 r;                                                                \
-    uint64_t s0[4];                                                            \
-    const uint64_t counter = fio_atomic_add(name##___state + 4, 1);            \
+    /* `counter` feeds lane 1 back (as before) plus a sequence number from */  \
+    /* [4], which is only written atomically: racing callers that read the */  \
+    /* same lanes (e.g. -O0 builds) still get distinct values. Reseeds */      \
+    /* happen every 2^reseed_log calls on average. */                          \
+    const uint64_t counter =                                                   \
+        name##___state[1] + fio_atomic_add((name##___state + 4), 1);           \
     if (!(counter & ((1ULL << reseed_log) - 1)) &&                             \
-        ((size_t)(reseed_log - 1) < 63))                                       \
+        ((size_t)(reseed_log - 1U) < 63))                                      \
       name##_reseed();                                                         \
     { /* load state + per-call input (timing, counter, address variation) */   \
       const uint64_t cycles =                                                  \
@@ -4934,50 +5026,43 @@ FIO_IFUNC uint64_t fio_cycle_counter(void) {
       const uint64_t variation =                                               \
           0x4E55788DULL +                                                      \
           (reseed_log ? (uint64_t)(uintptr_t)&name##_reseed : 0);              \
-      s0[0] = name##___state[0] + cycles + counter;                            \
-      s0[1] = name##___state[1] + cycles + (seed_offset + 0x59DD1C23ULL);      \
-      s0[2] = name##___state[2] + cycles + counter;                            \
-      s0[3] = name##___state[3] + cycles + variation;                          \
-    }                                                                          \
-    { /* update: one Feistel layer (lanes 0,2 from 1,3), then rotate lanes */  \
-      const uint64_t a_ =                                                      \
-          s0[0] + fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME0,             \
-                                      s0[3] ^ FIO_U64_HASH_PRIME1);            \
-      const uint64_t c_ =                                                      \
-          s0[2] + fio_math_mul64_fold(s0[3] ^ FIO_U64_HASH_PRIME2,             \
-                                      s0[1] ^ FIO_U64_HASH_PRIME3);            \
-      s0[0] = s0[1]; /* rotate: the other pair is updated next call */         \
-      s0[1] = c_;                                                              \
-      s0[2] = s0[3];                                                           \
-      s0[3] = a_;                                                              \
-    }                                                                          \
-    /* output: two multiply layers over all lanes (never stored) */            \
-    r.u64[0] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME8,                \
-                                   s0[1] ^ FIO_U64_HASH_PRIME9) +              \
-               fio_math_mul64_fold(s0[2] ^ FIO_U64_HASH_PRIME10,               \
-                                   s0[3] ^ FIO_U64_HASH_PRIME11);              \
-    r.u64[1] = fio_math_mul64_fold(s0[0] ^ FIO_U64_HASH_PRIME12,               \
-                                   s0[3] ^ FIO_U64_HASH_PRIME13) +             \
-               fio_math_mul64_fold(s0[1] ^ FIO_U64_HASH_PRIME14,               \
-                                   s0[2] ^ FIO_U64_HASH_PRIME15);              \
-    for (size_t i = 0; i < 4; ++i) /* store to memory */                       \
-      name##___state[i] = s0[i];                                               \
+      name##___state[5] = name##___state[1] + cycles + variation;              \
+      name##___state[7] = name##___state[3] + cycles + variation;              \
+      /* update: one Feistel layer (lanes 0,2 from 1,3), then rotate lanes; */ \
+      /* lanes 1,3 take the counter-mixed lanes 0,2 before 0,2 rotate */       \
+      name##___state[1] =                                                      \
+          name##___state[0] + cycles + counter +                               \
+          fio_math_mul64_fold(name##___state[5] ^ FIO_U64_HASH_PRIME0,         \
+                              name##___state[7] ^ FIO_U64_HASH_PRIME1);        \
+      name##___state[3] =                                                      \
+          name##___state[2] + cycles + counter +                               \
+          fio_math_mul64_fold(name##___state[7] ^ FIO_U64_HASH_PRIME2,         \
+                              name##___state[5] ^ FIO_U64_HASH_PRIME3);        \
+      name##___state[0] = name##___state[5];                                   \
+      name##___state[2] = name##___state[7];                                   \
+    } /* output: two multiply layers over all new lanes (never stored) */      \
+    r.u64[0] = fio_math_mul64_fold(name##___state[0] ^ FIO_U64_HASH_PRIME8,    \
+                                   (name##___state[1] ^ FIO_U64_HASH_PRIME9) + \
+                                       counter) +                              \
+               fio_math_mul64_fold(name##___state[2] ^ FIO_U64_HASH_PRIME10,   \
+                                   name##___state[3] ^ FIO_U64_HASH_PRIME11);  \
+    r.u64[1] = fio_math_mul64_fold(                                            \
+                   name##___state[0] ^ FIO_U64_HASH_PRIME12,                   \
+                   (name##___state[3] ^ FIO_U64_HASH_PRIME13) + counter) +     \
+               fio_math_mul64_fold(name##___state[1] ^ FIO_U64_HASH_PRIME14,   \
+                                   name##___state[2] ^ FIO_U64_HASH_PRIME15);  \
     return r;                                                                  \
   }                                                                            \
   /** Returns a 64 bit pseudo-random number. */                                \
   extern FIO_MAYBE_UNUSED uint64_t name##64(void) {                            \
-    static fio_u128 r;                                                         \
-    size_t counter = fio_atomic_add(name##___state + 8, 1);                    \
-    if (!(counter & 1))                                                        \
-      r = name##128();                                                         \
-    return r.u64[counter & 1];                                                 \
+    return name##128().u64[0];                                                 \
   }                                                                            \
   /** Fills the `dest` buffer with pseudo-random noise. */                     \
   extern FIO_MAYBE_UNUSED void name##_bytes(void *dest, size_t len) {          \
     if (!dest || !len)                                                         \
       return;                                                                  \
     uint8_t *d = (uint8_t *)dest;                                              \
-    for (unsigned i = 15; i < len; i += 16) {                                  \
+    for (size_t i = 15; i < len; i += 16) {                                    \
       fio_u128 r = name##128();                                                \
       fio_memcpy16(d, r.u8);                                                   \
       d += 16;                                                                 \
@@ -5178,6 +5263,8 @@ FIO_SFUNC bool fio_buf_info_is_ieq(fio_buf_info_s a, fio_buf_info_s b) {
   size_t n = a.len;
   if (!n || a.buf == b.buf)
     return true;
+  if (!a.buf || !b.buf)
+    return false;
   const uint8_t *x = (const uint8_t *)a.buf;
   const uint8_t *y = (const uint8_t *)b.buf;
   uint8_t diff = 0;
@@ -5296,12 +5383,19 @@ String and Buffer Information – Helper Macros
 #define FIO_UBUF_INFO_IS_EQ(s1, s2) FIO_STR_INFO_IS_EQ((s1), (s2))
 #endif
 
+/* Identity, for the `*_INFO1` NULL tests: GCC's `-Waddress` flags testing an
+ * array directly. (`FIO_STRLEN` stays in the macros: it may be defined later.)
+ */
+FIO_IFUNC const char *fio___cstr_nullable(const char *str) { return str; }
+
 /** A NULL fio_str_info_s. */
 #define FIO_STR_INFO0 ((fio_str_info_s){0})
 
 /** Converts a C String into a fio_str_info_s. */
 #define FIO_STR_INFO1(str)                                                     \
-  ((fio_str_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+  ((fio_str_info_s){.len =                                                     \
+                        (fio___cstr_nullable((str)) ? FIO_STRLEN((str)) : 0),  \
+                    .buf = (str)})
 
 /** Converts a String with a known length into a fio_str_info_s. */
 #define FIO_STR_INFO2(str, length)                                             \
@@ -5316,7 +5410,9 @@ String and Buffer Information – Helper Macros
 
 /** Converts a C String into a fio_buf_info_s. */
 #define FIO_BUF_INFO1(str)                                                     \
-  ((fio_buf_info_s){.len = ((str) ? FIO_STRLEN((str)) : 0), .buf = (str)})
+  ((fio_buf_info_s){.len =                                                     \
+                        (fio___cstr_nullable((str)) ? FIO_STRLEN((str)) : 0),  \
+                    .buf = (str)})
 
 /** Converts a String with a known length into a fio_buf_info_s. */
 #define FIO_BUF_INFO2(str, length)                                             \
@@ -5341,7 +5437,12 @@ String and Buffer Information – Helper Macros
 #define FIO_STR2BUF_INFO(str_info)                                             \
   ((fio_buf_info_s){.len = (str_info).len, .buf = (str_info).buf})
 
-/** Creates a stack fio_str_info_s variable `name` with `capacity` bytes. */
+/**
+ * Creates a stack fio_str_info_s variable `name` with `capacity` bytes.
+ *
+ * `capacity` SHOULD be a compile-time constant that fits the stack; a runtime
+ * value creates an unchecked VLA (never pass untrusted sizes).
+ */
 #define FIO_STR_INFO_TMP_VAR(name, capacity)                                   \
   char fio___stack_mem___##name[(capacity) + 1];                               \
   fio___stack_mem___##name[0] = 0; /* guard */                                 \
@@ -5366,7 +5467,8 @@ UTF-8 Support (basic)
 ***************************************************************************** */
 
 #ifndef FIO_UTF8_ALLOW_IF
-/* UTF-8 Constant Time? (0 = avoid mis-predictions; 1 = mostly ascii) */
+/* 1 (default): branchy table lookup, fastest on real (even mixed) text;
+ * 0: branchless, fastest when char lengths are random (unpredictable). */
 #define FIO_UTF8_ALLOW_IF 1
 
 #endif
@@ -5398,38 +5500,111 @@ FIO_IFUNC FIO_CONST unsigned fio_utf8_char_len_unsafe(uint8_t c) {
   return map[c >> 3];
 }
 
-/** Returns the number of valid UTF-8 bytes used by first char at `str`. */
-FIO_IFUNC unsigned fio_utf8_char_len(const void *str_) {
-  unsigned r, tst;
-  const uint8_t *s = (const uint8_t *)str_;
-  r = fio_utf8_char_len_unsafe(*s) & 7;
-#if FIO_UTF8_ALLOW_IF
-  if (r < 2)
-    return r;
-  tst = 1;
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2);
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
-  if (r != tst)
-    r = 0;
-#else
-  tst = (r > 0);
-  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 3));
-  tst += ((fio_utf8_char_len_unsafe(s[tst]) >> 3) & (r > 2));
-  tst += (fio_utf8_char_len_unsafe(s[tst]) >> 3);
-  r &= 0U - (r == tst);
-#endif
+/**
+ * Strict lead info for leads 0xC0-0xFF (64 bytes, one cache line), encoded as
+ * `len | lo_step << 3 | span_step << 5`, where the second byte must satisfy:
+ * `(uint8_t)(c1 - (0x80 + 16 * lo_step)) <= 0x0F + 16 * span_step`.
+ *
+ * C0, C1 (overlong) and F5-FF (above U+10FFFF) are 0; E0 (overlong) allows
+ * A0-BF; ED (surrogates) allows 80-9F; F0 (overlong) allows 90-BF; F4 allows
+ * 80-8F; all other leads allow 80-BF.
+ */
+FIO_IFUNC FIO_CONST unsigned fio___utf8_lead_info(unsigned i) {
+  static const uint8_t info[64] FIO_ALIGN(64) = {
+      0x00, 0x00, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, /* C0-C7 */
+      0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, /* C8-CF */
+      0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, /* D0-D7 */
+      0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, 0x62, /* D8-DF */
+      0x33, 0x63, 0x63, 0x63, 0x63, 0x63, 0x63, 0x63, /* E0-E7 */
+      0x63, 0x63, 0x63, 0x63, 0x63, 0x23, 0x63, 0x63, /* E8-EF */
+      0x4C, 0x64, 0x64, 0x64, 0x04, 0x00, 0x00, 0x00, /* F0-F7 */
+      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /* F8-FF */
+  };
+  return info[i & 63U]; /* i == lead - 0xC0 */
+}
+/** Tests the second byte `c1` against a `fio___utf8_lead_info` entry `e`. */
+#define FIO___UTF8_C1_OK(e, c1)                                                \
+  ((uint8_t)((c1) - (0x80U + (((e) << 1) & 0x30U))) <=                         \
+   (0x0FU + (((e) >> 1) & 0x30U)))
+/** Tests for a continuation byte (10xxxxxx). */
+#define FIO___UTF8_IS_CONT(c) (((c)&0xC0U) == 0x80U)
 
+/**
+ * Returns the number of valid UTF-8 bytes used by first char at `str`.
+ *
+ * Validation is strict (RFC 3629): overlong forms, surrogates and code points
+ * above U+10FFFF return 0.
+ *
+ * Reads stop at the first non-continuation byte (NUL terminated input is safe)
+ * and never reach the lead byte's `fio_utf8_char_len_unsafe` length.
+ */
+FIO_IFUNC unsigned fio_utf8_char_len(const void *str_) {
+  const uint8_t *s = (const uint8_t *)str_;
+  const unsigned c0 = s[0];
+#if FIO_UTF8_ALLOW_IF
+  if (c0 < 0x80U)
+    return 1;
+  if (c0 < 0xC0U)
+    return 0;
+  const unsigned e = fio___utf8_lead_info(c0 - 0xC0U), r = e & 7U;
+  if (r < 2 || !FIO___UTF8_C1_OK(e, s[1]))
+    return 0;
+  if (r > 2 && !FIO___UTF8_IS_CONT(s[2]))
+    return 0;
+  if (r > 3 && !FIO___UTF8_IS_CONT(s[3]))
+    return 0;
   return r;
+#else
+  /* The length comes from a nibble constant (1: 00-7F, 0: 80-BF, 2: C0-DF,
+   * 3: E0-EF, 4: F0-FF), keeping the table load off the critical path of
+   * `p += len` loops. Byte `n` is read only for leads needing it (C0-F7,
+   * E0-F7, F0-F7) and only if bytes `1..n-1` are 0x80-0xFF (so reads stop at
+   * a NUL); otherwise `s[0]` is re-read, and the result already failed. */
+  const unsigned x = c0 - 0xC0U;
+  const unsigned n1 = (x < 0x38U);
+  const unsigned n2 = ((x - 0x20U) < 0x18U);
+  const unsigned n3 = ((x - 0x30U) < 0x08U);
+  const unsigned r =
+      (unsigned)(((uint64_t)0x4322000011111111ULL >> ((c0 >> 4) << 2)) & 15U);
+  const unsigned e = fio___utf8_lead_info(x) & (0U - n1);
+  const unsigned c1 = s[n1];
+  /* `(c1 >> 6) & 2` / `(c1 & c2) >> 7`: non-zero only for 80-FF (non-NUL) */
+  const unsigned c2 = s[(c1 >> 6) & (n2 << 1)];
+  const unsigned c3 = s[(((c1 & c2) >> 7) & n3) * 3];
+  unsigned ok = (e != 0) | (c0 < 0x80U);
+  ok &= FIO___UTF8_C1_OK(e, c1) | (n1 ^ 1U);
+  ok &= FIO___UTF8_IS_CONT(c2) | (n2 ^ 1U);
+  ok &= FIO___UTF8_IS_CONT(c3) | (n3 ^ 1U);
+  return r & (0U - ok);
+#endif
+}
+#undef FIO___UTF8_C1_OK
+#undef FIO___UTF8_IS_CONT
+
+/**
+ * Same as `fio_utf8_char_len`, but never reads past `len` bytes: a sequence
+ * truncated by the end of the buffer returns 0. Use for raw (unterminated)
+ * buffers.
+ */
+FIO_IFUNC unsigned fio_utf8_char_len_bounded(const void *str, size_t len) {
+  if (!len) /* guard: nothing may be read */
+    return 0;
+  const unsigned need = fio_utf8_char_len_unsafe(*(const uint8_t *)str) & 7;
+  return (need > len) ? 0 : fio_utf8_char_len(str); /* reads < need bytes */
 }
 
-/** Writes code point to `dest` using UFT-8. Returns number of bytes written. */
+/**
+ * Writes code point to `dest` using UFT-8. Returns number of bytes written.
+ *
+ * Writes exactly the returned number of bytes (nothing if `u` > 0x1FFFFF).
+ */
 FIO_IFUNC unsigned fio_utf8_write(void *dest_, uint32_t u) {
   const uint8_t len = (uint8_t)fio_utf8_code_len(u);
   uint8_t *dest = (uint8_t *)dest_;
 #if FIO_UTF8_ALLOW_IF
-  if (len < 2) { /* writes, but doesn't report on len == 0 */
-    *dest = (uint8_t)u;
+  if (len < 2) { /* never writes when len == 0 */
+    if (len)
+      *dest = (uint8_t)u;
     return len;
   }
   const uint8_t offset = (uint8_t)(0xF0U << (4U - len));
@@ -5444,18 +5619,20 @@ FIO_IFUNC unsigned fio_utf8_write(void *dest_, uint32_t u) {
   *(dest) = (uint8_t)(head | ((u)&mask));
   return len;
 #else
-  const uint8_t offset = 0xF0U << (4U - len);
-  const uint8_t head = 0x80U << (len < 2);
+  if (!len) /* invalid code point (rare): write nothing */
+    return 0;
+  /* all stores stay within `dest[0..len-1]`; ASCII selects `u` as a whole */
+  const uint32_t ascii = (uint32_t)0 - (uint32_t)(len == 1);
+  const unsigned shift = (unsigned)(len - 1) * 6U;
+  const uint8_t offset = (uint8_t)(0xF0U << (4U - len));
   const uint8_t mask = 63U;
-  *dest = (uint8_t)u;
-  dest += (len == 1);
-  *dest = offset | ((u) >> (((len - 1) << 3) - ((len - 1) << 1)));
+  *dest = (uint8_t)((u & ascii) | ((offset | (u >> shift)) & ~ascii));
   dest += (len > 1);
-  *dest = head | (((u) >> 12) & mask);
+  *dest = (uint8_t)(0x80U | ((u >> 12) & mask));
   dest += (len > 3);
-  *dest = head | (((u) >> 6) & mask);
+  *dest = (uint8_t)(0x80U | ((u >> 6) & mask));
   dest += (len > 2);
-  *dest = head | ((u)&mask);
+  *dest = (uint8_t)((u & ascii) | ((0x80U | (u & mask)) & ~ascii));
   return len;
 #endif
 }

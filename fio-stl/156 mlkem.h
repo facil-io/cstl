@@ -67,7 +67,7 @@ SFUNC int fio_mlkem768_keypair_derand(uint8_t pk[1184],
  * Encapsulate: generate ciphertext and shared secret from public key.
  *
  * Uses system CSPRNG for randomness.
- * Returns 0 on success, -1 on failure.
+ * Returns 0 on success, -1 on failure (NULL or malformed pk: coefficient >= q).
  */
 SFUNC int fio_mlkem768_encaps(uint8_t ct[1088],
                               uint8_t ss[32],
@@ -77,7 +77,7 @@ SFUNC int fio_mlkem768_encaps(uint8_t ct[1088],
  * Encapsulate with deterministic randomness.
  *
  * The coins buffer must be exactly 32 bytes.
- * Returns 0 on success, -1 on failure.
+ * Returns 0 on success, -1 on failure (NULL or malformed pk: coefficient >= q).
  */
 SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
                                      uint8_t ss[32],
@@ -92,6 +92,9 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
  * rather than an error, preventing chosen-ciphertext attacks.
  *
  * Returns 0 on success (always succeeds for well-formed inputs).
+ *
+ * `sk` is trusted (from fio_mlkem768_keypair*); the FIPS 203 H(ek) key check
+ * is not repeated per call - validate imported keys separately.
  */
 SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
                               const uint8_t ct[1088],
@@ -1040,6 +1043,8 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta1(
   extseed[FIO___MLKEM_SYMBYTES] = nonce;
   fio_shake256(buf, sizeof(buf), extseed, sizeof(extseed));
   fio___mlkem_cbd2(r, buf);
+  fio_secure_zero(buf, sizeof(buf));
+  fio_secure_zero(extseed, sizeof(extseed));
 }
 
 /** Sample noise polynomial using SHAKE256 PRF (eta2 = 2 for ML-KEM-768). */
@@ -1054,6 +1059,8 @@ FIO_SFUNC void fio___mlkem_poly_getnoise_eta2(
   /* PRF(s, b) = SHAKE256(s || b, 64*eta) */
   fio_shake256(buf, sizeof(buf), extseed, sizeof(extseed));
   fio___mlkem_cbd2(r, buf);
+  fio_secure_zero(buf, sizeof(buf));
+  fio_secure_zero(extseed, sizeof(extseed));
 }
 
 /** Pointwise multiplication of polynomials in NTT domain. */
@@ -1241,7 +1248,9 @@ Matrix Generation (Rejection Sampling via SHAKE128 XOF)
 /**
  * Parse uniform random bytes from SHAKE128 stream into polynomial coefficients.
  * Rejection sampling: accept 12-bit values < q.
- * Uses branchless constant-time pattern without requiring overflow space.
+ * The matrix derives from the public seed rho, so timing need not be constant.
+ * Candidates are stored at r[ctr] (in bounds, ctr < len) and kept only when
+ * accepted; destination values are never read (no indeterminate reads).
  */
 FIO_SFUNC unsigned int fio___mlkem_rej_uniform(int16_t *r,
                                                unsigned int len,
@@ -1249,8 +1258,6 @@ FIO_SFUNC unsigned int fio___mlkem_rej_uniform(int16_t *r,
                                                unsigned int buflen) {
   unsigned int ctr, pos;
   uint16_t val0, val1;
-  unsigned int accept0, accept1, idx;
-  int16_t tmp;
 
   ctr = pos = 0;
   while (ctr < len && pos + 3 <= buflen) {
@@ -1261,18 +1268,12 @@ FIO_SFUNC unsigned int fio___mlkem_rej_uniform(int16_t *r,
                       0xFFF);
     pos += 3;
 
-    /* Process val0: branchless write and conditional increment */
-    accept0 = (val0 < FIO___MLKEM_Q) & (ctr < len);
-    tmp = r[ctr];
-    r[ctr] = (int16_t)((accept0 * val0) | ((1 - accept0) * (unsigned)tmp));
-    ctr += accept0;
-
-    /* Process val1: branchless write and conditional increment */
-    accept1 = (val1 < FIO___MLKEM_Q) & (ctr < len);
-    idx = ctr - (ctr >= len); /* Clamp index to valid range */
-    tmp = r[idx];
-    r[idx] = (int16_t)((accept1 * val1) | ((1 - accept1) * (unsigned)tmp));
-    ctr += accept1;
+    r[ctr] = (int16_t)val0; /* ctr < len (loop condition) */
+    ctr += (val0 < FIO___MLKEM_Q);
+    if (ctr >= len)
+      break;
+    r[ctr] = (int16_t)val1;
+    ctr += (val1 < FIO___MLKEM_Q);
   }
   return ctr;
 }
@@ -1344,7 +1345,8 @@ FIO_SFUNC void fio___mlkem_cmov(uint8_t *restrict dst,
                                 size_t len,
                                 uint8_t b) {
   size_t i;
-  b = (uint8_t)(-b); /* 0x00 or 0xFF */
+  /* normalize any nonzero b to 0xFF, zero stays 0x00 (branchless) */
+  b = (uint8_t)(0U - (unsigned)((uint8_t)(b | (uint8_t)(0U - b)) >> 7));
   /* Compiler barrier: prevent the optimizer from branching on b or folding the
    * XOR loop into memcpy/no-op — this is a constant-time select, not a branch.
    * Security-relevant: without the barrier, timing leaks the decryption result.
@@ -1382,6 +1384,7 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
     fio_memcpy32(gbuf, coins);
     gbuf[FIO___MLKEM_SYMBYTES] = FIO___MLKEM_K;
     fio_sha3_512(buf, gbuf, sizeof(gbuf));
+    fio_secure_zero(gbuf, sizeof(gbuf));
   }
 
   fio___mlkem_gen_matrix(a, publicseed, 0);
@@ -1415,7 +1418,7 @@ FIO_SFUNC void fio___mlkem_indcpa_keypair_derand(
   fio_memcpy32(pk + FIO___MLKEM_POLYVECBYTES, publicseed);
 
   /* Zero sensitive data */
-  FIO_MEMSET(buf, 0, sizeof(buf));
+  fio_secure_zero(buf, sizeof(buf));
   fio_secure_zero(a, sizeof(a));
   fio_secure_zero(e, sizeof(e));
   fio_secure_zero(pkpv, sizeof(pkpv));
@@ -1526,6 +1529,8 @@ FIO_SFUNC void fio___mlkem_indcpa_dec(
   fio___mlkem_poly_reduce(mp);
 
   fio___mlkem_poly_tomsg(msg, mp);
+  fio_secure_zero(skpv, sizeof(skpv));
+  fio_secure_zero(mp, sizeof(mp));
 }
 
 /* *****************************************************************************
@@ -1566,6 +1571,20 @@ SFUNC int fio_mlkem768_keypair_derand(uint8_t pk[1184],
   return 0;
 }
 
+/**
+ * FIPS 203 §7.2 encapsulation key modulus check: every 12-bit coefficient of
+ * the encoded t vector must be < q. Returns 0 if valid, -1 otherwise.
+ */
+FIO_SFUNC int fio___mlkem_pk_check(const uint8_t pk[1184]) {
+  unsigned int bad = 0;
+  for (size_t i = 0; i < FIO___MLKEM_POLYVECBYTES; i += 3) {
+    unsigned int v0 = ((unsigned)pk[i] | ((unsigned)pk[i + 1] << 8)) & 0xFFF;
+    unsigned int v1 = ((unsigned)pk[i + 1] >> 4) | ((unsigned)pk[i + 2] << 4);
+    bad |= (v0 >= FIO___MLKEM_Q) | (v1 >= FIO___MLKEM_Q);
+  }
+  return 0 - (int)bad;
+}
+
 /** ML-KEM-768 keypair generation (random). */
 SFUNC int fio_mlkem768_keypair(uint8_t pk[1184], uint8_t sk[2400]) {
   uint8_t coins[64];
@@ -1574,7 +1593,7 @@ SFUNC int fio_mlkem768_keypair(uint8_t pk[1184], uint8_t sk[2400]) {
   if (fio_rand_bytes_secure(coins, 64))
     fio_rand_bytes(coins, 64);
   int r = fio_mlkem768_keypair_derand(pk, sk, coins);
-  FIO_MEMSET(coins, 0, sizeof(coins));
+  fio_secure_zero(coins, sizeof(coins));
   return r;
 }
 
@@ -1592,6 +1611,8 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
 
   if (!ct || !ss || !pk || !coins)
     return -1;
+  if (fio___mlkem_pk_check(pk))
+    return -1; /* malformed encapsulation key (coefficient >= q) */
 
   /* buf = m || H(pk) */
   fio_memcpy32(buf, coins);
@@ -1609,8 +1630,8 @@ SFUNC int fio_mlkem768_encaps_derand(uint8_t ct[1088],
   fio_memcpy32(ss, kr);
 
   /* Zero sensitive stack data */
-  FIO_MEMSET(buf, 0, sizeof(buf));
-  FIO_MEMSET(kr, 0, sizeof(kr));
+  fio_secure_zero(buf, sizeof(buf));
+  fio_secure_zero(kr, sizeof(kr));
 
   return 0;
 }
@@ -1625,7 +1646,7 @@ SFUNC int fio_mlkem768_encaps(uint8_t ct[1088],
   if (fio_rand_bytes_secure(coins, FIO___MLKEM_SYMBYTES))
     fio_rand_bytes(coins, FIO___MLKEM_SYMBYTES);
   int r = fio_mlkem768_encaps_derand(ct, ss, pk, coins);
-  FIO_MEMSET(coins, 0, sizeof(coins));
+  fio_secure_zero(coins, sizeof(coins));
   return r;
 }
 
@@ -1667,10 +1688,9 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
   fio___mlkem_indcpa_enc(cmp, buf, pk, kr + FIO___MLKEM_SYMBYTES);
 
   /* Constant-time comparison: fail = (ct != c')
-   * fio_ct_is_eq returns 1 (equal/success), 0 (not equal/failure).
-   * Subtract 1 to invert: 0 (equal=no fail), 0xFF (not equal=fail). */
+   * fio_ct_is_eq returns 1 (equal), 0 (not equal) -> fail is 0 or 1. */
   fail =
-      (uint8_t)((uint8_t)fio_ct_is_eq(ct, cmp, FIO___MLKEM_INDCPA_BYTES) - 1);
+      (uint8_t)(1U ^ (unsigned)fio_ct_is_eq(ct, cmp, FIO___MLKEM_INDCPA_BYTES));
 
   /* Implicit rejection: if fail, use K_bar = J(z || ct) instead */
   /* Overwrite K with K_bar = SHAKE256(z || ct) if fail */
@@ -1684,13 +1704,14 @@ SFUNC int fio_mlkem768_decaps(uint8_t ss[32],
     /* Constant-time select: ss = fail ? k_bar : kr */
     fio_memcpy32(ss, kr);
     fio___mlkem_cmov(ss, k_bar, FIO___MLKEM_SYMBYTES, fail);
-    FIO_MEMSET(k_bar, 0, sizeof(k_bar));
+    fio_secure_zero(k_bar, sizeof(k_bar));
+    fio_secure_zero(&state, sizeof(state));
   }
 
   /* Zero sensitive stack data */
-  FIO_MEMSET(buf, 0, sizeof(buf));
-  FIO_MEMSET(kr, 0, sizeof(kr));
-  FIO_MEMSET(cmp, 0, sizeof(cmp));
+  fio_secure_zero(buf, sizeof(buf));
+  fio_secure_zero(kr, sizeof(kr));
+  fio_secure_zero(cmp, sizeof(cmp));
 
   return 0;
 }
@@ -1754,14 +1775,14 @@ SFUNC int fio_x25519mlkem768_encaps(uint8_t ct[1120],
    */
   if (fio_x25519_shared_secret(ss + 32, x25519_eph_sk, pk + 1184) != 0) {
     /* Low-order point - should not happen with valid public keys */
-    FIO_MEMSET(x25519_eph_sk, 0, sizeof(x25519_eph_sk));
+    fio_secure_zero(x25519_eph_sk, sizeof(x25519_eph_sk));
     FIO_MEMSET(ct, 0, 1120);
     FIO_MEMSET(ss, 0, 64);
     return -1;
   }
 
   /* Zero sensitive ephemeral private key */
-  FIO_MEMSET(x25519_eph_sk, 0, sizeof(x25519_eph_sk));
+  fio_secure_zero(x25519_eph_sk, sizeof(x25519_eph_sk));
 
   return 0;
 }
@@ -1781,8 +1802,11 @@ SFUNC int fio_x25519mlkem768_decaps(uint8_t ss[64],
     return -1;
 
   /* ML-KEM-768 decapsulation: ss[0..31] from ct[0..1087] using sk[0..2399]
-   * Note: ML-KEM uses implicit rejection, so this always "succeeds" */
-  fio_mlkem768_decaps(ss, ct, sk);
+   * Note: ML-KEM uses implicit rejection; a bad ciphertext is not an error. */
+  if (fio_mlkem768_decaps(ss, ct, sk) != 0) {
+    FIO_MEMSET(ss, 0, 64);
+    return -1;
+  }
 
   /* X25519 shared secret: ss[32..63] = X25519(sk[2400..2431], ct[1088..1119])
    */

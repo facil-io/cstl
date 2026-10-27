@@ -123,7 +123,40 @@ FIO_SFUNC void test_small_string_flavor(void) {
   fio_small_str_destroy(&key);
 }
 
+FIO_SFUNC void test_string_security_regressions(void) {
+  fio_str_s borrowed = FIO_STR_INIT_STATIC(
+      "A long borrowed string whose bytes must never be modified in place");
+  const size_t n = fio_str_len(&borrowed);
+  fio_str_resize(&borrowed, n - 1);
+  FIO_ASSERT(fio_str_is_allocated(&borrowed) &&
+                 fio_str_len(&borrowed) == n - 1,
+             "shrinking borrowed storage must detach it");
+  fio_str_destroy(&borrowed);
+
+  fio_str_s s = FIO_STR_INIT;
+  fio_str_resize(&s, 128);
+  for (size_t j = 0; j < fio_str_len(&s); ++j)
+    FIO_ASSERT(fio_str_ptr(&s)[j] == 0, "resize growth must zero bytes");
+  fio_str_destroy(&s);
+
+  fio_str_write(&s, "abcdefghijklmnopqrstuvwxyz0123456789", 36);
+  fio_str_resize(&s, 3);
+  fio_str_info_s reserved = fio_str_reserve(&s, 0);
+  FIO_ASSERT(reserved.buf == fio_str_ptr(&s) && reserved.len == 3 &&
+                 reserved.capa == fio_str_capa(&s) &&
+                 !FIO_MEMCMP(reserved.buf, "abc", 3),
+             "reserve compaction must return state of installed storage");
+  fio_str_destroy(&s);
+
+  fio_str_write(&s, "before", 6);
+  fio_str_info_s result = fio_str_readfile(&s, "missing-file-for-string-test", 0, 0);
+  FIO_ASSERT(!result.buf && fio_str_len(&s) == 6,
+             "failed file read must report error and preserve string");
+  fio_str_destroy(&s);
+}
+
 int main(void) {
+  test_string_security_regressions();
   FIO_NAME_TEST(stl, fio_str)();
   FIO_NAME_TEST(stl, fio_small_str)();
   test_string_object_lifecycle();

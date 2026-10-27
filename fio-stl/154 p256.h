@@ -44,9 +44,11 @@ ECDSA P-256 Verification API
  * @param sig DER-encoded signature (SEQUENCE { r INTEGER, s INTEGER })
  * @param sig_len Length of signature in bytes
  * @param msg_hash SHA-256 hash of the message (32 bytes)
- * @param pubkey Uncompressed public key (65 bytes: 0x04 || x || y)
- * @param pubkey_len Length of public key (must be 65)
- * @return 0 on success (valid signature), -1 on failure (invalid signature)
+ * @param pubkey SEC 1 public key: uncompressed (65 bytes: 0x04 || x || y)
+ *               or compressed (33 bytes: 0x02/0x03 || x)
+ * @param pubkey_len Length of public key (65 or 33)
+ * @return 0 on success (valid signature), -1 on failure (invalid signature or
+ *         an invalid / off-curve public key)
  */
 SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
                                 size_t sig_len,
@@ -98,6 +100,19 @@ P-256 ECDHE (Elliptic Curve Diffie-Hellman) API
  * @return 0 on success, -1 on failure
  */
 SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]);
+
+/**
+ * Derives the P-256 public key for an existing secret key (`Q = d * G`).
+ *
+ * Uses the constant-time scalar multiplication ladder.
+ *
+ * @param public_key Output: 65-byte uncompressed public key (0x04 || x || y)
+ * @param secret_key 32-byte secret key (scalar, big-endian), in [1, n-1]
+ * @return 0 on success, -1 on NULL arguments or an out-of-range scalar
+ *         (`public_key`, when not NULL, is zeroed on failure).
+ */
+SFUNC int fio_p256_public_key(uint8_t public_key[65],
+                              const uint8_t secret_key[32]);
 
 /**
  * Computes P-256 ECDH shared secret.
@@ -245,6 +260,21 @@ FIO_IFUNC void fio___p256_fe_from_bytes(fio___p256_fe_s r,
   r[2] = fio_buf2u64_be(in + 8);
   r[1] = fio_buf2u64_be(in + 16);
   r[0] = fio_buf2u64_be(in + 24);
+}
+
+/** Public-value load: returns -1 (r undefined) if encoding is >= p. */
+FIO_IFUNC int fio___p256_fe_from_bytes_canonical(fio___p256_fe_s r,
+                                                 const uint8_t in[32]) {
+  /* Only the final borrow of r - p matters (set iff r < p); the difference
+   * words are discarded (sink keeps GCC's warn_unused_result quiet). */
+  uint64_t borrow = 0, diff;
+  fio___p256_fe_from_bytes(r, in);
+  diff = fio_math_subc64(r[0], FIO___P256_P[0], 0, &borrow);
+  diff = fio_math_subc64(r[1], FIO___P256_P[1], borrow, &borrow);
+  diff = fio_math_subc64(r[2], FIO___P256_P[2], borrow, &borrow);
+  diff = fio_math_subc64(r[3], FIO___P256_P[3], borrow, &borrow);
+  (void)diff;
+  return borrow ? 0 : -1; /* borrow means r < p */
 }
 
 /** Store field element to 32-byte big-endian output */
@@ -681,72 +711,64 @@ FIO_IFUNC void fio___p256_scalar_sub_n_if(fio___p256_scalar_s a,
   a[3] = fio_ct_mux64(mask, s[3], a[3]);
 }
 
-/** Scalar reduction mod n using fio_math_div */
+/** Barrett constant: mu = floor(2^512 / n), little-endian 64-bit limbs. */
+static const uint64_t FIO___P256_N_MU[5] = {
+    0x012FFD85EEDF9BFEULL,
+    0x43190552DF1A6C21ULL,
+    0xFFFFFFFEFFFFFFFFULL,
+    0x00000000FFFFFFFFULL,
+    0x0000000000000001ULL,
+};
+
+/**
+ * Secret-safe scalar reduction: r = t mod n, for any t < 2^512.
+ *
+ * Barrett reduction (HAC 14.42) with fixed work and no secret-dependent
+ * branches or memory access.
+ */
 FIO_SFUNC void fio___p256_scalar_reduce(fio___p256_scalar_s r,
                                         const uint64_t t[8]) {
-  /* Use fio_math_div to compute t mod n directly.
-   * We need to extend n to 8 limbs for the division. */
-  uint64_t n_ext[8] = {FIO___P256_N[0],
-                       FIO___P256_N[1],
-                       FIO___P256_N[2],
-                       FIO___P256_N[3],
-                       0,
-                       0,
-                       0,
-                       0};
-  uint64_t remainder[8] = {0};
-
-  /* Compute t mod n */
-  fio_math_div(NULL, remainder, t, n_ext, 8);
-
-  /* Copy the low 4 limbs to result */
-  r[0] = remainder[0];
-  r[1] = remainder[1];
-  r[2] = remainder[2];
-  r[3] = remainder[3];
+  static const uint64_t n5[5] = {FIO___P256_N[0],
+                                 FIO___P256_N[1],
+                                 FIO___P256_N[2],
+                                 FIO___P256_N[3],
+                                 0};
+  uint64_t q[10], rr[5], s[5] = {0};
+  /* q3 = floor(floor(t / 2^192) * mu / 2^320) -> q[5..9] */
+  fio_math_mul(q, t + 3, FIO___P256_N_MU, 5);
+  /* s = (q3 * n) mod 2^320 (truncated schoolbook) */
+  for (size_t i = 0; i < 5; ++i) {
+    uint64_t carry = 0;
+    for (size_t j = 0; i + j < 5; ++j) {
+      uint64_t hi, c1 = 0, c2 = 0;
+      const uint64_t lo = fio_math_mulc64(q[5 + i], n5[j], &hi);
+      s[i + j] = fio_math_addc64(s[i + j], lo, 0, &c1);
+      s[i + j] = fio_math_addc64(s[i + j], carry, 0, &c2);
+      carry = hi + c1 + c2;
+    }
+  }
+  /* rr = (t mod 2^320) - s (mod 2^320); 0 <= rr < 3n */
+  const uint64_t ignored_borrow = fio_math_sub(rr, t, s, 5);
+  (void)ignored_borrow;
+  /* at most two conditional subtractions of n */
+  for (size_t round = 0; round < 2; ++round) {
+    const uint64_t borrow = fio_math_sub(s, rr, n5, 5);
+    const uint64_t mask = borrow - 1; /* all ones when rr >= n */
+    for (size_t i = 0; i < 5; ++i)
+      rr[i] = fio_ct_mux64(mask, s[i], rr[i]);
+  }
+  r[0] = rr[0];
+  r[1] = rr[1];
+  r[2] = rr[2];
+  r[3] = rr[3];
 }
 
-/** Scalar multiplication: r = a * b mod n */
+/** Scalar multiplication: r = a * b mod n (secret-safe, fixed work). */
 FIO_SFUNC void fio___p256_scalar_mul(fio___p256_scalar_s r,
                                      const fio___p256_scalar_s a,
                                      const fio___p256_scalar_s b) {
-  uint64_t t[8] = {0};
-
-  /* Schoolbook multiplication with full carry propagation. */
-#if defined(__SIZEOF_INT128__)
-  for (int i = 0; i < 4; ++i) {
-    __uint128_t carry = 0;
-    for (int j = 0; j < 4; ++j) {
-      const int k = i + j;
-      __uint128_t sum = (__uint128_t)a[i] * b[j] + t[k] + carry;
-      t[k] = (uint64_t)sum;
-      carry = sum >> 64;
-    }
-    for (int k = i + 4; carry && k < 8; ++k) {
-      __uint128_t sum = (__uint128_t)t[k] + carry;
-      t[k] = (uint64_t)sum;
-      carry = sum >> 64;
-    }
-  }
-#else
-  for (int i = 0; i < 4; ++i) {
-    uint64_t carry = 0;
-    for (int j = 0; j < 4; ++j) {
-      uint64_t hi;
-      uint64_t lo = fio_math_mulc64(a[i], b[j], &hi);
-      uint64_t c1 = 0, c2 = 0;
-      t[i + j] = fio_math_addc64(t[i + j], lo, 0, &c1);
-      t[i + j] = fio_math_addc64(t[i + j], carry, 0, &c2);
-      carry = hi + c1 + c2;
-    }
-    for (int k = i + 4; carry && k < 8; ++k) {
-      uint64_t c = 0;
-      t[k] = fio_math_addc64(t[k], carry, 0, &c);
-      carry = c;
-    }
-  }
-#endif
-
+  uint64_t t[8];
+  fio_math_mul(t, a, b, 4);
   fio___p256_scalar_reduce(r, t);
 }
 
@@ -844,7 +866,9 @@ FIO_IFUNC void fio___p256_point_cswap(fio___p256_point_jacobian_s *a,
                                       fio___p256_point_jacobian_s *b,
                                       uint64_t swap);
 
-/** Convert Jacobian point to affine (x = X/Z², y = Y/Z³) */
+/** Convert Jacobian point to affine (x = X/Z², y = Y/Z³)
+ * Infinity has no affine form: it yields (0,0), which is NOT a curve point.
+ * Callers must check fio___p256_point_is_infinity() first. */
 FIO_SFUNC void fio___p256_point_to_affine(
     fio___p256_point_affine_s *a,
     const fio___p256_point_jacobian_s *j) {
@@ -1201,6 +1225,9 @@ FIO_SFUNC void fio___p256_point_mul2(fio___p256_point_jacobian_s *r,
   fio___p256_point_jacobian_s gpq;
   fio___p256_point_to_jacobian(&gpq, &g);
   fio___p256_point_add_mixed(&gpq, &gpq, q);
+  /* G + Q is infinity iff Q == -G; adding infinity is then a no-op (never
+   * use the (0,0) affine placeholder as a point). */
+  const int gpq_inf = fio___p256_point_is_infinity(&gpq);
   fio___p256_point_affine_s gpq_affine;
   fio___p256_point_to_affine(&gpq_affine, &gpq);
 
@@ -1229,7 +1256,8 @@ FIO_SFUNC void fio___p256_point_mul2(fio___p256_point_jacobian_s *r,
     int b2 = (u2[limb] >> bit) & 1;
 
     if (b1 && b2) {
-      fio___p256_point_add_mixed(r, r, &gpq_affine);
+      if (!gpq_inf)
+        fio___p256_point_add_mixed(r, r, &gpq_affine);
     } else if (b1) {
       fio___p256_point_add_mixed(r, r, &g);
     } else if (b2) {
@@ -1243,8 +1271,47 @@ DER Signature Parsing
 ***************************************************************************** */
 
 /**
- * Parse DER-encoded ECDSA signature.
- * Format: SEQUENCE { r INTEGER, s INTEGER }
+ * Parse one strict DER INTEGER (short-form length, positive, minimal, at most
+ * 32 value bytes), right-aligned into `out`. Advances `*pp`.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+FIO_SFUNC int fio___p256_parse_der_integer(uint8_t out[32],
+                                           const uint8_t **pp,
+                                           const uint8_t *end) {
+  const uint8_t *p = *pp;
+  if ((size_t)(end - p) < 2 || p[0] != 0x02)
+    return -1;
+  size_t len = p[1];
+  p += 2;
+  if (!len || len > 33 || len > (size_t)(end - p))
+    return -1;
+  if (p[0] & 0x80) /* negative */
+    return -1;
+  if (p[0] == 0x00 && len > 1) {
+    if (!(p[1] & 0x80)) /* non-minimal leading zero */
+      return -1;
+    ++p;
+    --len;
+  }
+  if (len > 32)
+    return -1;
+  FIO_MEMSET(out, 0, 32);
+  FIO_MEMCPY(out + (32 - len), p, len);
+  *pp = p + len;
+  return 0;
+}
+
+/**
+ * Parse strict DER-encoded ECDSA signature.
+ * Format: SEQUENCE { r INTEGER, s INTEGER }, with no trailing data.
+ *
+ * Intentionally strict (unlike the lenient `der.h`, which this does not use):
+ * every mainstream signer emits canonical DER and mainstream verifiers reject
+ * anything else, so leniency gains no interoperability; it would only let one
+ * (r, s) have many encodings (CVE-2014-8275 style malleability, e.g. of
+ * certificate fingerprints). The API reports no consumed length, so trailing
+ * data is an error. Negative INTEGERs are different values, not encodings.
  *
  * Returns 0 on success, -1 on error.
  */
@@ -1252,76 +1319,16 @@ FIO_SFUNC int fio___p256_parse_der_signature(uint8_t r[32],
                                              uint8_t s[32],
                                              const uint8_t *sig,
                                              size_t sig_len) {
-  if (!sig || sig_len < 8)
+  /* max content is 2 * (2 + 33) = 70 bytes, so DER requires short form */
+  if (!sig || sig_len < 8 || sig_len > 72)
     return -1;
-
-  const uint8_t *p = sig;
+  if (sig[0] != 0x30 || (size_t)sig[1] != sig_len - 2)
+    return -1;
+  const uint8_t *p = sig + 2;
   const uint8_t *end = sig + sig_len;
-
-  /* SEQUENCE tag */
-  if (*p++ != 0x30)
+  if (fio___p256_parse_der_integer(r, &p, end) ||
+      fio___p256_parse_der_integer(s, &p, end) || p != end)
     return -1;
-
-  /* SEQUENCE length */
-  size_t seq_len;
-  if (*p & 0x80) {
-    /* Long form length */
-    int len_bytes = *p++ & 0x7F;
-    if (len_bytes > 2 || p + len_bytes > end)
-      return -1;
-    seq_len = 0;
-    for (int i = 0; i < len_bytes; ++i)
-      seq_len = (seq_len << 8) | *p++;
-  } else {
-    seq_len = *p++;
-  }
-
-  if (p + seq_len > end)
-    return -1;
-
-  /* Parse r INTEGER */
-  if (*p++ != 0x02)
-    return -1;
-
-  size_t r_len = *p++;
-  if (p + r_len > end || r_len > 33)
-    return -1;
-
-  /* Skip leading zero if present (positive integer encoding) */
-  const uint8_t *r_data = p;
-  if (r_len > 0 && *r_data == 0x00) {
-    r_data++;
-    r_len--;
-  }
-  p += (r_len + (r_data != p ? 1 : 0));
-
-  /* Copy r, right-aligned in 32 bytes */
-  FIO_MEMSET(r, 0, 32);
-  if (r_len > 32)
-    return -1;
-  FIO_MEMCPY(r + (32 - r_len), r_data, r_len);
-
-  /* Parse s INTEGER */
-  if (*p++ != 0x02)
-    return -1;
-
-  size_t s_len = *p++;
-  if (p + s_len > end || s_len > 33)
-    return -1;
-
-  /* Skip leading zero if present */
-  const uint8_t *s_data = p;
-  if (s_len > 0 && *s_data == 0x00) {
-    s_data++;
-    s_len--;
-  }
-
-  /* Copy s, right-aligned in 32 bytes */
-  FIO_MEMSET(s, 0, 32);
-  if (s_len > 32)
-    return -1;
-  FIO_MEMCPY(s + (32 - s_len), s_data, s_len);
-
   return 0;
 }
 
@@ -1360,8 +1367,9 @@ SFUNC int fio_ecdsa_p256_verify_raw(const uint8_t r_bytes[32],
   }
 
   /* Load public key point Q */
-  fio___p256_fe_from_bytes(q.x, pubkey_x);
-  fio___p256_fe_from_bytes(q.y, pubkey_y);
+  if (fio___p256_fe_from_bytes_canonical(q.x, pubkey_x) ||
+      fio___p256_fe_from_bytes_canonical(q.y, pubkey_y))
+    return -1;
 
   /* Verify Q is on the curve: y² = x³ - 3x + b (mod p) */
   {
@@ -1433,6 +1441,97 @@ SFUNC int fio_ecdsa_p256_verify_raw(const uint8_t r_bytes[32],
   return 0;
 }
 
+/**
+ * Decompress a compressed P-256 point (33 bytes: 0x02/0x03 || x), SEC 1
+ * section 2.3.4. Computes y from x using y² = x³ - 3x + b and selects the root
+ * whose parity matches the prefix.
+ *
+ * Rejects any other prefix (incl. the identity `0x00` and the hybrid forms
+ * `0x06` / `0x07`, which RFC 5480 forbids), a non-canonical x (x >= p) and an
+ * x with no curve point (y² is not a square). The result is on the curve.
+ * (No point has y = 0: the group order is odd, so both prefixes are valid.)
+ *
+ * Public values only (not constant time).
+ *
+ * @return 0 on success, -1 on failure
+ */
+FIO_SFUNC int fio___p256_point_decompress(fio___p256_point_affine_s *p,
+                                          const uint8_t compressed[33]) {
+  uint8_t prefix = compressed[0];
+  if (prefix != 0x02 && prefix != 0x03)
+    return -1;
+
+  /* Load x coordinate (must be canonical: x < p) */
+  if (fio___p256_fe_from_bytes_canonical(p->x, compressed + 1))
+    return -1;
+
+  /* Compute y² = x³ - 3x + b */
+  fio___p256_fe_s y2, x3, t;
+  fio___p256_fe_sqr(t, p->x);
+  fio___p256_fe_mul(x3, t, p->x);
+  fio___p256_fe_sub(t, x3, p->x);
+  fio___p256_fe_sub(t, t, p->x);
+  fio___p256_fe_sub(t, t, p->x);
+  fio___p256_fe_add(y2, t, FIO___P256_B);
+
+  /* Compute y = sqrt(y²) mod p.
+   * For P-256: p ≡ 3 (mod 4), so y = y²^((p+1)/4) mod p (no Tonelli-Shanks) */
+  /* (p+1)/4 =
+   * 0x3FFFFFFFC0000000400000000000000000000000400000000000000000000000 */
+  fio___p256_fe_s y;
+
+  /* Use Fermat's method: y = y2^((p+1)/4) mod p
+   * We use a simple square-and-multiply with the exponent (p+1)/4 */
+  static const uint64_t exp[4] = {
+      0x0000000000000000ULL, /* exp[0] */
+      0x0000000040000000ULL, /* exp[1] */
+      0x4000000000000000ULL, /* exp[2] */
+      0x3FFFFFFFC0000000ULL, /* exp[3] */
+  };
+
+  /* Start with result = 1 */
+  fio___p256_fe_s result;
+  fio___p256_fe_one(result);
+
+  /* base = y2 */
+  fio___p256_fe_s base;
+  fio___p256_fe_copy(base, y2);
+
+  /* Square-and-multiply from LSB to MSB */
+  for (int i = 0; i < 4; ++i) {
+    uint64_t bits = exp[i];
+    for (int j = 0; j < 64; ++j) {
+      if (bits & 1) {
+        fio___p256_fe_mul(result, result, base);
+      }
+      fio___p256_fe_sqr(base, base);
+      bits >>= 1;
+    }
+  }
+
+  fio___p256_fe_copy(y, result);
+
+  /* Verify: y² should equal y2 */
+  fio___p256_fe_s check;
+  fio___p256_fe_sqr(check, y);
+  if (fio___p256_fe_eq(check, y2) != 0)
+    return -1; /* Not a quadratic residue - invalid point */
+
+  /* Select correct sign: if (y mod 2) != (prefix - 2), negate y */
+  uint8_t y_bytes[32];
+  fio___p256_fe_to_bytes(y_bytes, y);
+  int y_parity = y_bytes[31] & 1;
+  int expected_parity = prefix - 0x02;
+
+  if (y_parity != expected_parity) {
+    fio___p256_fe_neg(p->y, y);
+  } else {
+    fio___p256_fe_copy(p->y, y);
+  }
+
+  return 0;
+}
+
 SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
                                 size_t sig_len,
                                 const uint8_t *msg_hash,
@@ -1441,9 +1540,24 @@ SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
   if (!sig || !msg_hash || !pubkey)
     return -1;
 
-  /* Uncompressed public key format: 0x04 || x (32 bytes) || y (32 bytes) */
-  if (pubkey_len != 65 || pubkey[0] != 0x04)
+  /* SEC 1 public key: 0x04 || x || y (65 bytes) or 0x02/0x03 || x (33 bytes).
+   * verify_raw checks the coordinates are canonical and on the curve. */
+  const uint8_t *qx, *qy;
+  uint8_t xy[64];
+  if (pubkey_len == 65 && pubkey[0] == 0x04) {
+    qx = pubkey + 1;
+    qy = pubkey + 33;
+  } else if (pubkey_len == 33) {
+    fio___p256_point_affine_s q;
+    if (fio___p256_point_decompress(&q, pubkey))
+      return -1;
+    fio___p256_fe_to_bytes(xy, q.x);
+    fio___p256_fe_to_bytes(xy + 32, q.y);
+    qx = xy;
+    qy = xy + 32;
+  } else {
     return -1;
+  }
 
   /* Parse DER signature */
   uint8_t r[32], s[32];
@@ -1451,7 +1565,7 @@ SFUNC int fio_ecdsa_p256_verify(const uint8_t *sig,
     return -1;
 
   /* Verify */
-  return fio_ecdsa_p256_verify_raw(r, s, msg_hash, pubkey + 1, pubkey + 33);
+  return fio_ecdsa_p256_verify_raw(r, s, msg_hash, qx, qy);
 }
 
 /* *****************************************************************************
@@ -1540,12 +1654,15 @@ SFUNC int fio_ecdsa_p256_sign(uint8_t *sig,
 
   /* Generate random k and compute signature. */
   for (int attempts = 0; attempts < 100; ++attempts) {
-    /* Generate random nonce k in the valid scalar range 0 < k < n. */
-    do {
-      if (fio_rand_bytes_secure(k_bytes, 32))
-        fio_rand_bytes(k_bytes, 32);
-      fio___p256_scalar_from_bytes(k, k_bytes);
-    } while (fio___p256_scalar_ct_is_zero(k) | fio___p256_scalar_ct_gte_n(k));
+    /* Generate random nonce k in the valid scalar range 0 < k < n.
+     * Rejections consume an attempt, bounding total draws (stuck RNG). */
+    if (fio_rand_bytes_secure(k_bytes, 32))
+      fio_rand_bytes(k_bytes, 32);
+    fio___p256_scalar_from_bytes(k, k_bytes);
+    if (fio___p256_scalar_ct_is_zero(k) | fio___p256_scalar_ct_gte_n(k)) {
+      FIO___P256_SIGN_CLEAR_ATTEMPT();
+      continue;
+    }
 
     /* Compute R = k * G */
     fio___p256_point_mul(&R_jac, k, &g);
@@ -1661,137 +1778,59 @@ FIO_SFUNC int fio___p256_point_validate(const fio___p256_point_affine_s *p) {
   return (fio___p256_fe_eq(y2, t) == 0) ? 0 : -1;
 }
 
-/**
- * Decompress a compressed P-256 point (33 bytes: 0x02/0x03 || x).
- * Computes y from x using y² = x³ - 3x + b, selects sign based on prefix.
- *
- * @return 0 on success, -1 on failure
- */
-FIO_SFUNC int fio___p256_point_decompress(fio___p256_point_affine_s *p,
-                                          const uint8_t compressed[33]) {
-  uint8_t prefix = compressed[0];
-  if (prefix != 0x02 && prefix != 0x03)
+SFUNC int fio_p256_public_key(uint8_t public_key[65],
+                              const uint8_t secret_key[32]) {
+  if (!public_key)
     return -1;
-
-  /* Load x coordinate */
-  fio___p256_fe_from_bytes(p->x, compressed + 1);
-
-  /* Compute y² = x³ - 3x + b */
-  fio___p256_fe_s y2, x3, t;
-  fio___p256_fe_sqr(t, p->x);
-  fio___p256_fe_mul(x3, t, p->x);
-  fio___p256_fe_sub(t, x3, p->x);
-  fio___p256_fe_sub(t, t, p->x);
-  fio___p256_fe_sub(t, t, p->x);
-  fio___p256_fe_add(y2, t, FIO___P256_B);
-
-  /* Compute y = sqrt(y²) mod p using Tonelli-Shanks.
-   * For P-256: p ≡ 3 (mod 4), so y = y²^((p+1)/4) mod p */
-  /* (p+1)/4 =
-   * 0x3FFFFFFFC0000000400000000000000000000000400000000000000000000000 */
-  fio___p256_fe_s y;
-
-  /* Use Fermat's method: y = y2^((p+1)/4) mod p
-   * We use a simple square-and-multiply with the exponent (p+1)/4 */
-  static const uint64_t exp[4] = {
-      0x0000000000000000ULL, /* exp[0] */
-      0x0000000040000000ULL, /* exp[1] */
-      0x4000000000000000ULL, /* exp[2] */
-      0x3FFFFFFFC0000000ULL, /* exp[3] */
-  };
-
-  /* Start with result = 1 */
-  fio___p256_fe_s result;
-  fio___p256_fe_one(result);
-
-  /* base = y2 */
-  fio___p256_fe_s base;
-  fio___p256_fe_copy(base, y2);
-
-  /* Square-and-multiply from LSB to MSB */
-  for (int i = 0; i < 4; ++i) {
-    uint64_t bits = exp[i];
-    for (int j = 0; j < 64; ++j) {
-      if (bits & 1) {
-        fio___p256_fe_mul(result, result, base);
-      }
-      fio___p256_fe_sqr(base, base);
-      bits >>= 1;
-    }
-  }
-
-  fio___p256_fe_copy(y, result);
-
-  /* Verify: y² should equal y2 */
-  fio___p256_fe_s check;
-  fio___p256_fe_sqr(check, y);
-  if (fio___p256_fe_eq(check, y2) != 0)
-    return -1; /* Not a quadratic residue - invalid point */
-
-  /* Select correct sign: if (y mod 2) != (prefix - 2), negate y */
-  uint8_t y_bytes[32];
-  fio___p256_fe_to_bytes(y_bytes, y);
-  int y_parity = y_bytes[31] & 1;
-  int expected_parity = prefix - 0x02;
-
-  if (y_parity != expected_parity) {
-    fio___p256_fe_neg(p->y, y);
-  } else {
-    fio___p256_fe_copy(p->y, y);
-  }
-
-  return 0;
-}
-
-SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
-  if (!secret_key || !public_key)
+  if (!secret_key) {
+    FIO_MEMSET(public_key, 0, 65);
     return -1;
+  }
 
   int rc = -1;
   fio___p256_scalar_s k = {0};
   fio___p256_point_affine_s g = {0}, pub_aff = {0};
   fio___p256_point_jacobian_s pub_jac = {0};
 
-  /* Generate random scalar and ensure 0 < k < n */
-  for (int attempts = 0; attempts < 100; ++attempts) {
-    do {
-      if (fio_rand_bytes_secure(secret_key, 32))
-        fio_rand_bytes(secret_key, 32);
-    } while (!fio_buf2u64u(secret_key) || !fio_buf2u64u(secret_key + 8) ||
-             !fio_buf2u64u(secret_key + 16) || !fio_buf2u64u(secret_key + 24));
-    fio___p256_scalar_from_bytes(k, secret_key);
-
-    /* Check k is not zero and k < n */
-    if (!fio___p256_scalar_ct_is_zero(k) && !fio___p256_scalar_ct_gte_n(k)) {
-      rc = 0;
-      break;
-    }
+  /* Load and validate the secret scalar: 0 < k < n */
+  fio___p256_scalar_from_bytes(k, secret_key);
+  if (fio___p256_scalar_ct_is_zero(k) | fio___p256_scalar_ct_gte_n(k)) {
+    FIO_MEMSET(public_key, 0, 65);
+    goto cleanup;
   }
 
-  if (rc != 0)
-    goto cleanup;
-
-  /* Compute public key = k * G */
+  /* Compute public key = k * G (constant-time ladder) */
   fio___p256_fe_copy(g.x, FIO___P256_GX);
   fio___p256_fe_copy(g.y, FIO___P256_GY);
   fio___p256_point_mul(&pub_jac, k, &g);
-
-  /* Convert to affine */
   fio___p256_point_to_affine(&pub_aff, &pub_jac);
 
   /* Serialize: 0x04 || x || y */
   public_key[0] = 0x04;
   fio___p256_fe_to_bytes(public_key + 1, pub_aff.x);
   fio___p256_fe_to_bytes(public_key + 33, pub_aff.y);
+  rc = 0;
 
 cleanup:
-  if (rc != 0)
-    fio_secure_zero(secret_key, 32);
   fio_secure_zero(k, sizeof(k));
-  fio_secure_zero(&g, sizeof(g));
   fio_secure_zero(&pub_jac, sizeof(pub_jac));
   fio_secure_zero(&pub_aff, sizeof(pub_aff));
   return rc;
+}
+
+SFUNC int fio_p256_keypair(uint8_t secret_key[32], uint8_t public_key[65]) {
+  if (!secret_key || !public_key)
+    return -1;
+
+  /* Draw random scalars until 0 < k < n (bounded number of draws). */
+  for (int attempts = 0; attempts < 100; ++attempts) {
+    if (fio_rand_bytes_secure(secret_key, 32))
+      fio_rand_bytes(secret_key, 32);
+    if (!fio_p256_public_key(public_key, secret_key))
+      return 0;
+  }
+  fio_secure_zero(secret_key, 32);
+  return -1;
 }
 
 SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
@@ -1811,8 +1850,11 @@ SFUNC int fio_p256_shared_secret(uint8_t shared_secret[32],
     /* Uncompressed: 0x04 || x || y */
     if (their_public_key[0] != 0x04)
       goto cleanup;
-    fio___p256_fe_from_bytes(their_point.x, their_public_key + 1);
-    fio___p256_fe_from_bytes(their_point.y, their_public_key + 33);
+    if (fio___p256_fe_from_bytes_canonical(their_point.x,
+                                           their_public_key + 1) ||
+        fio___p256_fe_from_bytes_canonical(their_point.y,
+                                           their_public_key + 33))
+      goto cleanup;
   } else if (their_public_key_len == 33) {
     /* Compressed: 0x02/0x03 || x */
     if (fio___p256_point_decompress(&their_point, their_public_key) != 0)

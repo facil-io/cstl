@@ -26,10 +26,10 @@ Queue Type(s)
 /* Note: FIO_QUEUE_TASKS_PER_ALLOC can't be more than 65535 */
 #ifndef FIO_QUEUE_TASKS_PER_ALLOC
 #if UINTPTR_MAX <= 0xFFFFFFFF
-/* fits fio_queue_s in one page on most 32 bit machines */
+/* a task ring chunk (12 + 338 * 12 = 4068 bytes) fits a 4 KiB page */
 #define FIO_QUEUE_TASKS_PER_ALLOC 338
 #else
-/* fits fio_queue_s in one page on most 64 bit machines */
+/* a task ring chunk (16 + 168 * 24 = 4048 bytes) fits a 4 KiB page */
 #define FIO_QUEUE_TASKS_PER_ALLOC 168
 #endif
 #endif
@@ -245,8 +245,8 @@ Queue Inline Helpers
 ***************************************************************************** */
 
 /** returns the number of tasks in the queue. */
-FIO_IFUNC uint32_t fio_queue_count(fio_queue_s *q) {
-  return fio_atomic_add(&q->count, 0);
+FIO_IFUNC FIO___TSAN_AVOID uint32_t fio_queue_count(fio_queue_s *q) {
+  return q->count;
 }
 
 /** Initializes a fio_queue_s object. */
@@ -400,7 +400,10 @@ FIO_SFUNC void fio___queue_workers_signal(fio_queue_s *q) {
   if (!q->consumers.next || FIO_LIST_IS_EMPTY(&q->consumers))
     return;
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    if (fio_atomic_add(&pos->stop, 0) || !fio_atomic_add(&pos->sleeping, 0))
+    size_t sleeping;
+    /* Pair with the worker's admission before its final count check. */
+    fio_atomic_load(sleeping, &pos->sleeping);
+    if (pos->stop || !sleeping)
       continue;
     fio_thread_mutex_lock(&pos->mutex);
     fio_thread_cond_signal(&pos->cond);
@@ -481,10 +484,10 @@ SFUNC fio_queue_task_s fio_queue_pop(fio_queue_s *q) {
   fio_queue_task_s t = {.fn = NULL};
   fio___task_ring_s *to_free = NULL;
   fio___task_ring_s *to_free_tst = NULL;
-  if (!fio_atomic_add(&q->count, 0))
+  if (!fio_queue_count(q))
     return t;
   FIO___LOCK_LOCK(q->lock);
-  if (!fio_atomic_add(&q->count, 0))
+  if (!q->count)
     goto finish;
   if (!(t = fio___task_ring_pop(q->r)).fn) {
     to_free = q->r;
@@ -538,12 +541,15 @@ FIO_SFUNC void *fio___queue_worker_task(void *g_) {
   fio___thread_group_s *grp = (fio___thread_group_s *)g_;
   FIO_LEAK_COUNTER_ON_ALLOC(fio___queue_worker);
   fio_state_callback_force(FIO_CALL_ON_WORKER_THREAD_START);
-  while (!fio_atomic_add(&grp->stop, 0)) {
+  while (!grp->stop) {
     fio_queue_perform_all(grp->queue);
     fio_thread_mutex_lock(&grp->mutex);
     /* announce, then re-check - see `fio___queue_workers_signal` */
     fio_atomic_add(&grp->sleeping, 1);
-    if (!fio_atomic_add(&grp->stop, 0) && !fio_queue_count(grp->queue))
+    uint32_t count;
+    /* Order this check with the pusher's count/sleeper handshake. */
+    fio_atomic_load(count, &grp->queue->count);
+    if (!grp->stop && !count)
       fio_thread_cond_wait(&grp->cond, &grp->mutex);
     fio_atomic_sub(&grp->sleeping, 1);
     fio_thread_mutex_unlock(&grp->mutex);
@@ -588,7 +594,7 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   fio_queue_perform_all(grp.queue);
   FIO___LOCK_LOCK(grp.queue->lock);
   FIO_LIST_REMOVE(&grp.node);
-  if (!(fio_atomic_add(&grp.stop, 0) & 2)) {
+  if (!(grp.stop & 2)) {
     FIO___LOCK_UNLOCK(grp.queue->lock);
     fio_thread_cond_destroy(&grp.cond);
     fio_thread_mutex_destroy(&grp.mutex);
@@ -597,8 +603,13 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
     fio_atomic_or(&grp.stop, 1);
     fio_atomic_and(&grp.stop, 1);
     FIO___LOCK_UNLOCK(grp.queue->lock);
-    while (fio_atomic_add(&grp.stop, 0) & 1)
-      FIO_THREAD_RESCHEDULE();
+    unsigned stop;
+    do {
+      /* The joiner releases this stack frame by clearing the handshake. */
+      fio_atomic_load(stop, &grp.stop);
+      if (stop & 1)
+        FIO_THREAD_RESCHEDULE();
+    } while (stop & 1);
   }
   FIO_LEAK_COUNTER_ON_FREE(fio___queue_worker_manager);
   return NULL;
@@ -607,6 +618,13 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
 SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
   if (!q)
     return -1;
+  while (workers > 255) {
+    fio_queue_workers_add(q, 128);
+    fio_queue_workers_add(q, 128);
+    workers -= 256;
+  }
+  if (!workers)
+    return 0;
   FIO___LOCK_LOCK(q->lock);
   if (!q->consumers.next || !q->consumers.prev) {
     q->consumers = FIO_LIST_INIT(q->consumers);
@@ -616,8 +634,13 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
     FIO___LOCK_UNLOCK(q->lock);
     return -1;
   }
-  while (fio_atomic_add(&grp.stop, 0))
-    FIO_THREAD_RESCHEDULE();
+  unsigned stop;
+  do {
+    /* Acquire the manager's copy before releasing this stack argument. */
+    fio_atomic_load(stop, &grp.stop);
+    if (stop)
+      FIO_THREAD_RESCHEDULE();
+  } while (stop);
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 }
@@ -628,7 +651,7 @@ SFUNC size_t fio_queue_workers_stop(fio_queue_s *q) {
   size_t count = 0;
   FIO___LOCK_LOCK(q->lock); /* consumers list is only read under the lock */
   FIO_LIST_EACH(fio___thread_group_s, node, &q->consumers, pos) {
-    fio_atomic_or(&pos->stop, 1);
+    pos->stop |= 1;
     fio_thread_mutex_lock(&pos->mutex);
     fio_thread_cond_broadcast(&pos->cond);
     fio_thread_mutex_unlock(&pos->mutex);
@@ -659,8 +682,13 @@ SFUNC void fio_queue_workers_join(fio_queue_s *q) {
     fio_atomic_or(&pos->stop, 3);
     FIO___LOCK_UNLOCK(q->lock);
     had_workers = 1;
-    while (fio_atomic_add(&pos->stop, 0) & 2)
-      FIO_THREAD_RESCHEDULE();
+    unsigned stop;
+    do {
+      /* Acquire the manager's retirement before destroying its wait state. */
+      fio_atomic_load(stop, &pos->stop);
+      if (stop & 2)
+        FIO_THREAD_RESCHEDULE();
+    } while (stop & 2);
     fio_thread_cond_destroy(&pos->cond);
     fio_thread_mutex_destroy(&pos->mutex);
     fio_thread_t thr = pos->thread;
@@ -755,10 +783,15 @@ SFUNC size_t fio_timer_push2queue(fio_queue_s *queue,
     return 0;
   fio___timer_event_s *t;
   while ((t = fio___timer_pop(&timer->next, start_at))) {
-    fio_queue_push(queue,
-                   .fn = fio___timer_perform,
-                   .udata1 = timer,
-                   .udata2 = t);
+    if (FIO_UNLIKELY(fio_queue_push(queue,
+                                    .fn = fio___timer_perform,
+                                    .udata1 = timer,
+                                    .udata2 = t))) {
+      /* No memory to queue it: keep the (still due) event scheduled and
+       * retry on the next call - never drop it (or its on_finish). */
+      fio___timer_insert(&timer->next, t);
+      break;
+    }
     ++r;
   }
   FIO___LOCK_UNLOCK(timer->lock);

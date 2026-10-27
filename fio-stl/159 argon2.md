@@ -53,7 +53,7 @@ Arguments:
 | `ad` | Optional associated data `X`. |
 | `t_cost` | Pass count, minimum `1`. |
 | `m_cost` | Memory cost in KiB, minimum `8 * parallelism`. |
-| `parallelism` | Lane count, minimum `1`; processed sequentially here. |
+| `parallelism` | Lane count, `1` to `2^24-1` (`0` selects `1`); processed sequentially here. |
 | `outlen` | Output length in bytes, minimum `4`, default `32`. |
 | `type` | `FIO_ARGON2D`, `FIO_ARGON2I`, or `FIO_ARGON2ID`. |
 
@@ -70,6 +70,8 @@ Computes an Argon2 hash and returns up to 64 bytes in `fio_u512`. Use the first 
 
 For outputs longer than 64 bytes, use `fio_argon2_hash`.
 
+On error (invalid arguments or allocation failure) the returned value is all zeros. This still fails closed when comparing against a stored hash, but when the output is used as a key, call `fio_argon2_hash` and check its return value.
+
 ### `fio_argon2_hash`
 
 ```c
@@ -78,9 +80,9 @@ SFUNC int fio_argon2_hash(void *out, fio_argon2_args_s args);
   fio_argon2_hash(out, (fio_argon2_args_s){__VA_ARGS__})
 ```
 
-Writes the Argon2 output into a caller-provided buffer. Supports arbitrary output lengths of at least 4 bytes.
+Writes the Argon2 output into a caller-provided buffer, which must hold `outlen` bytes (`0` selects 32). Supports arbitrary output lengths of at least 4 bytes.
 
-Returns `0` on success, `-1` on error.
+Returns `0` on success, `-1` on error, leaving `out` untouched. Errors: `out` is `NULL`, `outlen` is 1-3, `type` is invalid, `parallelism` exceeds `2^24-1`, an input is longer than `2^32-1` bytes, the memory matrix exceeds the address space, or allocation fails. Large `m_cost` values from untrusted sources fail gracefully on allocation failure, but applications should still cap costs.
 
 ## Example
 

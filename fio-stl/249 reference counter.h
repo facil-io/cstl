@@ -68,9 +68,8 @@ Copyright and License: see header file (000 copyright.h) or top of file
 #define FIO_REF_DUPNAME     dup2
 #endif
 
-/* The header's alignment matches the wrapped type's alignment, rounding
- * sizeof(__wrapper_s) up to a multiple of that alignment, so the object
- * immediately following the header keeps its required alignment. */
+/* The header's size is a multiple of the wrapped type's alignment, so the
+ * object immediately following it is properly aligned. */
 typedef struct FIO_ALIGN(_Alignof(FIO_REF_TYPE)) {
 #ifdef FIO_REF_FLEX_TYPE
   volatile uint32_t ref;
@@ -82,6 +81,14 @@ typedef struct FIO_ALIGN(_Alignof(FIO_REF_TYPE)) {
   FIO_REF_METADATA metadata;
 #endif
 } FIO_NAME(FIO_REF_NAME, __wrapper_s);
+
+#ifdef FIO_REF_FLEX_TYPE
+/* A flexible array must start immediately after the object: padding here
+ * would move it away from the offset used by the wrapped type's accessors. */
+_Static_assert(_Alignof(FIO_REF_TYPE) >= _Alignof(FIO_REF_FLEX_TYPE) &&
+                   !(sizeof(FIO_REF_TYPE) % _Alignof(FIO_REF_FLEX_TYPE)),
+               "reference-counted flex suffix requires aligned object size");
+#endif
 
 #ifdef FIO_PTR_TAG_TYPE
 #define FIO_REF_TYPE_PTR FIO_PTR_TAG_TYPE
@@ -159,9 +166,15 @@ IFUNC uint32_t FIO_NAME(FIO_REF_NAME,
 
 /* *****************************************************************************
 Reference Counter (Wrapper) Implementation
-***************************************************************************** */
-#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+Internal helper types (`FIO___RECURSIVE_INCLUDE` other than 99) are `static`
+(see `001 header.h`), so every translation unit needs their implementation,
+even a declarations-only `FIO_EXTERN` one (e.g., FIOBJ inline constructors).
+***************************************************************************** */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) ||                    \
+    (defined(FIO___RECURSIVE_INCLUDE) && (FIO___RECURSIVE_INCLUDE + 1) != 100)
+
+/* static helpers exist in declarations-only TUs too: report leaks once */
 FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)
 
 /** Allocates a reference counted object. */
@@ -169,12 +182,19 @@ FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME,
                                 FIO_REF_CONSTRUCTOR)(size_t members) {
   FIO_NAME(FIO_REF_NAME, __wrapper_s) *o = NULL;
+  /* flx_size is 32 bits; reject unrepresentable counts and byte sizes before
+   * the allocator or initialization hooks can observe a wrapped allocation. */
+  if (sizeof(*o) > SIZE_MAX - sizeof(FIO_REF_TYPE))
+    return (FIO_REF_TYPE_PTR)0;
+  const size_t prefix = sizeof(*o) + sizeof(FIO_REF_TYPE);
+  if (members > UINT32_MAX ||
+      members > (SIZE_MAX - prefix) / sizeof(FIO_REF_FLEX_TYPE))
+    return (FIO_REF_TYPE_PTR)0;
   FIO_MEM_REALLOC_ALIGNED_(o,
                            0,
-                           sizeof(*o) + sizeof(FIO_REF_TYPE) +
-                               (sizeof(FIO_REF_FLEX_TYPE) * members),
+                           prefix + sizeof(FIO_REF_FLEX_TYPE) * members,
                            0,
-                           _Alignof(FIO_REF_TYPE));
+                           _Alignof(FIO_NAME(FIO_REF_NAME, __wrapper_s)));
 #else
 IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
   FIO_NAME(FIO_REF_NAME, __wrapper_s) *o = NULL;
@@ -182,7 +202,7 @@ IFUNC FIO_REF_TYPE_PTR FIO_NAME(FIO_REF_NAME, FIO_REF_CONSTRUCTOR)(void) {
                            0,
                            sizeof(*o) + sizeof(FIO_REF_TYPE),
                            0,
-                           _Alignof(FIO_REF_TYPE));
+                           _Alignof(FIO_NAME(FIO_REF_NAME, __wrapper_s)));
 #endif /* FIO_REF_FLEX_TYPE */
   if (!o)
     return (FIO_REF_TYPE_PTR)(o);
@@ -215,7 +235,9 @@ IFUNC void FIO_NAME(FIO_REF_NAME,
   FIO_REF_METADATA_DESTROY((o->metadata));
   FIO_LEAK_COUNTER_ON_FREE(FIO_REF_NAME);
 #ifdef FIO_REF_FLEX_TYPE
-  FIO_MEM_FREE_ALIGNED_(o, sizeof(*o) + (o->flx_size * sizeof(FIO_REF_FLEX_TYPE)));
+  FIO_MEM_FREE_ALIGNED_(o,
+                        sizeof(*o) + sizeof(FIO_REF_TYPE) +
+                            ((size_t)o->flx_size * sizeof(FIO_REF_FLEX_TYPE)));
 #else
   FIO_MEM_FREE_ALIGNED_(o, sizeof(*o) + sizeof(FIO_REF_TYPE));
 #endif
@@ -236,7 +258,7 @@ IFUNC FIO_REF_METADATA *FIO_NAME(FIO_REF_NAME,
 Reference Counter (Wrapper) Cleanup
 ***************************************************************************** */
 
-#endif /* FIO_EXTERN_COMPLETE */
+#endif /* FIO_EXTERN_COMPLETE || static helper */
 #undef FIO_REF_NAME
 #undef FIO_REF_FLEX_TYPE
 #undef FIO_REF_TYPE

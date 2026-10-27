@@ -343,7 +343,9 @@ void fio_u2048_montgomery_mul(fio_u2048 *result, const fio_u2048 *a, const fio_u
                               const fio_u2048 *N, const fio_u2048 *N_dash);
 ```
 
-The multiplication uses `fio_math_mul` from [`./002 math.h`](./002%20math.h).
+`N` must be odd and `N_dash` must be `-N^-1 mod 2^bits`. Inputs must be below `N`; the result is `a * b * 2^-bits mod N`. The final reduction runs in constant time. Stack temporaries are not wiped; callers handling secrets should clear their own buffers.
+
+The multiplication uses `fio_math_mul` from [`./000 core.h`](./000%20core.h).
 
 ## Shuffle and Reduce on Native Arrays
 

@@ -115,8 +115,8 @@ macro wrappers let you pass named arguments directly.
 typedef struct {
   fio_pubsub_engine_s const *engine;  /* NULL = default engine                    */
   fio_io_s                  *from;    /* exclude this IO from receiving the message */
-  uint64_t                   id;      /* 0 = auto-generate random ID               */
-  uint64_t                   timestamp; /* 0 = current reactor tick (ms)           */
+  uint64_t                   id;      /* 0 = random; cluster dedup key (with ts)   */
+  uint64_t                   timestamp; /* 0 = fio_io_last_tick_time() (wall ms)    */
   fio_buf_info_s             channel; /* target channel name                       */
   fio_buf_info_s             message; /* message payload                           */
   int16_t                    filter;  /* numerical namespace                        */
@@ -158,7 +158,7 @@ fio_pubsub_subscribe(.channel    = FIO_BUF_INFO1("chat:*"),
 /* Replay history from the last 5 minutes */
 fio_pubsub_subscribe(.channel      = FIO_BUF_INFO1("news"),
                      .on_message   = handle_news,
-                     .replay_since = fio_io_last_tick() - 5*60*1000);
+                     .replay_since = fio_io_last_tick_time() - 5*60*1000);
 
 /* Manual handle for explicit control */
 uintptr_t sub_handle = 0;
@@ -368,6 +368,9 @@ fio_pubsub_engine_s const *fio_pubsub_engine_default_set(
 `fio_pubsub_engine_default_set(NULL)` restores the auto-selected default
 (cluster engine if cluster port is set, IPC engine otherwise).
 
+The default pointer is not synchronized. Set it, or detach the current default,
+before concurrent publishing begins or while other publishers are stopped.
+
 ### Custom engine interface
 
 ```c
@@ -392,7 +395,7 @@ typedef struct fio_pubsub_engine_s {
 
 Callbacks must not block. Defer slow operations with `fio_io_defer`.
 
-Missing callbacks are filled with safe defaults on `fio_pubsub_engine_attach`: subscription callbacks become no-ops; a NULL `publish` falls back to local IPC delivery.
+Missing callbacks are filled with safe defaults on `fio_pubsub_engine_attach`: subscription callbacks become no-ops; a NULL `publish` falls back to local IPC delivery. The built-in engines (`fio_pubsub_engine_ipc` / `fio_pubsub_engine_cluster`) are constant-initialized; their getters only return the pointer.
 
 ### `fio_pubsub_engine_attach` / `fio_pubsub_engine_detach`
 
@@ -406,6 +409,11 @@ channel and pattern subscriptions (via `subscribe` / `psubscribe`).
 
 `detach` removes the engine and calls its `detached` callback. If the detached
 engine was the current default, the default is automatically reset.
+
+`detached` is called in the master only (on detach, or at exit). Forked
+workers drop their inherited engine list without calling `detached`: the
+master still owns the engines, and a worker may keep publishing through one
+(e.g., when it is the default engine).
 
 ```c
 /* Example: a custom engine that bridges to NATS */
@@ -447,15 +455,23 @@ cache is initialized by default but **not attached automatically**; call
 `fio_pubsub_history_attach(fio_pubsub_history_cache(size), priority)` to begin
 storing messages for replay.
 
-`size_limit = 0` inherits from environment variables in order:
+A non-zero `size_limit` replaces the current limit; a lower limit applies on
+the next stored message, which evicts down to it. `size_limit = 0` keeps the
+current limit. The startup limit comes from environment variables in order
+(the KB/MB products saturate instead of overflowing):
 
 1. `WEBSITE_MEMORY_LIMIT_MB` (× 1 MiB)
 2. `WEBSITE_MEMORY_LIMIT_KB` (× 1 KiB)
 3. `WEBSITE_MEMORY_LIMIT` (bytes)
 4. `FIO_PUBSUB_HISTORY_DEFAULT_CACHE_SIZE_LIMIT` (256 MiB)
 
-When the cache overflows its limit, the oldest messages across all channels
-are evicted first.
+A single message larger than the limit (payload plus overhead, computed with
+saturating arithmetic) is not stored and the cache is left as is.
+
+When the cache overflows its limit, eviction visits the channels in map order
+and removes each visited channel's oldest message, repeating until the cache
+fits. This is **not** a global oldest-first order: a busy channel and a quiet
+channel lose messages at the same rate.
 
 ```c
 /* Attach the built-in cache with a 64 MiB ceiling */
@@ -498,8 +514,11 @@ typedef struct fio_pubsub_history_s {
 **Execution context:** all callbacks — **master process**, **IO thread** only.
 Do not block; use `fio_io_defer` for slow operations.
 
-`replay` **must** call `on_done(udata)` when finished (success or failure) —
-the IPC reply mechanism depends on it.
+`replay` **must** call `on_done(udata)` exactly once when finished (success or
+failure) — the IPC reply mechanism depends on it. It may finish
+asynchronously (on the master's IO thread): `udata` and the `channel` buffer
+stay valid until `on_done` runs, and neither may be used after it. Call
+`on_message` only before `on_done`.
 
 `replay` returns `0` if it handled the request. Returning `-1` does **not**
 trigger fallback; use `oldest()` to return `UINT64_MAX` when the manager cannot
@@ -548,14 +567,15 @@ raw IPC buffer.
 |-----------|---------------|
 | `fio_pubsub_publish` | any thread, any process |
 | `fio_pubsub_subscribe` / `fio_pubsub_unsubscribe` | any thread, any process |
-| `on_message` callback | IO thread, any process (per `queue`) |
-| `on_unsubscribe` callback | IO thread, any process |
+| `on_message` callback | Subscription queue's consumer, any process (IO thread by default) |
+| `on_unsubscribe` callback | Subscription queue's consumer, any process (IO thread by default) |
 | Engine `subscribe` / `unsubscribe` / `psubscribe` / `punsubscribe` | **master**, IO thread |
 | Engine `publish` | any thread, any process |
 | History `push` / `replay` / `oldest` / `detached` | **master**, IO thread |
 
-Callbacks must **not block** — offload slow work with `fio_io_defer` or
-route to a background `fio_io_async_s` pool.
+IO-thread callbacks must **not block**. Route slow work to a background
+`fio_io_async_s` pool. Subscription cleanup, delivery and unsubscribe notices
+use fallible queue tasks; allocation failure can lose that work.
 
 ---
 
@@ -627,7 +647,7 @@ static void on_news(fio_pubsub_msg_s *msg) {
 /* Subscribe and receive all messages from the last 10 minutes */
 fio_pubsub_subscribe(.channel      = FIO_BUF_INFO1("news"),
                      .on_message   = on_news,
-                     .replay_since = fio_io_last_tick() - 10*60*1000);
+                     .replay_since = fio_io_last_tick_time() - 10*60*1000);
 ```
 
 Attach the built-in cache, or add a custom persistence layer:

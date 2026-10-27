@@ -38,9 +38,9 @@ All routines are declared in [`./001 memalt.h`](./001%20memalt.h).
 void *fio_memcpy(void *dest, const void *src, size_t bytes);
 ```
 
-Copies `bytes` from `src` to `dest`. Handles overlapping regions like `memmove`. Returns `dest` immediately if `dest == src`, `bytes` is zero, or either pointer is `NULL`.
+Copies `bytes` from `src` to `dest`. Handles overlapping regions like `memmove` and always returns `dest`. Does nothing if `dest == src`, `bytes` is zero, or either pointer is `NULL`.
 
-For small, non-overlapping copies (≤64 bytes) it uses overlapping fixed-width copies. For larger or overlapping regions it uses a 64-byte buffered copy, choosing forward or backward direction as needed.
+For small, non-overlapping copies (≤64 bytes) it uses overlapping fixed-width copies. Larger non-overlapping regions use the internal block-copy helper; overlapping regions use a 64-byte buffered copy in the required direction. Overlap detection assumes the flat, byte-addressed `uintptr_t` address model used by supported targets.
 
 ### `fio_memset`
 
@@ -63,7 +63,7 @@ Picks the best available implementation at compile time:
 - AVX2 on x86-64 with intrinsics
 - SSE2 on x86 with intrinsics
 - NEON on ARM with intrinsics
-- Scalar 128-bit block fallback otherwise
+- Scalar 128-byte block fallback otherwise
 
 ### `fio_memcmp`
 
@@ -81,7 +81,7 @@ Processes 64-byte blocks for large buffers, 8-byte blocks for medium buffers, an
 size_t fio_strlen(const char *str);
 ```
 
-Returns the length of the NUL-terminated string `str`, or `0` if `str` is `NULL`. The implementation is a simple byte loop the compiler can auto-vectorize. Building with Address Sanitizer may flag speculative reads.
+Returns the length of the NUL-terminated string `str`, or `0` if `str` is `NULL`. The byte loop stops at the first NUL without reading later bytes. Address Sanitizer instrumentation remains enabled.
 
 ## OS patch environment helpers
 
@@ -92,7 +92,7 @@ char *fio_sys_env(const char *name);
 int   fio_sys_env_set(const char *name, const char *value, int overwrite);
 ```
 
-- `fio_sys_env(name)` returns the value of the environment variable, or `NULL`.
+- `fio_sys_env(name)` returns the value of the environment variable (including an empty value), or `NULL`. On Windows, the returned pointer is borrowed until the next call; copy it before retaining it. Values longer than 4,095 bytes are rejected with `NULL` and `errno == ERANGE`, not returned truncated.
 - `fio_sys_env_set(name, value, overwrite)` sets the variable. If `overwrite` is zero and the variable already exists, it is left unchanged. Returns `0` on success, `-1` on failure.
 
 On POSIX these are thin wrappers around `getenv`/`setenv`. On Windows they call `GetEnvironmentVariableA` and `SetEnvironmentVariableA` directly, bypassing macro redefinitions such as the one in Ruby's `win32.h` and avoiding `wchar_t` conversion issues.
@@ -104,4 +104,6 @@ On POSIX these are thin wrappers around `getenv`/`setenv`. On Windows they call 
 - **macOS < 10.12**: defines a `clock_gettime` fallback using `gettimeofday`, plus `CLOCK_REALTIME` and `CLOCK_MONOTONIC` placeholders.
 - **Windows startup**: enables virtual terminal processing for stdout/stderr and sets binary file mode by default.
 - **Windows symbol gaps**: supplies inline patches for `strcasecmp`, `write`, `read`, `clock_gettime`, and `pwrite`; maps `O_*`/`S_*` constants, `fstat`/`stat`/`lseek`/`unlink`, and defines `PATH_MAX`.
+- **Windows positional writes**: `pwrite` waits for pending I/O, rejects negative offsets and non-seekable handles, and returns a short write for counts above `INT32_MAX`. It preserves the cursor by saving and restoring it. Serialize operations that share a Windows file description, including duplicated descriptors; the shim is not atomic against concurrent cursor changes. The offset range remains limited by the platform's `off_t` (32-bit on MSVC). Append-only native handles retain Windows append semantics.
+- **Windows file metadata**: `stat` and `fstat` use the paired `_stati64` / `_fstati64` interfaces for 64-bit file sizes; this does not widen `off_t`. No `O_TMPFILE` alias is supplied: Windows temporary files use exclusive random names with `O_TEMPORARY` instead.
 - **POSIX branch**: present but currently has no extra patches beyond the environment helpers.

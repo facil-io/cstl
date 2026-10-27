@@ -110,7 +110,7 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
           if (cls >= pend)
             goto backtrack;
           b = a = *(cls++);
-        } else if (cls + 1 < pend && cls[0] == '-' && cls[1] != ']') {
+        } else if ((size_t)(pend - cls) > 1 && cls[0] == '-' && cls[1] != ']') {
           b = cls[1];
 
           cls += 2;
@@ -131,7 +131,11 @@ SFUNC uint8_t fio_glob_match(fio_str_info_s pat, fio_str_info_s str) {
       pat.buf = (char *)cls;
 
     } break;
-    case '\\': d = *(uint8_t *)pat.buf++; pat.len--;
+    case '\\': /* Escaped literal; a trailing escape never matches */
+      if (!pat.len)
+        goto backtrack;
+      d = *(uint8_t *)pat.buf++;
+      pat.len--;
     /* fall through */
     default: /* Literal character */
       if (c == d)

@@ -224,6 +224,66 @@ FIO_SFUNC void FIO_NAME_TEST(stl, argon2_null_out)(void) {
   FIO_ASSERT(rc == -1, "fio_argon2_hash should reject NULL output buffer");
 }
 
+/* Independent KAT (OpenSSL 3.6 EVP_KDF ARGON2ID): RFC 9106 inputs with a
+ * 32-byte AD (H0 input is exactly 128 bytes) and a 129-byte tag (long H'). */
+FIO_SFUNC void FIO_NAME_TEST(stl, argon2_long_kat)(void) {
+  static const uint8_t ad32[32] = {
+      0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
+      0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04,
+      0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
+  uint8_t expected[129], out[130];
+  fio___test_hex2bin(
+      expected,
+      "b04c15c70ca296173296f6a3dc754bea47e16a9970f955d1ef2889f14d0d11ae"
+      "9140d8eef9eee96f9ace8d3a285617faf29751407ed6aa23b3223eb3460580fd"
+      "be1b82e56df7a529736b4be3eb9210519985258cde6bb5cc9d008097fbecbd3c"
+      "b9684c7ac6977b83eb703feca362ebea77db1925dbb8866526a4bfef033fde10"
+      "9a",
+      129);
+  out[129] = 0xAA;
+  int rc = fio_argon2_hash(out,
+                           .password = FIO_BUF_INFO2((char *)rfc_password, 32),
+                           .salt = FIO_BUF_INFO2((char *)rfc_salt, 16),
+                           .secret = FIO_BUF_INFO2((char *)rfc_secret, 8),
+                           .ad = FIO_BUF_INFO2((char *)ad32, 32),
+                           .t_cost = 3,
+                           .m_cost = 32,
+                           .parallelism = 4,
+                           .outlen = 129,
+                           .type = FIO_ARGON2ID);
+  FIO_ASSERT(rc == 0, "Argon2id long KAT should succeed");
+  FIO_ASSERT(!FIO_MEMCMP(out, expected, 129), "Argon2id long KAT mismatch");
+  FIO_ASSERT(out[129] == 0xAA, "Argon2id long KAT wrote past outlen");
+}
+
+/* Invalid arguments are rejected (never clamped) without touching `out`. */
+FIO_SFUNC void FIO_NAME_TEST(stl, argon2_reject_invalid)(void) {
+  uint8_t out[8] = {0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA};
+  static const uint32_t bad_p[] = {0x1000000, 0x40000000, 0x40000001};
+  for (size_t i = 0; i < 3; ++i)
+    FIO_ASSERT(fio_argon2_hash(out, .m_cost = 8, .parallelism = bad_p[i]) ==
+                   -1,
+               "Argon2 should reject parallelism above 2^24-1");
+  for (uint32_t t = 1; t < 4; ++t)
+    FIO_ASSERT(fio_argon2_hash(out, .m_cost = 8, .outlen = t) == -1,
+               "Argon2 should reject outlen 1-3");
+  FIO_ASSERT(fio_argon2_hash(out, .m_cost = 8, .type = (fio_argon2_type_e)3) ==
+                 -1,
+             "Argon2 should reject an invalid type");
+  if (sizeof(size_t) > 4)
+    FIO_ASSERT(fio_argon2_hash(out,
+                               .password = FIO_BUF_INFO2(
+                                   (char *)out,
+                                   (size_t)((uint64_t)1 << 32)),
+                               .m_cost = 8) == -1,
+               "Argon2 should reject inputs longer than 2^32-1 bytes");
+  for (size_t i = 0; i < 8; ++i)
+    FIO_ASSERT(out[i] == 0xAA, "Argon2 error path should not write output");
+  FIO_ASSERT(fio_argon2_hash(out, .m_cost = 8, .outlen = 4) == 0 &&
+                 out[4] == 0xAA,
+             "Argon2 outlen=4 should write exactly 4 bytes");
+}
+
 int main(void) {
   FIO_NAME_TEST(stl, argon2_basic)();
   FIO_NAME_TEST(stl, argon2_determinism)();
@@ -233,5 +293,7 @@ int main(void) {
   FIO_NAME_TEST(stl, argon2_long_output_determinism)();
   FIO_NAME_TEST(stl, argon2_empty_optional)();
   FIO_NAME_TEST(stl, argon2_null_out)();
+  FIO_NAME_TEST(stl, argon2_long_kat)();
+  FIO_NAME_TEST(stl, argon2_reject_invalid)();
   return 0;
 }

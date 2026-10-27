@@ -59,7 +59,8 @@ typedef struct fio_ipc_s {
   uint16_t flags; /* User settable flags (AAD - authenticated, unencrypted) */
   uint16_t routing_flags; /* Internal (AAD - authenticated, unencrypted) */
   uint64_t timestamp;     /* timestamp (unencrypted, used for nonce) */
-  uint64_t id;            /* 8 random bytes (unencrypted, used for nonce) */
+  uint64_t id;            /* message ID (unencrypted, used for nonce) */
+  uint64_t nonce; /* fresh random bytes per encryption (unencrypted, nonce) */
   union {
     void (*call)(struct fio_ipc_s *); /* function pointer to call (encrypted) */
     uint32_t opcode;                  /* op-code to execute*/
@@ -96,7 +97,9 @@ typedef struct fio_ipc_opcode_s {
 
 /**
  * A helper macro for composing multiple buffers into the request. Fill with
- * fio_buf_info_s - will stop when a buffer has zero length. Use:
+ * fio_buf_info_s; the macro appends the terminator (`.len == (size_t)-1`),
+ * which ends the list. Zero-length elements are allowed and skipped; a NULL
+ * `buf` with a non-zero `len` writes `len` zero-valued bytes. Use:
  *
  *     .data = FIO_IPC_DATA(FIO_BUF_INFO1((char *)"example:"),
  *                          FIO_BUF_INFO2(&number, sizeof(number)))
@@ -165,7 +168,7 @@ typedef struct {
   fio_ipc_s *ipc;
   fio_buf_info_s *data;
   uint64_t timestamp; /* (optional) override timestamp, 0 = use current time */
-  uint64_t id;        /* (optional) override id, 0 = use original request id */
+  uint64_t id;        /* (optional) override id, 0 = fresh random id */
   uint16_t flags;     /* (optional) override flags, 0 = use original request */
   uint8_t done;
   uint8_t flags_set; /* set to 1 if flags should be used (allows flags=0) */
@@ -250,7 +253,18 @@ SFUNC void fio_ipc_send_to(fio_io_s *to, fio_ipc_s *ipc);
 /** Excludes current process from fio_ipc_local (to be set in ipc->from) */
 #define FIO_IPC_EXCLUDE_SELF ((fio_io_s *)((char *)-1LL))
 
-/* Sets callback to accept memory ownership after sending is complete. */
+/**
+ * Sets callback to accept memory ownership after sending is complete.
+ *
+ * The callback runs when the last reference is released (at most once), and
+ * receives the decrypted message, which it must free.
+ *
+ * Thread note: releases are normally performed by an IO thread task, but if
+ * that task cannot be queued (no memory) the release, and so the callback,
+ * runs on the thread calling fio_ipc_free. There is NO guarantee that the
+ * callback runs on the IO thread, and none that it runs at all if the
+ * message is discarded (e.g., queued tasks dropped at shutdown).
+ */
 SFUNC void fio_ipc_after_send(fio_ipc_s *ipc,
                               void (*fn)(fio_ipc_s *, void *),
                               void *udata);
@@ -262,7 +276,7 @@ IPC (Inter Process Communication) Encryption
 SFUNC void fio_ipc_encrypt(fio_ipc_s *m);
 
 /** Decrypt IPC message when received. */
-FIO_IFUNC int fio_ipc_decrypt(fio_ipc_s *m);
+IFUNC int fio_ipc_decrypt(fio_ipc_s *m);
 
 /* *****************************************************************************
 RPC (Multi-Machine Communication)
@@ -340,6 +354,8 @@ These are mostly for internal use, but made available for advance usage with
 /** If set, this is an internal ping/keepalive message (not dispatched to user)
  */
 #define FIO_IPC_FLAG_PING ((uint16_t)1UL << 6)
+/** Internal connection authentication handshake (not dispatched to user) */
+#define FIO_IPC_FLAG_HELLO ((uint16_t)1UL << 7)
 /** If flag is set == 1, otherwise zero */
 #define FIO_IPC_FLAG_TEST(msg, flag) (((msg)->routing_flags & flag) == flag)
 /** If flag is set == flag, otherwise zero */
@@ -445,22 +461,23 @@ FIO_IFUNC int fio___ipc_cluster_filter(fio___ipc_cluster_filter_s *filter,
   const size_t limit = 65536, keep = 16384;
   if (fio___ipc_cluster_filter_get(filter, mid))
     return -1;
-  if (filter->count >= limit)
-    goto at_limit;
-  fio___ipc_cluster_filter_set(filter, mid, 0);
-  return 0;
-at_limit:
-  /* reduce to `keep` items: sort, save only tail, rehash */
-  fio___ipc_cluster_filter_sort(filter->ary, filter->w);
-  FIO_MEMMOVE(filter->ary, ((filter->ary + filter->w) - keep), keep);
-  filter->ary[keep] = mid;
-  filter->count = filter->w = (keep + 1);
-  fio___ipc_cluster_filter_rehash(filter);
-  return 0;
+  if (filter->count >= limit) {
+    /* reduce to `keep` items: sort, save only tail, rehash */
+    fio___ipc_cluster_filter_sort(filter->ary, filter->w);
+    FIO_MEMMOVE(filter->ary,
+                ((filter->ary + filter->w) - keep),
+                keep * sizeof(*filter->ary));
+    filter->count = filter->w = keep;
+    if (fio___ipc_cluster_filter_rehash(filter))
+      return -1;
+  }
+  /* an unrecorded ID could be replayed, so it is never processed */
+  return 0 - !fio___ipc_cluster_filter_set(filter, mid, 0);
 }
 
 FIO_IFUNC int fio___ipc_cluster_filter_window(uint64_t timestamp) {
-  const uint64_t tick = fio_io_last_tick();
+  /* wall-clock: cluster peers don't share a monotonic clock (boot time) */
+  const uint64_t tick = (uint64_t)fio_io_last_tick_time();
   const uint64_t window = 30000;
   const uint64_t min = tick - window;
   const uint64_t max = tick + window;
@@ -476,19 +493,94 @@ static struct {
   fio_io_s *listener;                   /* Needs to be reset sometimes? */
   fio_io_s *worker_connection;          /* Worker's connection to master */
   void *worker_buffer;                  /* Worker's connection buffer (ID) */
-  fio_io_protocol_s protocol_ipc;       /* IPC protocol */
-  fio_io_protocol_s protocol_rpc;       /* RPC protocol */
+  uint64_t worker_opened;               /* Worker's connect time (ms, mono) */
+  fio_io_protocol_s protocol_ipc;       /* IPC protocol (authenticated) */
+  fio_io_protocol_s protocol_rpc;       /* RPC protocol (authenticated) */
+  fio_io_protocol_s protocol_ipc_hello; /* IPC handshake protocol */
   fio_io_protocol_s protocol_rpc_hello; /* RPC handshake protocol */
   fio_io_protocol_s protocol_udp;       /* Peer Discovery protocol */
   fio___ipc_cluster_ops_s opcodes;      /* Registered op-codes */
   fio___ipc_cluster_filter_s received;  /* messages recently received */
   fio___ipc_cluster_filter_s peers;     /* connected peers */
-  fio_u128 uuid;                        /* instance ID peers */
+  uint64_t received_floor; /* replay filter: older timestamps are refused */
+  size_t received_limit;   /* replay filter: compaction trigger */
+  uint64_t udp_log_time;   /* UDP discovery: last rejection log (ms) */
+  size_t udp_log_skipped;  /* UDP discovery: rejections not logged */
+  fio_u128 uuid;           /* instance ID peers */
   fio_ipc_cluster_on_peer_s on_peer[FIO_IPC_CLUSTER_PEER_MAX_SUBSCRIBERS];
   size_t on_peer_count;
   uint16_t cluster_port;                /* last port number in cluster_listen */
   char ipc_url[FIO_IPC_URL_MAX_LENGTH]; /* IPC socket path */
 } FIO___IPC;
+
+/* *****************************************************************************
+IPC / Remote - Replay Filter (received cluster messages)
+*****************************************************************************
+
+Every ID inside the acceptance window stays recorded, since an evicted ID could
+be replayed. Compaction only drops IDs outside the window. If the window holds
+more than FIO___IPC_REPLAY_MAX IDs, the oldest are dropped and their timestamps
+are refused from then on (`received_floor`), failing closed.
+***************************************************************************** */
+
+#define FIO___IPC_REPLAY_MIN ((size_t)65536)
+#define FIO___IPC_REPLAY_MAX ((size_t)1 << 19)
+
+/** Returns non-zero if a cluster message must not be processed. */
+FIO_IFUNC int fio___ipc_replay_seen(uint64_t ts, uint64_t id) {
+  return fio___ipc_cluster_filter_window(ts) ||
+         ts <= FIO___IPC.received_floor ||
+         fio___ipc_cluster_filter_get(
+             &FIO___IPC.received,
+             (fio___ipc_msg_id_s){.timestamp = ts, .id = id});
+}
+
+/** Drops expired IDs (or, past FIO___IPC_REPLAY_MAX, raises the floor). */
+FIO_SFUNC int fio___ipc_replay_compact(void) {
+  fio___ipc_cluster_filter_s *f = &FIO___IPC.received;
+  const uint64_t min =
+      (uint64_t)fio_io_last_tick_time() - 30000; /* see filter_window */
+  size_t i = 0, n;
+  fio___ipc_cluster_filter_sort(f->ary, f->w);
+  while (i < f->w && (f->ary[i].timestamp < min ||
+                      f->ary[i].timestamp <= FIO___IPC.received_floor))
+    ++i;
+  if (f->w - i > (FIO___IPC_REPLAY_MAX >> 1)) {
+    i = f->w - (FIO___IPC_REPLAY_MAX >> 1);
+    FIO___IPC.received_floor = f->ary[i - 1].timestamp;
+    while (i < f->w && f->ary[i].timestamp <= FIO___IPC.received_floor)
+      ++i;
+    FIO_LOG_SECURITY("(%d) IPC cluster replay filter overflow - refusing "
+                     "older messages",
+                     fio_io_pid());
+  }
+  n = f->w - i;
+  if (i)
+    FIO_MEMMOVE(f->ary, f->ary + i, n * sizeof(*f->ary));
+  f->count = f->w = (uint32_t)n;
+  FIO___IPC.received_limit =
+      (n << 1) > FIO___IPC_REPLAY_MIN ? (n << 1) : FIO___IPC_REPLAY_MIN;
+  if (!fio___ipc_cluster_filter_rehash(f))
+    return 0;
+  /* an incomplete index can't vouch for kept IDs: refuse them all */
+  FIO___IPC.received_floor = f->ary[n - 1].timestamp;
+  fio___ipc_cluster_filter_destroy(f);
+  return -1;
+}
+
+/** Records an authentic ID. Returns -1 if it must not be processed. */
+FIO_SFUNC int fio___ipc_replay_record(uint64_t ts, uint64_t id) {
+  fio___ipc_cluster_filter_s *f = &FIO___IPC.received;
+  fio___ipc_msg_id_s mid = {.timestamp = ts, .id = id};
+  if (f->count >= (FIO___IPC.received_limit ? FIO___IPC.received_limit
+                                            : FIO___IPC_REPLAY_MIN) &&
+      fio___ipc_replay_compact())
+    return -1;
+  if (ts <= FIO___IPC.received_floor || fio___ipc_cluster_filter_get(f, mid))
+    return -1;
+  /* an unrecorded ID could be replayed, so it is never processed */
+  return 0 - !fio___ipc_cluster_filter_set(f, mid, 0);
+}
 
 /* *****************************************************************************
 IPC Settings
@@ -516,7 +608,7 @@ SFUNC int fio_ipc_url_set(const char *url) {
     for (size_t i = 0; i < len; ++i) {
       if (FIO___IPC.ipc_url[i] != 'X' && FIO___IPC.ipc_url[i] != '#')
         continue;
-      if (rnd)
+      if (!rnd)
         rnd = fio_rand64();
       FIO___IPC.ipc_url[i] = fio_i2c(rnd & 15);
       rnd >>= 4;
@@ -594,11 +686,12 @@ after_send:
 SFUNC void fio_ipc_free(fio_ipc_s *msg) {
   if (!msg)
     return;
-  fio_queue_push(fio_io_queue(), fio___ipc_free_task, msg, NULL);
+  if (fio_queue_push(fio_io_queue(), fio___ipc_free_task, msg, NULL))
+    fio___ipc_free_task(msg, NULL); /* no memory: don't abandon the message */
 }
 
-/** Free message (decrement ref count) */
-FIO_SFUNC void fio___ipc_free_in_io_thread(fio_ipc_s *msg) {
+/** IO thread only `dealloc` (exact `void (*)(void *)` signature). */
+FIO_SFUNC void fio___ipc_free_in_io_thread(void *msg) {
   fio___ipc_free_task(msg, NULL);
 }
 
@@ -635,9 +728,12 @@ FIO_IFUNC void fio___ipc_data_write(fio_ipc_s *m, const fio_buf_info_s *data) {
   if (!data)
     return;
   for (; data->len != ((size_t)-1); pos += (data++)->len) {
-    if (!data->len || !data->buf)
+    if (!data->len)
       continue;
-    FIO_MEMCPY(m->data + pos, data->buf, data->len);
+    if (data->buf)
+      FIO_MEMCPY(m->data + pos, data->buf, data->len);
+    else /* never publish uninitialized memory */
+      FIO_MEMSET(m->data + pos, 0, data->len);
   }
 }
 
@@ -645,7 +741,8 @@ FIO_IFUNC fio_ipc_s *fio___ipc_copy(const fio_ipc_s *ipc) {
   if (!ipc)
     return NULL;
   fio_ipc_s *cpy = fio___ipc_new(ipc->len + 16);
-  FIO_ASSERT_ALLOC(cpy);
+  if (!cpy)
+    return NULL; /* no memory: callers drop the copy's delivery */
   FIO_MEMCPY(cpy, ipc, sizeof(*cpy) + ipc->len);
   if ((uintptr_t)(cpy->from) + 1 > 1)  /* tests exclude + NULL */
     cpy->from = fio_io_dup(cpy->from); /* copy owns its own ref */
@@ -674,8 +771,9 @@ FIO_IFUNC fio_ipc_s *fio___ipc_new_author(const fio_ipc_args_s *args,
                                                    : fio_io_dup(args->exclude));
   m->len = (uint32_t)(data_len);
   m->flags = args->flags;
-  m->timestamp = (uint64_t)(args->timestamp ? args->timestamp
-                                            : (uint64_t)fio_io_last_tick());
+  m->timestamp =
+      (uint64_t)(args->timestamp ? args->timestamp
+                                 : (uint64_t)fio_io_last_tick_time());
   m->id = (args->id ? args->id : fio_rand64());
   if (args->opcode) {
     routing_flags |= FIO_IPC_FLAG_OPCODE;
@@ -714,82 +812,78 @@ SFUNC void fio_ipc_after_send(fio_ipc_s *ipc,
 IPC Core - Encryption/Decryption
 ***************************************************************************** */
 
-FIO_IFUNC fio_u256 fio___ipc_get_encryption_key(fio_ipc_s *m) {
-  fio_u512 secret = fio_secret();
-  /* derive a single-use ephemeral key, risky hash is good enough for this */
-  fio_u256 key = fio_risky256_hmac((secret.u8 + (m->id & 31) + 1),
-                                   32,
-                                   (char *)&m->timestamp,
-                                   16);
-  fio_secure_zero(&secret, sizeof(secret));
-  // FIO_LOG_DDEBUG2("(%d) IPC key: %p...%p",
-  //                 fio_io_pid(),
-  //                 (void *)(uintptr_t)key.u64[0],
-  //                 (void *)(uintptr_t)key.u64[3]);
-  return key;
-}
+/* Messages are sealed with ChaCha20-Poly1305 under a per-message key:
+ *
+ *     key   = RiskyHash256_keyed(secret[o..o+31], timestamp || id || nonce)
+ *     o     = (id & 31) + 1
+ *     nonce = id || nonce (first 12 bytes)
+ *
+ * `nonce` is refreshed (fio_rand64) on every encryption, so keys (and key
+ * streams) stay unique even when `timestamp || id` repeats (forced IDs, or the
+ * same pair with different associated data). Re-sending one encrypted message
+ * (fan-out) reuses its key, which is safe (same plaintext).
+ *
+ * Keyed RiskyHash is used as a KDF only (the derived key is never exposed).
+ * The 32-byte key window rotates with `id`, splitting messages into 32 key
+ * groups, each keyed by a different window of the 64-byte secret. */
+FIO_ASSERT_STATIC(offsetof(fio_ipc_s, id) ==
+                          offsetof(fio_ipc_s, timestamp) + 8 &&
+                      offsetof(fio_ipc_s, nonce) == offsetof(fio_ipc_s, id) + 8,
+                  "IPC nonce fields must be contiguous");
 
-FIO_IFUNC fio_u128 fio___ipc_get_encryption_nonce(fio_ipc_s *m) {
-  fio_u128 nonce = fio_u128_init64(m->timestamp, m->id);
-  // FIO_LOG_DDEBUG2("(%d) IPC nonce: %p-%p",
-  //                 fio_io_pid(),
-  //                 (void *)(uintptr_t)nonce.u64[0],
-  //                 (void *)(uintptr_t)nonce.u64[1]);
-  return nonce;
+/** Derives the per-message key (secret material, caller wipes). */
+FIO_IFUNC fio_u256 fio___ipc_msg_key(const fio_ipc_s *m) {
+  fio_u512 secret = fio_secret();
+  fio_u256 k =
+      fio_risky256_keyed(secret.u8 + (m->id & 31) + 1, 32, &m->timestamp, 24);
+  fio_secure_zero(&secret, sizeof(secret));
+  return k;
 }
 
 /** Encrypt IPC message before sending */
 SFUNC void fio_ipc_encrypt(fio_ipc_s *m) {
   if ((m->routing_flags & FIO_IPC_FLAG_ENCRYPTED)) /* runs on IO thread */
     return;
-  fio_u256 key_buf = fio___ipc_get_encryption_key(m);
-  fio_u128 nonce = fio___ipc_get_encryption_nonce(m);
+  m->nonce = fio_rand64();
+  fio_u256 key = fio___ipc_msg_key(m);
   m->routing_flags |= FIO_IPC_FLAG_ENCRYPTED; /* runs on IO thread */
-
-  // FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
-  //                 fio_io_pid(),
-  //                 fio___ipc_sizeof_enc(m->len),
-  //                 fio___ipc_wire_length(m->len));
-
-  /* Encrypt in-place (everything after first 16 bytes) */
+  /* Encrypt in-place (everything after the header) */
   fio_chacha20_poly1305_enc((m->data + m->len),           /* MAC output */
-                            ((char *)&m->call),           /* Data to encrypt */
+                            ((char *)&m->call),           /* Data */
                             fio___ipc_sizeof_enc(m->len), /* Data length */
                             (char *)(&m->len),            /* AAD */
                             8,                            /* AAD length */
-                            key_buf.u8,                   /* 32-byte key */
-                            nonce.u8                      /* 12-byte nonce */
+                            key.u8,                       /* 32-byte key */
+                            (char *)&m->id                /* 12-byte nonce */
   );
   m->len = fio_ltole32(m->len);
-  fio_secure_zero(&key_buf, sizeof(key_buf));
+  fio_secure_zero(&key, sizeof(key));
 }
 
 /** Decrypt IPC message on receive */
-FIO_IFUNC int fio_ipc_decrypt(fio_ipc_s *m) {
+IFUNC int fio_ipc_decrypt(fio_ipc_s *m) {
   int r = 0;
   if (!(m->routing_flags & FIO_IPC_FLAG_ENCRYPTED)) /* runs on IO thread */
     return r;
   m->len = fio_ltole32(m->len);
-  fio_u256 key_buf = fio___ipc_get_encryption_key(m);
-  fio_u128 nonce = fio___ipc_get_encryption_nonce(m);
-  // FIO_LOG_DDEBUG2("(%d) IPC sizes \t enc: %zu \t wire %zu",
-  //                 fio_io_pid(),
-  //                 fio___ipc_sizeof_enc(m->len),
-  //                 fio___ipc_wire_length(m->len));
+  fio_u256 key = fio___ipc_msg_key(m);
   /* Decrypt and verify MAC */
-  r = fio_chacha20_poly1305_dec((m->data + m->len), /* MAC output */
-                                ((char *)&m->call), /* Data to decrypt */
+  r = fio_chacha20_poly1305_dec((m->data + m->len),           /* MAC */
+                                ((char *)&m->call),           /* Data */
                                 fio___ipc_sizeof_enc(m->len), /* Data length */
                                 (char *)(&m->len),            /* AAD */
                                 8,                            /* AAD length */
-                                key_buf.u8,                   /* 32-byte key */
-                                nonce.u8 /* 12-byte nonce */
+                                key.u8,                       /* 32-byte key */
+                                (char *)&m->id /* 12-byte nonce */
   );
-  m->routing_flags &= ~FIO_IPC_FLAG_ENCRYPTED; /* runs on IO thread */
+  fio_secure_zero(&key, sizeof(key));
   if (r) {
+    /* stay encrypted (output was wiped), so a retry fails again */
+    m->len = fio_ltole32(m->len);
     FIO_LOG_SECURITY("IPC message decryption failed (possible attack)");
+    return r;
   }
-  fio_secure_zero(&key_buf, sizeof(key_buf));
+  m->routing_flags &= ~FIO_IPC_FLAG_ENCRYPTED; /* runs on IO thread */
   return r;
 }
 
@@ -834,15 +928,18 @@ SFUNC const fio_ipc_opcode_s *fio_ipc_opcode(uint32_t opcode) {
 IPC / RPC - Execution (fast path / slow path)
 ***************************************************************************** */
 
-SFUNC void fio___ipc_opcode_task(fio_ipc_s *ipc, void *ignr_) {
+FIO_SFUNC void fio___ipc_opcode_task(fio_ipc_s *ipc, void *ignr_) {
   const fio_ipc_opcode_s *op = fio_ipc_opcode(ipc->opcode);
-  void (*const *call)(struct fio_ipc_s *);
   if (op) {
-    call = &op->call;
-    call += FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY);
-    call += FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_DONE);
+    const unsigned stage = FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY) +
+                           FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_DONE);
     ipc->udata = op->udata;
-    call[0](ipc);
+    if (stage == 2)
+      op->on_done(ipc);
+    else if (stage)
+      op->on_reply(ipc);
+    else
+      op->call(ipc);
   } else {
     FIO_LOG_WARNING("(%d) ignoring IPC cluster with illegal op-code: %u",
                     fio_io_pid(),
@@ -852,19 +949,29 @@ SFUNC void fio___ipc_opcode_task(fio_ipc_s *ipc, void *ignr_) {
   (void)ignr_;
 }
 
-SFUNC void fio___ipc_direct_task(fio_ipc_s *ipc, void *ignr_) {
-  void (**call)(struct fio_ipc_s *) = &ipc->call;
-  call += FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY);
-  call += FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_DONE);
-  call[0](ipc);
+FIO_SFUNC void fio___ipc_direct_task(fio_ipc_s *ipc, void *ignr_) {
+  /* These are separate struct members, not an array of callbacks. */
+  const unsigned stage = FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY) +
+                         FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_DONE);
+  if (stage == 2)
+    ipc->on_done(ipc);
+  else if (stage)
+    ipc->on_reply(ipc);
+  else
+    ipc->call(ipc);
   fio___ipc_free_in_io_thread(ipc);
   (void)ignr_;
 }
 
-SFUNC void fio___ipc_execute_task(fio_ipc_s *ipc, void *ignr_) {
+FIO_SFUNC void fio___ipc_execute_task(fio_ipc_s *ipc, void *ignr_) {
   void (*task[])(fio_ipc_s * ipc, void *ignr_) = {fio___ipc_direct_task,
                                                   fio___ipc_opcode_task};
   task[FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_OPCODE)](ipc, ignr_);
+}
+
+/** Exact-signature `fio_io_defer` adapter for `fio___ipc_execute_task`. */
+FIO_SFUNC void fio___ipc_execute_deferred_task(void *ipc, void *ignr_) {
+  fio___ipc_execute_task((fio_ipc_s *)ipc, ignr_);
 }
 
 /* *****************************************************************************
@@ -879,7 +986,7 @@ FIO_SFUNC void fio___ipc_send_each_task(fio_io_s *to, void *ipc_) {
                 .buf = fio_ipc_dup(ipc),
                 .offset = FIO_PTR_FIELD_OFFSET(fio_ipc_s, len),
                 .len = fio___ipc_wire_length(ipc->len),
-                .dealloc = (void (*)(void *))fio___ipc_free_in_io_thread);
+                .dealloc = fio___ipc_free_in_io_thread);
 }
 
 FIO_SFUNC void fio___ipc_send_master_task(void *ipc_, void *ignr_) {
@@ -912,9 +1019,12 @@ SFUNC void fio_ipc_send(fio_ipc_s *ipc) {
   if (fio_io_is_master()) {
     if (ipc->from != FIO_IPC_EXCLUDE_SELF) {
       /* on master we can't risk slow clients preventing execution */
-      fio_io_defer((void (*)(void *, void *))fio___ipc_execute_task,
-                   fio___ipc_copy(ipc),
-                   NULL);
+      fio_ipc_s *cpy = fio___ipc_copy(ipc);
+      if (FIO_LIKELY(cpy != NULL))
+        fio_io_defer(fio___ipc_execute_deferred_task, cpy, NULL);
+      else
+        FIO_LOG_ERROR("(%d) no memory: local IPC execution dropped",
+                      fio_io_pid());
     }
     if (!FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_WORKERS) &&
         !FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER))
@@ -959,7 +1069,7 @@ SFUNC void fio_ipc_send_to(fio_io_s *to, fio_ipc_s *m) {
                 .buf = m,
                 .offset = FIO_PTR_FIELD_OFFSET(fio_ipc_s, len),
                 .len = fio___ipc_wire_length(m->len),
-                .dealloc = (void (*)(void *))fio___ipc_free_in_io_thread);
+                .dealloc = fio___ipc_free_in_io_thread);
   return;
 
 free_send:
@@ -977,7 +1087,7 @@ SFUNC void fio_ipc_reply FIO_NOOP(fio_ipc_reply_args_s args) {
     return;
   fio_ipc_args_s ar = {
       .timestamp = args.timestamp,
-      .id = (args.id ? args.id : args.ipc->id),
+      .id = args.id, /* 0 = fresh id (replies are distinct messages) */
       .call = args.ipc->call,
       .on_reply = args.ipc->on_reply,
       .on_done = args.ipc->on_done,
@@ -1008,10 +1118,15 @@ IPC Core - IPC Socket Parser State
 /** Parser state for reading IPC messages from socket */
 typedef struct {
   fio_ipc_s *msg;        /* Current message being parsed */
+  uint64_t opened;       /* Local: when the connection opened (ms, mono) */
+  uint64_t challenge;    /* Cluster: our per-connection challenge */
   uint32_t expected_len; /* Expected total length */
   uint32_t msg_received; /* Bytes received for current message */
   size_t buf_len;        /* Valid bytes in buffer */
+  uint8_t peer[16];      /* Cluster: declared UUID (until challenge proof) */
   uint8_t ping_pending;  /* Non-zero if a ping was sent and awaiting pong */
+  uint8_t auth;          /* FIO___IPC_AUTH_* state */
+  uint8_t first;         /* Non-zero once the first frame was queued */
   char buffer[];         /* FIO_IPC_BUFFER_LEN for small messages */
 } fio___ipc_parser_s;
 
@@ -1042,9 +1157,134 @@ FIO_IFUNC void fio___ipc_parser_destroy(fio___ipc_parser_s *p) {
   *p = (fio___ipc_parser_s){0};
 }
 
+/* *****************************************************************************
+IPC Core - Connection Authentication (UUID Declaration)
+*****************************************************************************
+
+Every IPC connection (local and cluster) starts on a "hello" protocol that never
+receives broadcasts. On attach, each side sends one declaration, sealed like any
+IPC message (so a valid MAC proves knowledge of the secret):
+
+    local:   uuid[16] || role[1]
+    cluster: uuid[16] || role[1] || challenge[8]
+
+The peer's first message MUST be a valid declaration, otherwise the connection
+is closed. The timestamp (authenticated through the key) bounds replays: local
+declarations must be within FIO___IPC_LOCAL_DRIFT ms of the time the connection
+opened on our side (accept / connect, so slow worker start-up callbacks don't
+count); cluster declarations pass the 30 second window and the replay filter.
+Local peers must share our UUID (the master's, inherited by workers). The role
+stops a declaration from being reflected back to its author.
+
+A cluster declaration is transferable (any client can elicit one and replay it
+to another node), so it only names the peer. Each side answers a valid
+declaration with a sealed proof (flags HELLO | REPLY) echoing the peer's random
+per-connection challenge:
+
+    proof:   uuid[16] || challenge[8]
+
+The peer is authenticated (and its UUID registered - our own UUID and duplicates
+are refused) only once its proof echoes our challenge under its declared UUID.
+This costs cluster connections one round trip; local connections add none.
+
+Once valid, the IO moves to the matching authenticated protocol. Each side's
+handshake frames precede its other messages on the stream. Until then, frames
+that don't fit the parser's buffer wait (the IO is suspended), so an
+unauthenticated peer can't make us allocate large messages.
+***************************************************************************** */
+
+#define FIO___IPC_ROLE_MASTER  ((uint8_t)0)
+#define FIO___IPC_ROLE_WORKER  ((uint8_t)1)
+#define FIO___IPC_ROLE_CLUSTER ((uint8_t)2)
+#define FIO___IPC_ROLE_SET(role)                                               \
+  ((uint8_t)((fio_rand64() & 252) | (uint8_t)(role)))
+#define FIO___IPC_ROLE(role) ((uint8_t)(3U & (uint8_t)(role)))
+
+#define FIO___IPC_LOCAL_DRIFT 1000 /* ms */
+#define FIO___IPC_HELLO_MAX   25   /* longest handshake frame payload */
+#define FIO___IPC_AUTH_NONE   0    /* waiting for a declaration */
+#define FIO___IPC_AUTH_PROOF  1 /* cluster: waiting for the challenge proof */
+#define FIO___IPC_AUTH_DONE   2 /* authenticated */
+
+/** Current monotonic time in ms (not the cached tick, which may be stale). */
+FIO_IFUNC uint64_t fio___ipc_now(void) {
+  return (uint64_t)fio_time2milli(fio_time_mono());
+}
+
+/** Sends a sealed handshake frame. */
+FIO_SFUNC void fio___ipc_handshake_send(fio_io_s *io,
+                                        uint16_t routing_flags,
+                                        uint64_t timestamp,
+                                        const void *data,
+                                        uint32_t len) {
+  fio_ipc_s *m = fio___ipc_new(len + 16); /* data + MAC */
+  if (!m) {
+    fio_io_close(io);
+    return;
+  }
+  /* random junk fills the (unused) encrypted pointer fields */
+  fio_rand_bytes(&m->call,
+                 sizeof(m->call) + sizeof(m->on_reply) + sizeof(m->on_done) +
+                     sizeof(m->udata));
+  m->from = NULL;
+  m->len = len;
+  m->flags = 0;
+  m->routing_flags = routing_flags;
+  m->timestamp = timestamp;
+  m->id = fio_rand64();
+  FIO_MEMCPY(m->data, data, len);
+  fio_ipc_send_to(io, m);
+}
+
+/** Sends our declaration (on attach; workers when connecting). */
+FIO_SFUNC void fio___ipc_hello_send(fio_io_s *io, uint8_t role) {
+  uint8_t data[FIO___IPC_HELLO_MAX];
+  fio_memcpy16(data, FIO___IPC.uuid.u8);
+  data[16] = FIO___IPC_ROLE_SET(role);
+  if (FIO___IPC_ROLE(role) !=
+      FIO___IPC_ROLE_CLUSTER) { /* local: monotonic (drift checked) */
+    fio___ipc_handshake_send(io, FIO_IPC_FLAG_HELLO, fio___ipc_now(), data, 17);
+    return;
+  }
+  /* cluster: wall-clock (window checked) + challenge */
+  fio_memcpy8(data + 17, &fio___ipc_cluster_parser(io)->challenge);
+  fio___ipc_handshake_send(io,
+                           FIO_IPC_FLAG_HELLO,
+                           (uint64_t)fio_io_last_tick_time(),
+                           data,
+                           25);
+}
+
+/** Sends our cluster challenge proof (echoes the peer's challenge). */
+FIO_SFUNC void fio___ipc_proof_send(fio_io_s *io, const char *challenge) {
+  uint8_t data[24];
+  fio_memcpy16(data, FIO___IPC.uuid.u8);
+  fio_memcpy8(data + 16, challenge);
+  fio___ipc_handshake_send(io,
+                           FIO_IPC_FLAG_HELLO | FIO_IPC_FLAG_REPLY,
+                           (uint64_t)fio_io_last_tick_time(),
+                           data,
+                           24);
+}
+
+/** on_timeout for connections that did not authenticate in time. */
+FIO_SFUNC void fio___ipc_on_timeout_hello(fio_io_s *io) {
+  FIO_LOG_SECURITY("(%d) IPC peer failed to authenticate in time",
+                   fio_io_pid());
+  fio_io_close(io);
+}
+
 FIO_SFUNC void fio___ipc_on_attach(fio_io_s *io) {
   fio___ipc_parser_s *p = fio___ipc_parser(io);
   fio___ipc_parser_init(p);
+  /* Workers declare when connecting (see fio___ipc_on_fork), since messages
+   * written while connecting precede on_attach on the stream. */
+  if (!fio_io_is_master()) {
+    p->opened = FIO___IPC.worker_opened;
+    return;
+  }
+  p->opened = fio___ipc_now();
+  fio___ipc_hello_send(io, FIO___IPC_ROLE_MASTER);
 }
 
 /* *****************************************************************************
@@ -1065,7 +1305,7 @@ FIO_SFUNC void fio___ipc_send_ping_frame(fio_io_s *io, uint16_t routing_flags) {
   msg->len = 0;
   msg->flags = 0;
   msg->routing_flags = routing_flags;
-  msg->timestamp = (uint64_t)fio_io_last_tick();
+  msg->timestamp = (uint64_t)fio_io_last_tick_time();
   msg->id = fio_rand64();
   fio_ipc_send_to(io, msg);
 }
@@ -1137,11 +1377,19 @@ FIO_SFUNC void fio___ipc_on_timeout_rpc(fio_io_s *io) {
 IPC Core - executing IPC calls
 ***************************************************************************** */
 
+FIO_SFUNC int fio___ipc_auth_gate(fio_ipc_s *ipc,
+                                  fio_io_s *io,
+                                  fio___ipc_parser_s *p,
+                                  uint8_t *uuid);
+
 /** Wrapper that manages request vs response states */
 FIO_SFUNC void fio___ipc_on_ipc_master(void *ipc_, void *io_) {
-  fio_ipc_s *ipc = (fio_ipc_s *)ipc_; /* io_ dup'd ref owned by ipc->from */
+  fio_ipc_s *ipc = (fio_ipc_s *)ipc_;
+  ipc->from = (fio_io_s *)io_; /* io_ dup'd ref owned by ipc->from */
   if (fio_ipc_decrypt(ipc))
     goto decrypt_error;
+  if (fio___ipc_auth_gate(ipc, (fio_io_s *)io_, fio___ipc_parser(io_), NULL))
+    return;
   /* Handle internal ping/pong — never dispatch to user */
   if (fio___ipc_handle_ping(ipc, fio___ipc_parser(ipc->from)))
     return;
@@ -1156,8 +1404,11 @@ FIO_SFUNC void fio___ipc_on_ipc_master(void *ipc_, void *io_) {
       return;
     }
     fio_ipc_s *cpy = fio___ipc_copy(ipc);
-    fio_ipc_encrypt(cpy);
-    fio___ipc_send_master_task(cpy, NULL);
+    if (FIO_LIKELY(cpy != NULL)) {
+      fio_ipc_encrypt(cpy);
+      fio___ipc_send_master_task(cpy, NULL);
+    } else /* the local execution below still runs */
+      FIO_LOG_ERROR("(%d) no memory: IPC forwarding dropped", fio_io_pid());
   }
   fio___ipc_execute_task(ipc, io_);
   return;
@@ -1168,9 +1419,12 @@ decrypt_error:
 
 /** Wrapper that manages request vs response states */
 FIO_SFUNC void fio___ipc_on_ipc_worker(void *ipc_, void *io_) {
-  fio_ipc_s *ipc = (fio_ipc_s *)ipc_; /* io_ dup'd ref owned by ipc->from */
+  fio_ipc_s *ipc = (fio_ipc_s *)ipc_;
+  ipc->from = (fio_io_s *)io_; /* io_ dup'd ref owned by ipc->from */
   if (fio_ipc_decrypt(ipc))
     goto decrypt_error;
+  if (fio___ipc_auth_gate(ipc, (fio_io_s *)io_, fio___ipc_parser(io_), NULL))
+    return;
   /* Handle internal ping/pong — never dispatch to user */
   if (fio___ipc_handle_ping(ipc, fio___ipc_parser(ipc->from)))
     return;
@@ -1207,6 +1461,87 @@ FIO_SFUNC void fio___ipc_lifecycle_emit(fio_io_s *io,
   }
 }
 
+/* *****************************************************************************
+IPC Core - Connection Authentication (Gate)
+***************************************************************************** */
+
+/**
+ * Validates the peer's declaration (its first message) - see above.
+ *
+ * Call after `ipc` was decrypted. Returns 0 if `ipc` should be processed,
+ * otherwise `ipc` was consumed (and the connection closed on error).
+ * `uuid` is the peer UUID storage for cluster connections, NULL for local.
+ */
+FIO_SFUNC int fio___ipc_auth_gate(fio_ipc_s *ipc,
+                                  fio_io_s *io,
+                                  fio___ipc_parser_s *p,
+                                  uint8_t *uuid) {
+  fio_u128 peer;
+  const int hello = FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_HELLO);
+  const int proof = hello && FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY);
+  if (p->auth == FIO___IPC_AUTH_DONE) {
+    if (!hello)
+      return 0;
+    goto error;
+  }
+  if (!hello)
+    goto error;
+  if (p->auth == FIO___IPC_AUTH_PROOF) { /* cluster: proof echoes challenge */
+    if (!proof || ipc->len != 24 || !fio_ct_is_eq(ipc->data, p->peer, 16) ||
+        FIO_MEMCMP(ipc->data + 16, &p->challenge, 8))
+      goto error;
+    fio_memcpy16(peer.u8, p->peer);
+    if (fio___ipc_cluster_filter(&FIO___IPC.peers, peer.u64[0], peer.u64[1]))
+      goto error; /* registers the UUID, refusing duplicates */
+    fio_memcpy16(uuid, peer.u8);
+    goto authenticated;
+  }
+  if (proof || ipc->len != (uuid ? 25U : 17U))
+    goto error;
+  fio_memcpy16(peer.u8, ipc->data);
+  if (uuid) { /* cluster: a different, unique, instance (window checked) */
+    if (FIO___IPC_ROLE(ipc->data[16]) != FIO___IPC_ROLE_CLUSTER ||
+        !peer.u64[0] || !peer.u64[1] ||
+        fio_ct_is_eq(peer.u8, FIO___IPC.uuid.u8, 16) ||
+        fio___ipc_cluster_filter_get(
+            &FIO___IPC.peers,
+            (fio___ipc_msg_id_s){.timestamp = peer.u64[0], .id = peer.u64[1]}))
+      goto error;
+    fio_memcpy16(p->peer, peer.u8);
+    p->auth = FIO___IPC_AUTH_PROOF;
+    fio___ipc_proof_send(io, ipc->data + 17);
+    fio___ipc_free(ipc);
+    return 1;
+  }
+  { /* local: same instance, opposite role, fresh */
+    const uint64_t ts = fio_ltole64(ipc->timestamp), opened = p->opened;
+    if ((ts > opened ? ts - opened : opened - ts) >= FIO___IPC_LOCAL_DRIFT ||
+        FIO___IPC_ROLE(ipc->data[16]) != (fio_io_is_master()
+                                              ? FIO___IPC_ROLE_WORKER
+                                              : FIO___IPC_ROLE_MASTER) ||
+        !fio_ct_is_eq(peer.u8, FIO___IPC.uuid.u8, 16))
+      goto error;
+  }
+authenticated:
+  p->auth = FIO___IPC_AUTH_DONE;
+  fio_io_protocol_set(
+      io,
+      (uuid ? &FIO___IPC.protocol_rpc : &FIO___IPC.protocol_ipc));
+  if (fio_io_is_suspended(io)) { /* resume frames held back until now */
+    fio_io_unsuspend(io);
+    fio_io_on_data_schedule(io);
+  }
+  if (uuid)
+    fio___ipc_lifecycle_emit(io, &peer, true);
+  fio___ipc_free(ipc);
+  return 1;
+error:
+  FIO_LOG_SECURITY("(%d) IPC peer authentication failed", fio_io_pid());
+  fio_io_close(io);
+  fio___ipc_free(ipc);
+  return 1;
+}
+
 void fio_ipc_cluster_on_peer___(void); /* IDE marker */
 SFUNC int fio_ipc_cluster_on_peer FIO_NOOP(fio_ipc_cluster_on_peer_s args) {
   if (!fio_io_is_master() || fio_io_is_running() ||
@@ -1221,30 +1556,28 @@ SFUNC int fio_ipc_cluster_on_peer FIO_NOOP(fio_ipc_cluster_on_peer_s args) {
 
 FIO_SFUNC void fio___ipc_on_rpc_master(void *ipc_, void *io_) {
   fio_ipc_s *ipc = (fio_ipc_s *)ipc_;
-  ipc->from = io_;
-  uint8_t *uuid = fio___ipc_cluster_uuid(io_);
-  fio_u128 peer_uuid = {0};
-  fio_u128 old_uuid;
-  fio_memcpy16(old_uuid.u8, uuid);
-
+  uint64_t ts;
+  ipc->from = (fio_io_s *)io_; /* io_ dup'd ref owned by ipc->from */
+  /* drop stale / replayed messages before spending time on decryption */
+  ts = fio_ltole64(ipc->timestamp);
+  if (fio___ipc_replay_seen(ts, ipc->id))
+    goto filtered;
   if (fio_ipc_decrypt(ipc))
     goto peer_error;
-  if (!FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER) ||
-      !FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_OPCODE))
-    goto peer_error;
-  /* Nothing, not even a ping, is dispatched before a validated handshake. */
-  if (ipc->opcode == (uint32_t)0xFFFFFFFF)
-    goto uuid_msg;
-  if (!old_uuid.u64[0] && !old_uuid.u64[1])
-    goto peer_error;
-  if (fio___ipc_cluster_filter_window(fio_ltole64(ipc->timestamp)) ||
-      fio___ipc_cluster_filter(&FIO___IPC.received,
-                               fio_ltole64(ipc->timestamp),
-                               ipc->id))
+  /* record only authentic messages, so forgeries can't poison the filter */
+  if (fio___ipc_replay_record(ts, ipc->id))
     goto filtered;
+  if (fio___ipc_auth_gate(ipc,
+                          (fio_io_s *)io_,
+                          fio___ipc_cluster_parser(io_),
+                          fio___ipc_cluster_uuid(io_)))
+    return;
   /* Handle internal ping/pong for established cluster connections. */
   if (fio___ipc_handle_ping(ipc, fio___ipc_cluster_parser(io_)))
     return;
+  if (!FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_CLUSTER) ||
+      !FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_OPCODE))
+    goto peer_error;
 
   if (FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_WORKERS)) {
     fio_ipc_send(ipc);
@@ -1253,37 +1586,6 @@ FIO_SFUNC void fio___ipc_on_rpc_master(void *ipc_, void *io_) {
   fio___ipc_execute_task(ipc, io_);
   return;
 
-uuid_msg:
-  if (old_uuid.u64[0] || old_uuid.u64[1] || ipc->len ||
-      FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_REPLY) ||
-      FIO_IPC_FLAG_TEST(ipc, FIO_IPC_FLAG_PING))
-    goto peer_error;
-  if (fio___ipc_cluster_filter_window(fio_ltole64(ipc->timestamp)) ||
-      fio___ipc_cluster_filter(&FIO___IPC.received,
-                               fio_ltole64(ipc->timestamp),
-                               ipc->id))
-    goto filtered;
-  if (sizeof(ipc->on_reply) >= 8) {
-    fio_memcpy8(&peer_uuid, (char *)(void *)(&ipc->on_reply));
-    fio_memcpy8(&peer_uuid.u8[8], (char *)(void *)(&ipc->on_done));
-  } else /* (sizeof(ipc->on_reply) >= 4) */ {
-    fio_memcpy4(&peer_uuid, (char *)(void *)(&ipc->on_reply));
-    fio_memcpy4(&peer_uuid.u8[4], (char *)(void *)(&ipc->on_done));
-  }
-  /* Reject self, zero and duplicate identities before announcing this peer. */
-  if (!peer_uuid.u64[0] || !peer_uuid.u64[1] ||
-      FIO_MEMCMP(peer_uuid.u8, FIO___IPC.uuid.u8, 16) == 0)
-    goto peer_error;
-  /* test if we already connected to peer previously */
-  if (fio___ipc_cluster_filter(&FIO___IPC.peers,
-                               peer_uuid.u64[0],
-                               peer_uuid.u64[1]))
-    goto peer_error;
-  /* set peer uuid */
-  fio_memcpy16(uuid, peer_uuid.u8);
-  fio___ipc_lifecycle_emit(io_, &peer_uuid, true);
-  fio___ipc_free(ipc);
-  return;
 peer_error:
   fio_io_close(io_);
 filtered:
@@ -1294,6 +1596,20 @@ filtered:
 /* *****************************************************************************
 IPC Core - IPC Socket Management
 ***************************************************************************** */
+
+/** Queues a received message (owns `msg`). Returns -1 (IO closed) on error. */
+FIO_SFUNC int fio___ipc_on_data_dispatch(fio_io_s *io,
+                                         fio_ipc_s *msg,
+                                         void (*fn)(void *ipc, void *io)) {
+  fio_io_s *ref = fio_io_dup(io); /* owned by msg->from once queued */
+  if (!fio_queue_push(fio_io_queue(), fn, msg, ref))
+    return 0;
+  msg->from = NULL; /* the reference was never handed over */
+  fio___ipc_free(msg);
+  fio_io_close(io);
+  fio_io_free(ref);
+  return -1;
+}
 
 /** Called when data is received on IPC socket */
 FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
@@ -1310,9 +1626,9 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
                                      p->expected_len - p->msg_received);
       if (p->expected_len != p->msg_received)
         return;
-      /* dup ref owned by msg->from */
-      fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
-      fio___ipc_parser_init(p);
+      p->msg = NULL;
+      p->expected_len = p->msg_received = 0;
+      fio___ipc_on_data_dispatch(io, msg, fn);
       return; /* don't read more messages for now */
     }
     /* read into IO buffer */
@@ -1325,19 +1641,9 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
         break;
       uint32_t published_len = fio_buf2u32_le(p->buffer + consumed);
       p->expected_len = fio___ipc_wire_length(published_len);
-      // FIO_LOG_DEBUG2("(%d) incoming IPC message: %u/%zu (len=%u, bytes: %02x
-      // "
-      //                "%02x %02x %02x)",
-      //                fio_io_pid(),
-      //                p->expected_len,
-      //                p->buf_len,
-      //                fio_buf2u32u(p->buffer + consumed),
-      //                (uint8_t)p->buffer[consumed],
-      //                (uint8_t)p->buffer[consumed + 1],
-      //                (uint8_t)p->buffer[consumed + 2],
-      //                (uint8_t)p->buffer[consumed + 3]);
       if (p->expected_len > FIO___IPC.max_length ||
-          published_len > FIO___IPC.max_length) { /* oversized? */
+          published_len > FIO___IPC.max_length || /* oversized? */
+          (!p->first && published_len > FIO___IPC_HELLO_MAX)) {
         FIO_LOG_SECURITY(
             "(%d) Invalid IPC message length: %u (buf: %zu, published: %u)",
             fio_io_pid(),
@@ -1347,23 +1653,29 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
         fio_io_close(io);
         return;
       }
-
-      if (p->buf_len >= consumed + p->expected_len) {
-        // FIO_LOG_DEBUG2("(%d) routing small IPC message:%u/%u",
-        //                fio_io_pid(),
-        //                p->expected_len,
-        //                p->buf_len);
+      p->first = 1; /* the first frame (a declaration) is always small */
+      if (p->buf_len >= consumed + p->expected_len) { /* small message */
         msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
-        FIO_ASSERT_ALLOC(msg);
-        msg->from = io; /* ref ownership from fio_io_dup below */
+        if (!msg)
+          goto no_memory;
+        msg->from = io; /* ref ownership from fio_io_dup in dispatch */
         FIO_MEMCPY(&msg->len, p->buffer + consumed, p->expected_len);
         consumed += p->expected_len;
-        fio_queue_push(fio_io_queue(), fn, msg, fio_io_dup(io));
+        if (fio___ipc_on_data_dispatch(io, msg, fn))
+          return;
         had_messages |= 1;
         continue;
       }
+      if (p->auth != FIO___IPC_AUTH_DONE &&
+          p->expected_len > FIO_IPC_BUFFER_LEN) {
+        /* unauthenticated peer: don't allocate large frames (yet) */
+        p->expected_len = 0;
+        fio_io_suspend(io); /* resumed by fio___ipc_auth_gate */
+        break;
+      }
       p->msg = msg = fio___ipc_new(p->expected_len - fio___ipc_sizeof_header());
-      FIO_ASSERT_ALLOC(msg);
+      if (!msg)
+        goto no_memory;
       p->msg_received = (uint32_t)(p->buf_len - consumed);
       msg->from = io; /* dup'd when queued / NULLs if incomplete (on destroy) */
       FIO_MEMCPY(&msg->len, p->buffer + consumed, p->msg_received);
@@ -1379,6 +1691,12 @@ FIO_IFUNC void fio___ipc_on_data_internal(fio_io_s *io,
     if (had_messages || !p->msg)
       return;
   }
+no_memory:
+  FIO_LOG_ERROR("(%d) IPC message allocation failed (%u bytes)",
+                fio_io_pid(),
+                (unsigned)p->expected_len);
+  p->expected_len = 0;
+  fio_io_close(io);
 }
 
 /** Called when data is received on IPC socket */
@@ -1449,7 +1767,7 @@ FIO_SFUNC void fio___ipc_connect_on_failed(fio_io_protocol_s *protocol,
                                            void *udata) {
   (void)protocol;
   (void)udata;
-  FIO_LOG_FATAL("Couldn't connect to IPC @ %s", FIO___IPC.ipc_url);
+  FIO_LOG_FATAL("Couldn't connect to IPC");
   fio_io_stop();
 }
 
@@ -1477,24 +1795,25 @@ FIO_SFUNC void fio___ipc_listen(void *ignr_) {
   fio_url_tls_info_s tls_info = fio_url_is_tls(url);
   if (tls_info.tls) {
     FIO_LOG_SECURITY(
-        "IPC URL error - ignoring TLS (using internal encryption): %s",
-        FIO___IPC.ipc_url);
+        "IPC URL error - ignoring TLS (using internal encryption)");
   }
 
-  FIO_LOG_DEBUG2("(%d) Opening IPC listening socket @ %s", FIO___IPC.ipc_url);
+  FIO_LOG_DEBUG2("(%d) Opening IPC listening socket", fio_io_pid());
 
   fio_socket_i fd =
       fio_sock_open2(FIO___IPC.ipc_url,
                      FIO_SOCK_SERVER | FIO_SOCK_TCP | FIO_SOCK_NONBLOCK);
 
   FIO_ASSERT(FIO_SOCK_FD_ISVALID(fd),
-             "(%d) failed to start IPC listening @ %s",
-             fio_io_pid(),
-             FIO___IPC.ipc_url);
-  FIO_LOG_DEBUG2("(%d) starting IPC listening socket at: %s",
+             "(%d) failed to start IPC listening",
+             fio_io_pid());
+  FIO_LOG_DEBUG2("(%d) starting IPC listening socket (fd %" PRIuPTR ")",
                  fio_io_pid(),
-                 FIO___IPC.ipc_url);
-  fio_io_attach_fd(fd, &listening_protocol, &FIO___IPC.protocol_ipc, NULL);
+                 (uintptr_t)fd);
+  fio_io_attach_fd(fd,
+                   &listening_protocol,
+                   &FIO___IPC.protocol_ipc_hello,
+                   NULL);
   (void)ignr_;
 }
 
@@ -1520,25 +1839,41 @@ typedef struct {
   uint8_t mac[16];    /* Poly1305 MAC */
 } fio___ipc_udp_discovery_s;
 
-/** Compose a UDP discovery message */
-FIO_SFUNC void fio___ipc_udp_discovery_compose(fio___ipc_udp_discovery_s *msg) {
+/** Derives the discovery MAC key (secret material, caller wipes). */
+FIO_SFUNC int fio___ipc_udp_discovery_key(
+    fio_u256 *key,
+    const fio___ipc_udp_discovery_s *msg) {
+  fio_u512 secret = fio_secret();
+  fio_u256 k; /* fio_chacha20 `data` is restrict: the key mustn't alias it */
+  fio_memcpy32(k.u8, secret.u8 + (msg->random & 31) + 1);
+  int r = fio_chacha20(secret.u8,
+                       sizeof(secret),
+                       k.u8,
+                       ((char *)&msg->timestamp + 4),
+                       (msg->random & 1023));
+  fio_memcpy32(key->u8, secret.u8 + (secret.u8[2] & 31));
+  fio_secure_zero(&k, sizeof(k));
+  fio_secure_zero(&secret, sizeof(secret));
+  return r;
+}
+
+/** Compose a UDP discovery message. Returns 0 on success, -1 on failure. */
+FIO_SFUNC int fio___ipc_udp_discovery_compose(fio___ipc_udp_discovery_s *msg) {
   fio_u256 key_buf;
   uint64_t mac[2];
+  int r;
   /* Fill message fields */
   fio_memcpy16(msg->uuid, FIO___IPC.uuid.u8);
-  msg->timestamp = fio_lton64(fio_io_last_tick());
+  msg->timestamp = fio_ltole64((uint64_t)fio_io_last_tick_time());
   msg->random = fio_rand64();
   /* Derive key from secret + random */
-  fio_u512 secret = fio_secret();
-  fio_chacha20(secret.u8,
-               sizeof(secret),
-               (secret.u8 + (msg->random & 31) + 1),
-               ((char *)&msg->timestamp + 4),
-               (msg->random & 1023));
-  fio_memcpy32(key_buf.u8, secret.u8 + (secret.u8[2] & 31));
+  r = fio___ipc_udp_discovery_key(&key_buf, msg);
   /* Compute MAC over uuid + timestamp + random (32 bytes) */
-  fio_poly1305_auth(mac, msg, 32, NULL, 0, key_buf.u8);
+  r |= fio_poly1305_auth(mac, msg, 32, NULL, 0, key_buf.u8);
+  fio_secure_zero(&key_buf, sizeof(key_buf));
   fio_memcpy16(msg->mac, mac);
+  fio_secure_zero(mac, sizeof(mac));
+  return r;
 }
 
 /** Validate a UDP discovery message. Returns 0 on success, -1 on failure. */
@@ -1553,21 +1888,14 @@ FIO_SFUNC int fio___ipc_udp_discovery_validate(fio___ipc_udp_discovery_s *msg) {
   if (fio___ipc_cluster_filter_window(timestamp))
     return -1;
   /* Derive key from secret + random */
-  fio_u512 secret = fio_secret();
-  fio_chacha20(secret.u8,
-               sizeof(secret),
-               (secret.u8 + (msg->random & 31) + 1),
-               ((char *)&msg->timestamp + 4),
-               (msg->random & 1023));
-  fio_memcpy32(key_buf.u8, secret.u8 + (secret.u8[2] & 31));
-  /* Verify MAC */
-  fio_poly1305_auth(mac, msg, 32, NULL, 0, key_buf.u8);
-  if (FIO_MEMCMP(mac, msg->mac, 16) != 0) {
-    FIO_LOG_SECURITY("(%d) UDP discovery MAC failure - possible attack?",
-                     fio_io_pid());
-    return -1;
-  }
-  return 0;
+  int r = fio___ipc_udp_discovery_key(&key_buf, msg);
+  /* Verify MAC (a failed MAC computation is rejected, never compared) */
+  r |= fio_poly1305_auth(mac, msg, 32, NULL, 0, key_buf.u8);
+  fio_secure_zero(&key_buf, sizeof(key_buf));
+  r = r ? -1 : (0 - !fio_ct_is_eq(mac, msg->mac, 16));
+  /* on failure, mac is a valid tag for attacker-chosen data - wipe it */
+  fio_secure_zero(mac, sizeof(mac));
+  return r; /* the caller logs (rate limited) */
 }
 
 /* *****************************************************************************
@@ -1579,7 +1907,11 @@ FIO_SFUNC void fio___ipc_udp_broadcast_hello(fio_io_s *io) {
   if (!fio_io_is_running() || !io)
     return;
   fio___ipc_udp_discovery_s msg;
-  fio___ipc_udp_discovery_compose(&msg);
+  if (fio___ipc_udp_discovery_compose(&msg)) {
+    FIO_LOG_ERROR("(%d) IPC/RPC UDP discovery message composition failed",
+                  fio_io_pid());
+    return;
+  }
   uint16_t port = (uint16_t)(uintptr_t)fio_io_udata(io);
   struct sockaddr_in addr = {
       .sin_family = AF_INET,
@@ -1629,6 +1961,23 @@ FIO_SFUNC void fio___ipc_udp_on_close(void *ignr1_, void *ignr2_) {
   (void)ignr1_, (void)ignr2_;
 }
 
+#define FIO___IPC_UDP_BATCH 64 /* datagrams per on_data event */
+
+/** Logs rejected discovery datagrams, at most once a second. */
+FIO_SFUNC void fio___ipc_udp_log_rejected(void) {
+  const uint64_t now = (uint64_t)fio_io_last_tick_time();
+  if (FIO___IPC.udp_log_time && now - FIO___IPC.udp_log_time < 1000) {
+    ++FIO___IPC.udp_log_skipped;
+    return;
+  }
+  FIO_LOG_SECURITY("(%d) IPC/RPC UDP discovery packet rejected - possible "
+                   "attack? (%zu more since last report)",
+                   fio_io_pid(),
+                   FIO___IPC.udp_log_skipped);
+  FIO___IPC.udp_log_time = now;
+  FIO___IPC.udp_log_skipped = 0;
+}
+
 /** Called when UDP data is received */
 FIO_SFUNC void fio___ipc_udp_on_data(fio_io_s *io) {
   fio___ipc_udp_discovery_s buf;
@@ -1637,24 +1986,19 @@ FIO_SFUNC void fio___ipc_udp_on_data(fio_io_s *io) {
   socklen_t from_len = sizeof(from_storage);
   ssize_t len;
   uint16_t port = (uint16_t)(uintptr_t)fio_io_udata(io);
-
-  while ((len = fio_sock_recvfrom(fio_io_fd(io),
-                                  &buf,
-                                  sizeof(buf),
-                                  0,
-                                  from,
-                                  &from_len)) > 0) {
-    /* Validate message size */
-    if (len != sizeof(fio___ipc_udp_discovery_s)) {
-      FIO_LOG_SECURITY("(%d) IPC/RPC UDP received invalid packet (%zd bytes)",
-                       fio_io_pid(),
-                       len);
-      continue;
-    }
-    /* Validate message content */
-    if (fio___ipc_udp_discovery_validate(&buf)) {
-      FIO_LOG_SECURITY("(%d) IPC/RPC UDP discovery message validation failed",
-                       fio_io_pid());
+  /* bounded batch: the reactor re-polls (and calls again) if more is pending */
+  for (size_t budget = FIO___IPC_UDP_BATCH; budget; --budget) {
+    from_len = sizeof(from_storage);
+    len =
+        fio_sock_recvfrom(fio_io_fd(io), &buf, sizeof(buf), 0, from, &from_len);
+    if (len <= 0)
+      return;
+    if (len == sizeof(buf) && !FIO_MEMCMP(buf.uuid, FIO___IPC.uuid.u8, 16))
+      continue; /* our own broadcast */
+    /* Validate message size and content (unauthenticated: rate limit logs) */
+    if (len != sizeof(fio___ipc_udp_discovery_s) ||
+        fio___ipc_udp_discovery_validate(&buf)) {
+      fio___ipc_udp_log_rejected();
       continue;
     }
     /* Check if already connected to this peer */
@@ -1760,25 +2104,12 @@ IPC - Remote - New Connection Attachments
 ***************************************************************************** */
 FIO_ASSERT_STATIC((sizeof(void (*)(void *)) >= 4),
                   "function pointers MUST be 4 bytes or more");
-SFUNC void fio___ipc_on_attach_cluster(fio_io_s *io) {
-  /* set peer UUID to zero and initialize parser */
+FIO_SFUNC void fio___ipc_on_attach_cluster(fio_io_s *io) {
+  /* peer UUID is zero until the peer's declaration is valid */
   FIO_MEMSET(fio___ipc_cluster_uuid(io), 0, 16);
   fio___ipc_parser_init(fio___ipc_cluster_parser(io));
-  /* inform peer about our UUID */
-  fio_ipc_s *ipc = fio_ipc_new(0);
-  FIO_ASSERT_ALLOC(ipc);
-  ipc->opcode = (uint32_t)0xFFFFFFFF;
-  ipc->udata = FIO_IPC_EXCLUDE_SELF;
-  ipc->routing_flags |= (FIO_IPC_FLAG_CLUSTER | FIO_IPC_FLAG_OPCODE);
-  /* Store UUID over the `ipc->on_reply` and `ipc->on_done pointers */
-  if (sizeof(ipc->on_reply) >= 8) {
-    fio_memcpy8((char *)(void *)(&ipc->on_reply), FIO___IPC.uuid.u8);
-    fio_memcpy8((char *)(void *)(&ipc->on_done), FIO___IPC.uuid.u8 + 8);
-  } else /* (sizeof(ipc->on_reply) >= 4) */ {
-    fio_memcpy4((char *)(void *)(&ipc->on_reply), FIO___IPC.uuid.u8);
-    fio_memcpy4((char *)(void *)(&ipc->on_done), FIO___IPC.uuid.u8 + 4);
-  }
-  fio_ipc_send_to(io, ipc);
+  fio___ipc_cluster_parser(io)->challenge = fio_rand64();
+  fio___ipc_hello_send(io, FIO___IPC_ROLE_CLUSTER);
 }
 
 /** Called when IPC socket is closed */
@@ -1823,7 +2154,7 @@ SFUNC fio_io_listener_s *fio_ipc_cluster_listen(uint16_t port) {
 
   fio_io_listener_s *listener =
       fio_io_listen(.url = url.buf,
-                    .protocol = &FIO___IPC.protocol_rpc,
+                    .protocol = &FIO___IPC.protocol_rpc_hello,
                     .on_root = 1,
                     .hide_from_log = 1);
 
@@ -1865,12 +2196,10 @@ SFUNC void fio_ipc_cluster_connect(const char *url) {
     return;
   }
 
-  fio_io_s *io = fio_io_connect(url, .protocol = &FIO___IPC.protocol_rpc);
+  fio_io_s *io = fio_io_connect(url, .protocol = &FIO___IPC.protocol_rpc_hello);
 
   if (!io) {
-    FIO_LOG_ERROR("(%d) Failed to connect to cluster IPC peer: %s",
-                  fio_io_pid(),
-                  url);
+    FIO_LOG_ERROR("(%d) Failed to connect to cluster IPC peer", fio_io_pid());
     return;
   }
   fio_url_s info = fio_url_parse(url, FIO_STRLEN(url));
@@ -1880,7 +2209,9 @@ SFUNC void fio_ipc_cluster_connect(const char *url) {
       FIO___IPC.cluster_port = tmp;
   }
 
-  FIO_LOG_INFO("(%d) Connecting to cluster IPC peer: %s", fio_io_pid(), url);
+  FIO_LOG_INFO("(%d) Connecting to cluster IPC peer (fd %" PRIuPTR ")",
+               fio_io_pid(),
+               (uintptr_t)fio_io_fd(io));
 }
 
 /* *****************************************************************************
@@ -1890,6 +2221,8 @@ IPC - Initialization & Destruction
 /** Cleanup IPC system */
 FIO_SFUNC void fio___ipc_destroy(void *ignr_) {
   fio___ipc_cluster_filter_destroy(&FIO___IPC.received);
+  FIO___IPC.received_floor = 0;
+  FIO___IPC.received_limit = 0;
   fio___ipc_cluster_filter_destroy(&FIO___IPC.peers);
   fio___ipc_cluster_ops_destroy(&FIO___IPC.opcodes);
   FIO_MEMSET(FIO___IPC.on_peer, 0, sizeof(FIO___IPC.on_peer));
@@ -1909,27 +2242,33 @@ FIO_SFUNC void fio___ipc_on_fork(void *ignr_) {
 
   FIO___IPC.protocol_ipc.on_data = fio___ipc_on_data_worker;
   FIO___IPC.protocol_ipc.on_shutdown = fio___ipc_on_shutdown_worker;
+  FIO___IPC.protocol_ipc_hello.on_data = fio___ipc_on_data_worker;
+  FIO___IPC.protocol_ipc_hello.on_shutdown = fio___ipc_on_shutdown_worker;
 
   /* Connect to master's IPC socket */
+  FIO___IPC.worker_opened = fio___ipc_now();
   FIO___IPC.worker_connection =
       fio_io_connect(FIO___IPC.ipc_url,
-                     .protocol = &FIO___IPC.protocol_ipc,
+                     .protocol = &FIO___IPC.protocol_ipc_hello,
                      .on_failed = fio___ipc_connect_on_failed);
 
   if (!FIO___IPC.worker_connection) {
-    FIO_LOG_ERROR("Failed to connect to master IPC socket: %s",
-                  FIO___IPC.ipc_url);
+    FIO_LOG_ERROR("Failed to connect to master IPC socket");
   } else {
     /* remember the connection's buffer identity (see fio___ipc_on_close) */
     FIO___IPC.worker_buffer = (void *)(FIO___IPC.worker_connection + 1);
+    /* declare first: any message written while connecting follows it */
+    fio___ipc_hello_send(FIO___IPC.worker_connection, FIO___IPC_ROLE_WORKER);
   }
 }
 void fio___ipc_init____(void); /* IDE Marker */
 /* Master initialization - runs automatically at startup */
 FIO_CONSTRUCTOR(fio___ipc_init) {
   FIO___IPC.max_length = FIO_IPC_MAX_LENGTH;
+  /* Connections start on a hello protocol (never broadcast to) and move to
+   * the matching authenticated protocol (same buffer layout) once the peer's
+   * declaration is valid. Authenticated protocols have no on_attach. */
   FIO___IPC.protocol_ipc = (fio_io_protocol_s){
-      .on_attach = fio___ipc_on_attach,
       .on_data = fio___ipc_on_data_master,
       .on_shutdown = fio___ipc_on_shutdown_master,
       .on_close = fio___ipc_on_close,
@@ -1938,15 +2277,24 @@ FIO_CONSTRUCTOR(fio___ipc_init) {
       .timeout = (360 * 1024), /* IPC (local) timeout: ~6 minutes */
   };
   FIO___IPC.protocol_rpc = (fio_io_protocol_s){
-      .on_attach = fio___ipc_on_attach_cluster,
       .on_data = fio___ipc_on_data_cluster,
       .on_close = fio___ipc_on_close_cluster,
       .on_timeout = fio___ipc_on_timeout_rpc,
       .buffer_size = 16 + sizeof(fio___ipc_parser_s) + FIO_IPC_BUFFER_LEN,
       .timeout = (55 * 1024), /* RPC (remote) timeout: ~55 sec */
   };
+  FIO___IPC.protocol_ipc_hello = FIO___IPC.protocol_ipc;
+  FIO___IPC.protocol_ipc_hello.on_attach = fio___ipc_on_attach;
+  FIO___IPC.protocol_ipc_hello.on_timeout = fio___ipc_on_timeout_hello;
+  FIO___IPC.protocol_ipc_hello.timeout = (30 * 1024); /* handshake: ~30 sec */
+  FIO___IPC.protocol_rpc_hello = FIO___IPC.protocol_rpc;
+  FIO___IPC.protocol_rpc_hello.on_attach = fio___ipc_on_attach_cluster;
+  FIO___IPC.protocol_rpc_hello.on_timeout = fio___ipc_on_timeout_hello;
+  FIO___IPC.protocol_rpc_hello.timeout = (30 * 1024); /* handshake: ~30 sec */
   fio_io_protocol_set(NULL, &FIO___IPC.protocol_ipc); /* initialize - safety */
   fio_io_protocol_set(NULL, &FIO___IPC.protocol_rpc); /* initialize - safety */
+  fio_io_protocol_set(NULL, &FIO___IPC.protocol_ipc_hello);
+  fio_io_protocol_set(NULL, &FIO___IPC.protocol_rpc_hello);
   do {
     FIO___IPC.uuid = fio_rand128();
   } while (!FIO___IPC.uuid.u64[0] || !FIO___IPC.uuid.u64[1]);

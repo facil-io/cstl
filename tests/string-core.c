@@ -217,8 +217,14 @@ FIO_SFUNC void test_string_write2(void) {
   {
     char buf[64];
     fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
-    fio_string_write2(&s, NULL, FIO_STRING_WRITE_FLOAT(3.14));
-    FIO_ASSERT(s.len > 0, "FLOAT len should be > 0");
+    fio_string_write2(&s,
+                      NULL,
+                      FIO_STRING_WRITE_FLOAT(3.14),
+                      FIO_STRING_WRITE_STR1(" "),
+                      FIO_STRING_WRITE_FLOAT(42.0));
+    FIO_ASSERT(s.len == 9 && !FIO_MEMCMP(s.buf, "3.14 42.0", 10),
+               "FLOAT content (fio_ftoa): %s",
+               s.buf);
   }
 }
 
@@ -226,7 +232,7 @@ FIO_SFUNC void test_string_write2(void) {
 FIO_SFUNC void test_string_write2_float_overflow(void) {
   char prefix[12];
   FIO_MEMSET(prefix, 'A', sizeof(prefix));
-  double v = 1.7976931348623157e+308; /* %.15g => 21 chars */
+  double v = 1.7976931348623157e+308;
 
   fio_str_info_s s = FIO_STR_INFO0;
   fio_string_write2(&s,
@@ -378,6 +384,99 @@ FIO_SFUNC void test_string_utf8(void) {
     FIO_ASSERT(pos == 1, "utf8_select pos should be 1");
     FIO_ASSERT(len == 2, "utf8_select len should be 2 (é is 2 bytes)");
   }
+
+  /* Regression: a multi-byte lead truncated by the buffer's end must be
+   * rejected without reading past the buffer (exact-size heap copies so
+   * ASan reports any overread). */
+  {
+    static const struct {
+      const char *s;
+      size_t len;
+    } tail[] = {
+        {"\xF0\x9F", 2},
+        {"a\xE2\x82", 3},
+        {"ab\xC3", 3},
+        {"\xF4", 1},
+    };
+    for (size_t i = 0; i < sizeof(tail) / sizeof(tail[0]); ++i) {
+      char *b = (char *)malloc(tail[i].len);
+      FIO_ASSERT_ALLOC(b);
+      FIO_MEMCPY(b, tail[i].s, tail[i].len);
+      fio_str_info_s s = FIO_STR_INFO2(b, tail[i].len);
+      size_t lead = 0;
+      while ((((uint8_t *)b)[lead] & 0xC0U) != 0xC0U)
+        ++lead;
+      FIO_ASSERT(
+          !fio_string_utf8_valid_code_point(b + lead, tail[i].len - lead),
+          "truncated UTF-8 tail should be invalid (%zu)",
+          i);
+      FIO_ASSERT(!fio_string_utf8_valid(s), "truncated tail valid (%zu)", i);
+      FIO_ASSERT(!fio_string_utf8_len(s), "truncated tail has len (%zu)", i);
+      intptr_t pos = 0;
+      size_t len = 8;
+      FIO_ASSERT(fio_string_utf8_select(s, &pos, &len) == -1 && pos == -1,
+                 "truncated tail selectable (%zu)",
+                 i);
+      char out[64];
+      fio_str_info_s dest = FIO_STR_INFO3(out, 0, sizeof(out));
+      fio_string_write_html_escape(&dest, NULL, b, tail[i].len);
+      free(b);
+    }
+    /* a complete sequence at the exact buffer end is still accepted */
+    char *b = (char *)malloc(2);
+    FIO_ASSERT_ALLOC(b);
+    FIO_MEMCPY(b, "\xC3\xA9", 2);
+    FIO_ASSERT(fio_string_utf8_valid_code_point(b, 2) == 2 &&
+                   !fio_string_utf8_valid_code_point(b, 1),
+               "bounded code point length");
+    FIO_ASSERT(fio_string_utf8_len(FIO_STR_INFO2(b, 2)) == 1,
+               "exact-end UTF-8 len");
+    free(b);
+  }
+
+  /* ASCII word skipping + bounded tail: place complete / truncated / invalid
+   * sequences at every offset around the 8 byte word boundary (exact-size
+   * heap buffers, so ASan reports any overread). */
+  {
+    static const struct {
+      const char *s;
+      size_t len;
+      size_t chars; /* 0 == invalid */
+    } seq[] = {
+        {"\xC3\xA9", 2, 1},
+        {"\xE2\x82\xAC", 3, 1},
+        {"\xF0\x9F\x98\x80", 4, 1},
+        {"\xF0\x9F\x98", 3, 0},
+        {"\xE2\x82", 2, 0},
+        {"\xC3", 1, 0},
+        {"\xED\xA0\x80", 3, 0}, /* surrogate */
+        {"\x80", 1, 0},
+    };
+    for (size_t i = 0; i < sizeof(seq) / sizeof(seq[0]); ++i) {
+      for (size_t pre = 0; pre < 18; ++pre) {
+        for (size_t post = 0; post < 10; ++post) {
+          const size_t total = pre + seq[i].len + post;
+          char *b = (char *)malloc(total);
+          FIO_ASSERT_ALLOC(b);
+          FIO_MEMSET(b, 'a', total);
+          FIO_MEMCPY(b + pre, seq[i].s, seq[i].len);
+          fio_str_info_s s = FIO_STR_INFO2(b, total);
+          const size_t expect = seq[i].chars ? (pre + 1 + post) : 0;
+          FIO_ASSERT(fio_string_utf8_valid(s) == !!seq[i].chars,
+                     "UTF-8 valid mismatch (seq %zu, pre %zu, post %zu)",
+                     i,
+                     pre,
+                     post);
+          FIO_ASSERT(fio_string_utf8_len(s) == expect,
+                     "UTF-8 len mismatch (seq %zu, pre %zu, post %zu)",
+                     i,
+                     pre,
+                     post);
+          free(b);
+        }
+      }
+    }
+  }
 }
 
 /* =============================================================================
@@ -512,6 +611,110 @@ FIO_SFUNC void test_string_base64(void) {
     FIO_ASSERT(dec.len == 128, "binary roundtrip len: %zu", dec.len);
     FIO_ASSERT(!FIO_MEMCMP(dec.buf, original, 128), "binary roundtrip content");
   }
+
+  /* decoder: accepted forms (RFC 4648 vectors, unpadded, whitespace, URL) */
+  {
+    static const struct {
+      const char *in;
+      const char *out;
+      size_t out_len;
+    } ok[] = {
+        {"", "", 0},
+        {"   \r\n\t ", "", 0},
+        {"Zg==", "f", 1},
+        {"Zm8=", "fo", 2},
+        {"Zm9v", "foo", 3},
+        {"Zm9vYg==", "foob", 4},
+        {"Zm9vYmE=", "fooba", 5},
+        {"Zm9vYmFy", "foobar", 6},
+        {"Zg", "f", 1},
+        {"Zm8", "fo", 2},
+        {"Zm9vYmE", "fooba", 5},
+        {" Z m 9 v\r\nY g = = \n", "foob", 4},
+        {"Zm9v\vYmFy\f", "foobar", 6},
+        {"-_-_", "\xFB\xFF\xBF", 3},
+        {"+/+/", "\xFB\xFF\xBF", 3},
+        {"+_-/", "\xFB\xFF\xBF", 3},
+        /* lenient: padding variants, padding only, \b, non-zero tail bits */
+        {"Zg=", "f", 1},
+        {"Zg===", "f", 1},
+        {"Zm8==", "fo", 2},
+        {"Zm9v=", "foo", 3},
+        {"Zm9v====", "foo", 3},
+        {"====", "", 0},
+        {"\bZm9v\b", "foo", 3},
+        {"Zh==", "f", 1},
+        {"Zm9=", "fo", 2},
+    };
+    for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); ++i) {
+      char db[16];
+      fio_str_info_s dec = FIO_STR_INFO3(db, 0, sizeof(db));
+      FIO_ASSERT(!fio_string_write_base64dec(&dec,
+                                             NULL,
+                                             ok[i].in,
+                                             FIO_STRLEN(ok[i].in)) &&
+                     dec.len == ok[i].out_len &&
+                     !FIO_MEMCMP(db, ok[i].out, dec.len),
+                 "base64 decode should accept \"%s\"",
+                 ok[i].in);
+    }
+    fio_str_info_s empty = {0};
+    FIO_ASSERT(!fio_string_write_base64dec(&empty, NULL, NULL, 0) &&
+                   !empty.buf && !empty.len,
+               "base64 NULL/0 decode should succeed without changes");
+    /* whitespace heavy input must not fail an exact capacity check */
+    char spaced[256];
+    size_t sl = 0;
+    for (const char *c = "Zm9vYmFy"; *c; ++c) {
+      for (size_t k = 0; k < 20; ++k)
+        spaced[sl++] = ' ';
+      spaced[sl++] = *c;
+    }
+    char db[7]; /* exactly "foobar" + NUL */
+    fio_str_info_s dec = FIO_STR_INFO3(db, 0, sizeof(db));
+    FIO_ASSERT(!fio_string_write_base64dec(&dec, NULL, spaced, sl) &&
+                   dec.len == 6 && !FIO_MEMCMP(db, "foobar", 7),
+               "base64 whitespace heavy decode should fit an exact buffer");
+  }
+  /* decoder: rejected forms leave `dest` unchanged */
+  {
+    static const struct {
+      const char *in;
+      size_t len;
+    } bad[] = {
+        {"Zm9v!YmFy", 9},     /* invalid character mid-stream */
+        {"Zm9vYmFy!", 9},     /* trailing garbage */
+        {"!", 1},             /* invalid only */
+        {"Zm9v\0Ym", 7},      /* embedded NUL */
+        {"Zm9vYmFy\x80", 9},  /* non-ASCII */
+        {"Zg==Zg==", 8},      /* data after padding */
+        {"Zg=a", 4},          /* data after padding */
+        {"Z", 1},             /* impossible length */
+        {"Zm9vY", 5},         /* impossible length */
+        {"Zm9vY===", 8},      /* impossible length + bad padding */
+        {"Zg=\x01", 4},       /* invalid character after padding */
+        {"TQ!===", 6},        /* historical partial-success case */
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+      char db[32];
+      FIO_MEMCPY(db, "keep", 5);
+      fio_str_info_s dec = FIO_STR_INFO3(db, 4, sizeof(db));
+      FIO_ASSERT(fio_string_write_base64dec(&dec, NULL, bad[i].in, bad[i].len) ==
+                         -1 &&
+                     dec.len == 4 && dec.buf == db && dec.capa == sizeof(db) &&
+                     !FIO_MEMCMP(db, "keep", 5),
+                 "base64 decode should reject case %zu without changes",
+                 i);
+      fio_str_info_s dyn = {0};
+      FIO_ASSERT(fio_string_write_base64dec(&dyn,
+                                            FIO_STRING_ALLOC_COPY,
+                                            bad[i].in,
+                                            bad[i].len) == -1 &&
+                     !dyn.buf && !dyn.len,
+                 "base64 decode should reject case %zu (no allocation)",
+                 i);
+    }
+  }
 }
 
 /* =============================================================================
@@ -529,10 +732,15 @@ FIO_SFUNC void test_string_base64_short_input(void) {
 
   char out[64];
   fio_str_info_s s = FIO_STR_INFO3(out, 0, sizeof(out));
+  out[0] = 0;
   int r = fio_string_write_base64dec(&s, NULL, in, 1);
-  FIO_ASSERT(r == 0, "base64 short input: should not report error");
-  FIO_ASSERT(s.len <= sizeof(out), "base64 short input: len overflow");
-  FIO_ASSERT(s.buf[s.len] == 0, "base64 short input: missing NUL terminator");
+  /* a single symbol can't encode a byte: rejected, `dest` unchanged */
+  FIO_ASSERT(r == -1, "base64 short input: should report an error");
+  FIO_ASSERT(s.len == 0 && !out[0], "base64 short input: dest changed");
+  in[0] = '=';
+  r = fio_string_write_base64dec(&s, NULL, in, 1);
+  FIO_ASSERT(r == 0 && !s.len && !out[0],
+             "base64 short input '=': padding only is an empty decode");
 
   FIO_MEM_FREE(in, 1);
 }
@@ -562,6 +770,106 @@ FIO_SFUNC void test_string_base32(void) {
                FIO_STRLEN(original));
     FIO_ASSERT(!FIO_MEMCMP(dec.buf, original, dec.len),
                "base32 roundtrip content");
+  }
+  /* RFC 4648 section 10 test vectors (encode: canonical, padded) */
+  {
+    static const char *vec[][2] = {{"", ""},
+                                   {"f", "MY======"},
+                                   {"fo", "MZXQ===="},
+                                   {"foo", "MZXW6==="},
+                                   {"foob", "MZXW6YQ="},
+                                   {"fooba", "MZXW6YTB"},
+                                   {"foobar", "MZXW6YTBOI======"}};
+    for (size_t i = 0; i < sizeof(vec) / sizeof(vec[0]); ++i) {
+      char eb[64], db[64];
+      fio_str_info_s enc = FIO_STR_INFO3(eb, 0, sizeof(eb));
+      fio_str_info_s dec = FIO_STR_INFO3(db, 0, sizeof(db));
+      FIO_ASSERT(!fio_string_write_base32enc(&enc,
+                                             NULL,
+                                             vec[i][0],
+                                             FIO_STRLEN(vec[i][0])) &&
+                     enc.len == FIO_STRLEN(vec[i][1]) &&
+                     !FIO_MEMCMP(enc.buf, vec[i][1], enc.len) && !eb[enc.len],
+                 "base32 RFC 4648 encode \"%s\" -> %s",
+                 vec[i][0],
+                 enc.buf);
+      FIO_ASSERT(!fio_string_write_base32dec(&dec,
+                                             NULL,
+                                             vec[i][1],
+                                             FIO_STRLEN(vec[i][1])) &&
+                     dec.len == FIO_STRLEN(vec[i][0]) &&
+                     !FIO_MEMCMP(dec.buf, vec[i][0], dec.len),
+                 "base32 RFC 4648 decode %s",
+                 vec[i][1]);
+    }
+  }
+  /* decoder: accepted forms (unpadded, lower case, whitespace heavy) */
+  {
+    static const char *ok[] = {"MZXW6",
+                               "mzxw6===",
+                               " M Z\tX\r\nW 6 = = = ",
+                               "MZXW6=",
+                               "   \n\t  ",
+                               "\v\fMZXW6\b",
+                               "MZXW7",
+                               "MZXW6==========",
+                               "========"};
+    static const size_t ok_len[] = {3, 3, 3, 3, 0, 3, 3, 3, 0};
+    for (size_t i = 0; i < sizeof(ok) / sizeof(ok[0]); ++i) {
+      char db[8];
+      fio_str_info_s dec = FIO_STR_INFO3(db, 0, sizeof(db));
+      FIO_ASSERT(!fio_string_write_base32dec(&dec, NULL, ok[i], FIO_STRLEN(ok[i])) &&
+                     dec.len == ok_len[i] &&
+                     (!dec.len || !FIO_MEMCMP(db, "foo", 3)),
+                 "base32 decode should accept \"%s\"",
+                 ok[i]);
+    }
+    /* empty input: success, no buffer required */
+    fio_str_info_s empty = {0};
+    FIO_ASSERT(!fio_string_write_base32dec(&empty, NULL, "", 0) && !empty.len,
+               "base32 empty decode should succeed");
+    FIO_ASSERT(!fio_string_write_base32dec(&empty, NULL, NULL, 0),
+               "base32 NULL/0 decode should succeed");
+    /* whitespace heavy input must not fail an exact capacity check */
+    char spaced[256];
+    size_t sl = 0;
+    for (const char *c = "MZXW6YTBOI======"; *c; ++c) {
+      for (size_t k = 0; k < 15; ++k)
+        spaced[sl++] = ' ';
+      spaced[sl++] = *c;
+    }
+    char db[7]; /* exactly "foobar" + NUL */
+    fio_str_info_s dec = FIO_STR_INFO3(db, 0, sizeof(db));
+    FIO_ASSERT(!fio_string_write_base32dec(&dec, NULL, spaced, sl) &&
+                   dec.len == 6 && !FIO_MEMCMP(db, "foobar", 6) && !db[6],
+               "base32 whitespace heavy decode should fit an exact buffer");
+  }
+  /* decoder: rejected forms leave `dest` unchanged */
+  {
+    static const char *bad[] = {"MZXW6!AAAA", "MZ!XW6", "!", "MZXW6=A",
+                                "MY======MZXQ====", "M", "MZX", "MZXW6Y",
+                                "MZXW6YTB1", "MZXW6\0AA"};
+    static const size_t bad_len[] = {10, 6, 1, 7, 16, 1, 3, 6, 9, 8};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+      char db[32];
+      FIO_MEMCPY(db, "keep", 5);
+      fio_str_info_s dec = FIO_STR_INFO3(db, 4, sizeof(db));
+      FIO_ASSERT(fio_string_write_base32dec(&dec, NULL, bad[i], bad_len[i]) ==
+                         -1 &&
+                     dec.len == 4 && dec.buf == db &&
+                     !FIO_MEMCMP(db, "keep", 5),
+                 "base32 decode should reject \"%s\" without changes",
+                 bad[i]);
+      /* also with a reallocating destination (no allocation on error) */
+      fio_str_info_s dyn = {0};
+      FIO_ASSERT(fio_string_write_base32dec(&dyn,
+                                            FIO_STRING_ALLOC_COPY,
+                                            bad[i],
+                                            bad_len[i]) == -1 &&
+                     !dyn.buf && !dyn.len,
+                 "base32 decode should reject \"%s\" (no allocation)",
+                 bad[i]);
+    }
   }
 }
 
@@ -1215,6 +1523,182 @@ FIO_SFUNC void test_string2primitive(void) {
   FIO_ASSERT(r.type == FIO_STRING_PRIMITIVE_STRING, "NULL should be a String");
 }
 
+/* =============================================================================
+ * Test: string core security regressions (bounds / truncation / COW)
+ * ========================================================================== */
+FIO_SFUNC char *test___exact_copy(const char *s, size_t len) {
+  char *p = (char *)malloc(len ? len : 1); /* exact size: ASan catches reads */
+  FIO_ASSERT(p, "allocation failed");
+  FIO_MEMCPY(p, s, len);
+  return p;
+}
+
+FIO_SFUNC void test_string_security_regressions(void) {
+  { /* write2 float: fixed tiny buffer must truncate, not overflow */
+    char out[4];
+    fio_str_info_s s = FIO_STR_INFO3(out, 0, 4);
+    int r = fio_string_write2(&s, NULL, FIO_STRING_WRITE_FLOAT(-1.0e308));
+    FIO_ASSERT(r == -1 && s.len < 4 && !out[s.len], "write2 float truncate");
+  }
+  { /* write2 float: length matches the stored text (no stale bytes) */
+    char out[64];
+    FIO_MEMSET(out, 'X', sizeof(out));
+    fio_str_info_s s = FIO_STR_INFO3(out, 0, 64);
+    fio_string_write2(&s, NULL, FIO_STRING_WRITE_FLOAT(-1.79769313486231e308));
+    char expect[64];
+    const size_t elen = fio_ftoa(expect, -1.79769313486231e308, 10);
+    FIO_ASSERT(s.len == strlen(out) && s.len == elen &&
+                   !FIO_MEMCMP(out, expect, elen + 1),
+               "write2 float length %zu != %zu (%s)",
+               s.len,
+               strlen(out),
+               out);
+  }
+  { /* escape: tiny fixed buffer truncates on whole escape sequences */
+    char *out = (char *)malloc(3);
+    fio_str_info_s s = FIO_STR_INFO3(out, 0, 3);
+    int r = fio_string_write_escape(&s, NULL, "\n\n", 2);
+    FIO_ASSERT(r == -1 && s.len == 2 && !FIO_MEMCMP(out, "\\n", 3),
+               "escape truncation");
+    free(out);
+    char buf[8];
+    s = FIO_STR_INFO3(buf, 0, 8);
+    r = fio_string_write_escape(&s, NULL, "ab\x01"
+                                          "cd",
+                                5);
+    FIO_ASSERT(r == -1 && s.len == 2 && !FIO_MEMCMP(buf, "ab", 3),
+               "escape truncation before u0001 (%zu)",
+               s.len);
+  }
+  { /* escape: overlong / surrogate UTF-8 is escaped, valid UTF-8 kept */
+    char buf[64];
+    fio_str_info_s s = FIO_STR_INFO3(buf, 0, 64);
+    fio_string_write_escape(&s, NULL, "\xC0\xAF\xED\xA0\x80\xC3\xA9", 7);
+    FIO_ASSERT(s.len == 4 * 5 + 2 && !FIO_MEMCMP(buf + 20, "\xC3\xA9", 2),
+               "escape strict UTF-8 (%zu: %s)",
+               s.len,
+               buf);
+  }
+  { /* shared (COW) string shrink must not overflow the detached copy */
+    char *a = fio_bstr_write(NULL, "Hello", 5);
+    char *b = fio_bstr_copy(a);
+    b = fio_bstr_len_set(b, 0);
+    FIO_ASSERT(a != b && fio_bstr_len(a) == 5 && !fio_bstr_len(b) && !b[0],
+               "COW shrink");
+    fio_bstr_free(b);
+    b = fio_bstr_copy(a);
+    b = fio_bstr_len_set(b, 2);
+    FIO_ASSERT(fio_bstr_len(b) == 2 && !FIO_MEMCMP(b, "He", 3) &&
+                   !FIO_MEMCMP(a, "Hello", 6),
+               "COW partial shrink");
+    fio_bstr_free(a);
+    fio_bstr_free(b);
+  }
+  { /* replace: huge overwrite length must not wrap */
+    char buf[16] = "abc";
+    fio_str_info_s s = FIO_STR_INFO3(buf, 3, 16);
+    fio_string_replace(&s, NULL, 0, SIZE_MAX, NULL, 0);
+    FIO_ASSERT(s.len == 0 && !buf[0], "replace SIZE_MAX overwrite");
+    s = FIO_STR_INFO3(buf, 0, 16);
+    fio_string_write(&s, NULL, "abcdef", 6);
+    fio_string_replace(&s, NULL, 2, SIZE_MAX - 1, "Z", 1);
+    FIO_ASSERT(s.len == 3 && !FIO_MEMCMP(buf, "abZ", 4), "replace wrap");
+  }
+  { /* NULL destination without allocator: no NUL write through NULL */
+    fio_str_info_s s = {0};
+    FIO_ASSERT(fio_string_write(&s, NULL, "abc", 3) == -1 && !s.buf &&
+                   !s.len,
+               "write to NULL destination");
+    FIO_ASSERT(fio_string_write_unescape(&s, NULL, "a\\nb", 4) == -1 && !s.buf,
+               "unescape to NULL destination");
+  }
+  { /* truncated C / JSON escapes never read past the input */
+    static const char *const vec[] = {"\\x", "\\x4", "\\0", "\\u12", "\\"};
+    static const char *const expect[] = {"x", "x4", "0", "u12", "\\"};
+    for (size_t i = 0; i < sizeof(vec) / sizeof(vec[0]); ++i) {
+      char out[16];
+      char *in = test___exact_copy(vec[i], strlen(vec[i]));
+      fio_str_info_s s = FIO_STR_INFO3(out, 0, 16);
+      fio_string_write_unescape(&s, NULL, in, strlen(vec[i]));
+      FIO_ASSERT(s.len == strlen(expect[i]) && !strcmp(out, expect[i]),
+                 "truncated unescape %zu: %s",
+                 i,
+                 out);
+      free(in);
+    }
+    char tmp[200]; /* long input takes the sizing path */
+    FIO_MEMSET(tmp, 'a', sizeof(tmp));
+    tmp[199] = '\\';
+    char *in = test___exact_copy(tmp, sizeof(tmp));
+    char *b = fio_bstr_write_unescape(NULL, in, sizeof(tmp));
+    FIO_ASSERT(fio_bstr_len(b) == 200 && b[199] == '\\', "terminal backslash");
+    fio_bstr_free(b);
+    free(in);
+  }
+  { /* UTF-16 surrogates: full high range pairs, lone halves => U+FFFD */
+    char out[32];
+    fio_str_info_s s = FIO_STR_INFO3(out, 0, 32);
+    fio_string_write_unescape(&s, NULL, "\\uDBFF\\uDFFF", 12);
+    FIO_ASSERT(s.len == 4 && !FIO_MEMCMP(out, "\xF4\x8F\xBF\xBF", 4),
+               "unescape surrogate pair U+10FFFF");
+    s = FIO_STR_INFO3(out, 0, 32);
+    fio_string_write_unescape(&s, NULL, "\\uD800\\u0041", 12);
+    FIO_ASSERT(s.len == 4 && !FIO_MEMCMP(out,
+                                         "\xEF\xBF\xBD"
+                                         "A",
+                                         4),
+               "unescape lone surrogate");
+    s = FIO_STR_INFO3(out, 0, 32);
+    fio_string_write_url_dec(&s, NULL, "%uDBFF%uDFFF", 12);
+    FIO_ASSERT(s.len == 4 && !FIO_MEMCMP(out, "\xF4\x8F\xBF\xBF", 4),
+               "url decode surrogate pair U+10FFFF");
+    char *in = test___exact_copy("%uD800%uDC0", 11);
+    s = FIO_STR_INFO3(out, 0, 32);
+    fio_string_write_url_dec(&s, NULL, in, 11);
+    FIO_ASSERT(s.len == 8 && !FIO_MEMCMP(out, "\xEF\xBF\xBD%uDC0", 8),
+               "url decode truncated pair");
+    free(in);
+  }
+  { /* HTML unescape: truncated entities stay in bounds */
+    static const char *const vec[] = {"&", "&a", "&#", "&#12", "&#x", "&l"};
+    for (size_t i = 0; i < sizeof(vec) / sizeof(vec[0]); ++i) {
+      char out[16];
+      const size_t l = strlen(vec[i]);
+      char *in = test___exact_copy(vec[i], l);
+      fio_str_info_s s = FIO_STR_INFO3(out, 0, 16);
+      fio_string_write_html_unescape(&s, NULL, in, l);
+      FIO_ASSERT(s.len == l && !FIO_MEMCMP(out, vec[i], l + 1),
+                 "truncated HTML entity %zu",
+                 i);
+      free(in);
+    }
+    char *in = test___exact_copy("&lt", 3);
+    char out[32];
+    fio_str_info_s s = FIO_STR_INFO3(out, 0, 32);
+    fio_string_write_html_unescape(&s, NULL, in, 3);
+    FIO_ASSERT(s.len == 1 && out[0] == '<', "HTML entity at end of input");
+    free(in);
+    /* numeric entities without ';' are copied, never under-allocated */
+    char tmp[4095];
+    for (size_t i = 0; i + 5 <= sizeof(tmp); i += 5)
+      FIO_MEMCPY(tmp + i, "&#60 ", 5);
+    char *b = fio_bstr_write_html_unescape(NULL, tmp, sizeof(tmp));
+    FIO_ASSERT(fio_bstr_len(b) == sizeof(tmp) && !FIO_MEMCMP(b, tmp, 4095),
+               "HTML numeric without ';'");
+    fio_bstr_free(b);
+    s = FIO_STR_INFO3(out, 0, 32);
+    fio_string_write_html_unescape(&s, NULL, "&#x1F600;&#xD800;", 17);
+    FIO_ASSERT(s.len == 12 && !FIO_MEMCMP(out, "\xF0\x9F\x98\x80&#xD800;", 12),
+               "HTML numeric range");
+  }
+  { /* utf8_select: INTPTR_MIN must not overflow */
+    intptr_t pos = INTPTR_MIN;
+    size_t len = 1;
+    fio_string_utf8_select(FIO_STR_INFO2((char *)"abc", 3), &pos, &len);
+    FIO_ASSERT(pos == 0 && len == 1, "utf8_select INTPTR_MIN");
+  }
+}
+
 int main(void) {
   test_str_info_macros();
   test_string2primitive();
@@ -1239,5 +1723,6 @@ int main(void) {
   test_string_memory();
   test_string_files();
   test_archive_roundtrips();
+  test_string_security_regressions();
   return 0;
 }

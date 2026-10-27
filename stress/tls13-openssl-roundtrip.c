@@ -670,9 +670,9 @@ static void fio___tls13_openssl_rt_sha384_on_data(fio_io_s *io) {
     fprintf(stderr,
             "SHA-384 embedded client: unexpected acknowledgement %u\n",
             (unsigned)byte);
-    fio_atomic_exchange(&state->sha384_client_failed, 1);
+    fio_atomic_or(&state->sha384_client_failed, 1);
   }
-  fio_atomic_exchange(&state->sha384_client_done, 1);
+  fio_atomic_or(&state->sha384_client_done, 1);
   fio_io_close(io);
 }
 
@@ -686,8 +686,8 @@ static void fio___tls13_openssl_rt_sha384_on_close(void *iobuf, void *udata) {
     /* Closed before the exchange completed (e.g., handshake failure). */
     fprintf(stderr,
             "SHA-384 embedded client: connection closed before exchange\n");
-    fio_atomic_exchange(&state->sha384_client_failed, 1);
-    fio_atomic_exchange(&state->sha384_client_done, 1);
+    fio_atomic_or(&state->sha384_client_failed, 1);
+    fio_atomic_or(&state->sha384_client_done, 1);
   }
 }
 
@@ -698,8 +698,8 @@ static void fio___tls13_openssl_rt_sha384_on_failed(
   fio___tls13_openssl_rt_state_s *state =
       (fio___tls13_openssl_rt_state_s *)udata;
   fprintf(stderr, "SHA-384 embedded client: TCP connect failed\n");
-  fio_atomic_exchange(&state->sha384_client_failed, 1);
-  fio_atomic_exchange(&state->sha384_client_done, 1);
+  fio_atomic_or(&state->sha384_client_failed, 1);
+  fio_atomic_or(&state->sha384_client_done, 1);
 }
 
 /* OpenSSL server thread: TLS_AES_256_GCM_SHA384 only, one-byte echo. */
@@ -777,7 +777,7 @@ cleanup:
   if (fd >= 0)
     close(fd);
   state->openssl_server_failed = failed;
-  fio_atomic_exchange(&state->openssl_server_done, 1);
+  fio_atomic_or(&state->openssl_server_done, 1);
   return NULL;
 }
 
@@ -816,7 +816,7 @@ static void *fio___tls13_openssl_rt_thread(void *ignr_) {
             fio___tls13_openssl_rt_state.openssl_peer_port)) {
       fio___tls13_openssl_rt_state.result = -1;
     } else {
-      fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_server_done,
+      fio_atomic_or(&fio___tls13_openssl_rt_state.sha384_server_done,
                           1);
     }
   }
@@ -836,11 +836,11 @@ static void *fio___tls13_openssl_rt_thread(void *ignr_) {
                     &fio___tls13_openssl_rt_state.sha384_client_done);
     if (!client_done) {
       fprintf(stderr, "SHA-384 embedded-client phase timed out\n");
-      fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_client_failed,
+      fio_atomic_or(&fio___tls13_openssl_rt_state.sha384_client_failed,
                           1);
     }
   }
-  fio_atomic_exchange(&fio___tls13_openssl_rt_state.done, 1);
+  fio_atomic_or(&fio___tls13_openssl_rt_state.done, 1);
   fio_io_stop();
   return NULL;
 }
@@ -865,15 +865,15 @@ static void fio___tls13_openssl_rt_start_client(void *ignr_) {
                      .tls = fio___tls13_openssl_rt_state.client_tls,
                      .timeout = 5000);
   if (!sha384_io) {
-    fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_client_failed, 1);
-    fio_atomic_exchange(&fio___tls13_openssl_rt_state.sha384_client_done, 1);
+    fio_atomic_or(&fio___tls13_openssl_rt_state.sha384_client_failed, 1);
+    fio_atomic_or(&fio___tls13_openssl_rt_state.sha384_client_done, 1);
   }
   if (pthread_create(&fio___tls13_openssl_rt_state.thread,
                      NULL,
                      fio___tls13_openssl_rt_thread,
                      NULL) != 0) {
     fio___tls13_openssl_rt_state.result = -1;
-    fio_atomic_exchange(&fio___tls13_openssl_rt_state.done, 1);
+    fio_atomic_or(&fio___tls13_openssl_rt_state.done, 1);
     fio_io_stop();
   } else {
     fio___tls13_openssl_rt_state.thread_started = 1;
@@ -1055,7 +1055,7 @@ int main(void) {
   if (fio___tls13_openssl_rt_state.thread_started)
     pthread_join(fio___tls13_openssl_rt_state.thread, NULL);
 
-  fio_atomic_exchange(&fio___tls13_openssl_rt_state.openssl_server_abort, 1);
+  fio_atomic_or(&fio___tls13_openssl_rt_state.openssl_server_abort, 1);
   if (fio___tls13_openssl_rt_state.server_thread_started)
     pthread_join(fio___tls13_openssl_rt_state.server_thread, NULL);
   close(fio___tls13_openssl_rt_state.openssl_server_fd);

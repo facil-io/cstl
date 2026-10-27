@@ -92,6 +92,23 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_key_printing)(void) {
                   "Should generate keys when NULL passed");
   OTP_TEST_ASSERT(strcmp(output1, output2) != 0,
                   "Generated OTP keys should be different");
+
+  /* unpadded output fits `len * 2 + 1` bytes and round-trips for any len */
+  for (size_t l = 1; l <= 21; ++l) {
+    uint8_t raw[21];
+    char out[64];
+    for (size_t i = 0; i < l; ++i)
+      raw[i] = (uint8_t)(i * 37 + l);
+    memset(out, 0x7F, sizeof(out));
+    size_t ol = fio_otp_print_key(out, raw, l);
+    OTP_TEST_ASSERT(ol == (l * 8 + 4) / 5 && !out[ol] && out[l * 2 + 1] == 0x7F,
+                    "print_key length / bounds for %zu bytes", l);
+    for (size_t i = 0; i < ol; ++i)
+      OTP_TEST_ASSERT(out[i] != '=', "print_key should not pad");
+    OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO2(out, ol), 59, .is_raw = 0) ==
+                        fio_otp_at(FIO_BUF_INFO2((char *)raw, l), 59, .is_raw = 1),
+                    "print_key output should round-trip (%zu bytes)", l);
+  }
 }
 
 FIO_SFUNC void FIO_NAME_TEST(stl, otp_basic)(void) {
@@ -257,6 +274,131 @@ FIO_SFUNC void FIO_NAME_TEST(stl, otp_google_auth_compat)(void) {
                   "Google Auth compatible OTP should be 6 digits");
 }
 
+FIO_SFUNC void FIO_NAME_TEST(stl, otp_errors)(void) {
+  fio_buf_info_s rfc =
+      FIO_BUF_INFO2((char *)rfc6238_secret, rfc6238_secret_len);
+  /* 10 digits: full 31 bit truncated value (RFC 4226 counter 1) */
+  OTP_TEST_ASSERT(fio_otp_at(rfc, 59, .is_raw = 1, .digits = 10) ==
+                      1094287082UL,
+                  "10-digit OTP should be the full truncated value");
+  for (size_t d = 11; d < 70; d += 29)
+    OTP_TEST_ASSERT(fio_otp_at(rfc, 59, .is_raw = 1, .digits = d) ==
+                        FIO_OTP_ERROR,
+                    "%zu digits should be rejected", d);
+  OTP_TEST_ASSERT(fio_otp_at(rfc, 59, .is_raw = 1, .digits = SIZE_MAX) ==
+                      FIO_OTP_ERROR,
+                  "SIZE_MAX digits should be rejected");
+  /* extreme offsets wrap (defined), never crash */
+  (void)fio_otp_at(rfc, 59, .is_raw = 1, .offset = INT64_MIN);
+  (void)fio_otp_at(rfc, 59, .is_raw = 1, .offset = INT64_MAX,
+                   .interval = SIZE_MAX);
+
+  /* RFC 2104: keys longer than 64 bytes are replaced by SHA1(key) */
+  {
+    char long_key[100];
+    for (size_t i = 0; i < sizeof(long_key); ++i)
+      long_key[i] = (char)i;
+    fio_sha1_s h = fio_sha1(long_key, sizeof(long_key));
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO2(long_key, sizeof(long_key)), 59, .is_raw = 1) ==
+            fio_otp_at(FIO_BUF_INFO2((char *)fio_sha1_digest(&h), 20),
+                       59,
+                       .is_raw = 1),
+        "long raw keys should follow RFC 2104 HMAC key hashing");
+    char hex[2 * sizeof(long_key) + 1];
+    for (size_t i = 0; i < sizeof(long_key); ++i) {
+      hex[i * 2] = "0123456789ABCDEF"[(uint8_t)long_key[i] >> 4];
+      hex[i * 2 + 1] = "0123456789ABCDEF"[(uint8_t)long_key[i] & 15];
+    }
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO2(hex, sizeof(long_key) * 2), 59, .is_hex = 1) ==
+            fio_otp_at(FIO_BUF_INFO2(long_key, sizeof(long_key)),
+                       59,
+                       .is_raw = 1),
+        "long hex keys should match raw keys");
+  }
+
+  /* malformed hex is rejected, not aliased ("0G" != "10") */
+  OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO1((char *)"0G"), 59, .is_hex = 1) ==
+                      FIO_OTP_ERROR,
+                  "invalid hex digits should be rejected");
+  {
+    char hex[258];
+    memset(hex, 'A', sizeof(hex));
+    OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO2(hex, 256), 59, .is_hex = 1) !=
+                        FIO_OTP_ERROR,
+                    "256 hex nibbles (128 bytes) should be accepted");
+    OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO2(hex, 257), 59, .is_hex = 1) ==
+                        FIO_OTP_ERROR,
+                    "hex keys over 128 bytes should be rejected");
+  }
+
+  /* Base32: junk suffix rejected, padding / whitespace / lower case fine */
+  {
+    uint32_t ok = fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DPEHPK3PXP"), 59, .is_hex = 0);
+    OTP_TEST_ASSERT(ok != FIO_OTP_ERROR, "valid Base32 should be accepted");
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO1((char *)"jbsw y3dp ehpk 3pxp\n"), 59, .is_hex = 0) == ok,
+        "lower case / whitespace Base32 should be accepted");
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DPEHPK3PXP!"), 59, .is_hex = 0) ==
+            FIO_OTP_ERROR,
+        "Base32 with a junk suffix should be rejected");
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DP=EHPK3PXP"), 59, .is_hex = 0) ==
+            FIO_OTP_ERROR,
+        "Base32 data after padding should be rejected");
+    OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DPEE======"), 59, .is_hex = 0) !=
+                        FIO_OTP_ERROR,
+                    "padded Base32 should be accepted");
+    /* lenient: separators, extra / missing padding, trailing bits */
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO1((char *)"JBSW-Y3DP\vEHPK:3PXP\f=="), 59, .is_hex = 0) ==
+            ok,
+        "Base32 separators and extra padding should be ignored");
+    uint32_t ee = fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DPEE"), 59, .is_hex = 0);
+    OTP_TEST_ASSERT(
+        ee != FIO_OTP_ERROR &&
+            fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DPEE======"), 59, .is_hex = 0) == ee &&
+            fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DPEF="), 59, .is_hex = 0) == ee,
+        "Base32 padding is optional and trailing bits are ignored");
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO1((char *)"========"), 59, .is_hex = 0) ==
+            fio_otp_at(FIO_BUF_INFO2(NULL, 0), 59, .is_raw = 1),
+        "padding-only Base32 should be an empty key");
+    OTP_TEST_ASSERT(
+        fio_otp_at(FIO_BUF_INFO1((char *)"JBSWY3DP_EHPK3PXP"), 59, .is_hex = 0) ==
+            FIO_OTP_ERROR,
+        "non-Base32 characters should be rejected");
+    char b32[207];
+    memset(b32, 'A', sizeof(b32));
+    OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO2(b32, 205), 59, .is_hex = 0) !=
+                        FIO_OTP_ERROR,
+                    "205 Base32 chars (128 bytes) should be accepted");
+    OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO2(b32, 207), 59, .is_hex = 0) ==
+                        FIO_OTP_ERROR,
+                    "Base32 keys over 128 bytes should be rejected");
+  }
+  OTP_TEST_ASSERT(
+      fio_otp_at(FIO_BUF_INFO1((char *)"de:ad\tbe-ef"), 59, .is_hex = 1) ==
+          fio_otp_at(FIO_BUF_INFO1((char *)"DEADBEEF"), 59, .is_hex = 1),
+      "Hex separators / lower case should be accepted");
+  OTP_TEST_ASSERT(fio_otp_at(FIO_BUF_INFO2(NULL, 4), 59, .is_raw = 1) ==
+                      FIO_OTP_ERROR,
+                  "NULL secret with a length should be rejected");
+
+  /* generated keys need 33 bytes regardless of `len` */
+  {
+    char dest[40];
+    memset(dest, 0x7F, sizeof(dest));
+    size_t len = fio_otp_print_key(dest, NULL, 0);
+    OTP_TEST_ASSERT(len > 0 && len < 33 && !dest[len] && dest[33] == 0x7F,
+                    "generated key should fit 33 bytes");
+    OTP_TEST_ASSERT(fio_otp_print_key(NULL, NULL, 0) == 0,
+                    "NULL destination should fail");
+  }
+}
+
 int main(void) {
   FIO_NAME_TEST(stl, otp_key_generation)();
   FIO_NAME_TEST(stl, otp_key_printing)();
@@ -270,5 +412,6 @@ int main(void) {
   FIO_NAME_TEST(stl, otp_rfc6238)();
   FIO_NAME_TEST(stl, otp_rfc4226)();
   FIO_NAME_TEST(stl, otp_google_auth_compat)();
+  FIO_NAME_TEST(stl, otp_errors)();
   return (int)OTP_TEST_RESULTS.failed;
 }

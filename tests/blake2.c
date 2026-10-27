@@ -126,6 +126,65 @@ static void fio___test_blake2_streaming(void) {
     FIO_ASSERT(!FIO_MEMCMP(out1, out2, 32),
                "BLAKE2s byte-by-byte streaming mismatch");
   }
+
+  /* Every two-part split around block boundaries (keyed and unkeyed) must
+   * match the one-shot digest (regression: an exactly filled buffered block
+   * was compressed as non-final, adding an extra empty final block). */
+  {
+    uint8_t buf[257], key[64];
+    for (size_t i = 0; i < sizeof(buf); ++i)
+      buf[i] = (uint8_t)(i * 7 + 1);
+    for (size_t i = 0; i < sizeof(key); ++i)
+      key[i] = (uint8_t)i;
+    static const size_t lens[] = {63, 64, 65, 127, 128, 129, 192, 256, 257};
+    for (size_t keyed = 0; keyed < 2; ++keyed) {
+      for (size_t l = 0; l < sizeof(lens) / sizeof(lens[0]); ++l) {
+        size_t n = lens[l];
+        uint8_t ob[64], os[32];
+        fio_blake2b_hash(ob, 64, buf, n, keyed ? key : NULL, keyed ? 64 : 0);
+        fio_blake2s_hash(os, 32, buf, n, keyed ? key : NULL, keyed ? 32 : 0);
+        for (size_t s = 0; s <= n; ++s) {
+          fio_blake2b_s hb =
+              fio_blake2b_init(64, keyed ? key : NULL, keyed ? 64 : 0);
+          fio_blake2b_consume(&hb, buf, s);
+          fio_blake2b_consume(&hb, buf + s, n - s);
+          fio_u512 rb = fio_blake2b_finalize(&hb);
+          FIO_ASSERT(!FIO_MEMCMP(ob, rb.u8, 64),
+                     "BLAKE2b split streaming mismatch (len %zu, split %zu, "
+                     "keyed %zu)",
+                     n,
+                     s,
+                     keyed);
+          fio_blake2s_s hs =
+              fio_blake2s_init(32, keyed ? key : NULL, keyed ? 32 : 0);
+          fio_blake2s_consume(&hs, buf, s);
+          fio_blake2s_consume(&hs, buf + s, n - s);
+          fio_u256 rs = fio_blake2s_finalize(&hs);
+          FIO_ASSERT(!FIO_MEMCMP(os, rs.u8, 32),
+                     "BLAKE2s split streaming mismatch (len %zu, split %zu, "
+                     "keyed %zu)",
+                     n,
+                     s,
+                     keyed);
+        }
+      }
+    }
+  }
+
+  /* Finalize wipes the context (key material / state). */
+  {
+    uint8_t key[64] = {1, 2, 3, 4, 5, 6, 7, 8};
+    fio_blake2b_s hb = fio_blake2b_init(64, key, 64);
+    fio_blake2s_s hs = fio_blake2s_init(32, key, 32);
+    (void)fio_blake2b_finalize(&hb);
+    (void)fio_blake2s_finalize(&hs);
+    static const fio_blake2b_s zb;
+    static const fio_blake2s_s zs;
+    FIO_ASSERT(!FIO_MEMCMP(&hb, &zb, sizeof(hb)),
+               "BLAKE2b finalize didn't wipe context");
+    FIO_ASSERT(!FIO_MEMCMP(&hs, &zs, sizeof(hs)),
+               "BLAKE2s finalize didn't wipe context");
+  }
 }
 
 /* *****************************************************************************
@@ -403,6 +462,95 @@ static void fio___test_blake2_edge_cases(void) {
     fio_blake2b_hash(out2, 64, data, 4, (const uint8_t *)"", 0);
     FIO_ASSERT(!FIO_MEMCMP(out1, out2, 64),
                "BLAKE2b empty key differs from NULL key");
+  }
+
+  /* One-shot writes exactly `outlen` bytes and matches the streaming API
+   * (the one-shot wipes its stack digest copy after the output copy). */
+  {
+    static const uint8_t data[] = "test";
+    static const uint8_t key[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9};
+    uint8_t ob[21], os[21];
+    FIO_MEMSET(ob, 0xAA, sizeof(ob));
+    FIO_MEMSET(os, 0xAA, sizeof(os));
+    fio_blake2b_hash(ob, 20, data, 4, key, 16);
+    fio_blake2s_hash(os, 20, data, 4, key, 16);
+    FIO_ASSERT(ob[20] == 0xAA && os[20] == 0xAA,
+               "BLAKE2 one-shot wrote past outlen");
+    fio_blake2b_s hb = fio_blake2b_init(20, key, 16);
+    fio_blake2b_consume(&hb, data, 4);
+    fio_u512 rb = fio_blake2b_finalize(&hb);
+    fio_blake2s_s hs = fio_blake2s_init(20, key, 16);
+    fio_blake2s_consume(&hs, data, 4);
+    fio_u256 rs = fio_blake2s_finalize(&hs);
+    FIO_ASSERT(!FIO_MEMCMP(ob, rb.u8, 20) && !FIO_MEMCMP(os, rs.u8, 20),
+               "BLAKE2 one-shot differs from streaming result");
+  }
+
+  /* NULL key with nonzero keylen is the standard unkeyed digest. */
+  {
+    static const uint8_t data[] = "test";
+    uint8_t b1[64], b2[64], s1[32], s2[32];
+    fio_blake2b_hash(b1, 64, data, 4, NULL, 0);
+    fio_blake2b_hash(b2, 64, data, 4, NULL, 32);
+    fio_blake2s_hash(s1, 32, data, 4, NULL, 0);
+    fio_blake2s_hash(s2, 32, data, 4, NULL, 16);
+    FIO_ASSERT(!FIO_MEMCMP(b1, b2, 64) && !FIO_MEMCMP(s1, s2, 32),
+               "BLAKE2 NULL key with keylen should be unkeyed");
+    fio_blake2b_s hb = fio_blake2b_init(64, NULL, 64);
+    fio_blake2b_consume(&hb, data, 4);
+    fio_u512 rb = fio_blake2b_finalize(&hb);
+    fio_blake2s_s hs = fio_blake2s_init(32, NULL, 32);
+    fio_blake2s_consume(&hs, data, 4);
+    fio_u256 rs = fio_blake2s_finalize(&hs);
+    FIO_ASSERT(!FIO_MEMCMP(b1, rb.u8, 64) && !FIO_MEMCMP(s1, rs.u8, 32),
+               "BLAKE2 init: NULL key with keylen should be unkeyed");
+  }
+
+  /* Long keys are pre-hashed (never truncated); init_at == init. */
+  {
+    static const uint8_t data[] = "test";
+    uint8_t k1[100], k2[100];
+    FIO_MEMSET(k1, 0x5A, sizeof(k1));
+    FIO_MEMSET(k2, 0x5A, sizeof(k2));
+    k2[99] ^= 1; /* same 64/32-byte prefix */
+    uint8_t b1[64], b2[64], bh[64], s1[32], s2[32], sh[32];
+    /* BLAKE2b: 65-byte and 100-byte keys */
+    for (size_t kl = 65; kl <= 100; kl += 35) {
+      fio_blake2b_hash(b1, 64, data, 4, k1, kl);
+      fio_blake2b_hash(b2, 64, data, 4, k2, kl);
+      fio_u512 hk = fio_blake2b(k1, kl);
+      fio_blake2b_hash(bh, 64, data, 4, hk.u8, 64);
+      FIO_ASSERT(!FIO_MEMCMP(b1, bh, 64),
+                 "BLAKE2b long key should equal BLAKE2b-512(key) as key");
+      FIO_ASSERT(kl < 100 || FIO_MEMCMP(b1, b2, 64),
+                 "BLAKE2b long keys sharing a prefix collided");
+      fio_blake2b_s ha;
+      fio_blake2b_init_at(&ha, 64, k1, kl);
+      fio_blake2b_consume(&ha, data, 4);
+      fio_u512 ra = fio_blake2b_finalize(&ha);
+      FIO_ASSERT(!FIO_MEMCMP(b1, ra.u8, 64), "BLAKE2b init_at mismatch");
+    }
+    /* BLAKE2s: 33-byte and 100-byte keys */
+    for (size_t kl = 33; kl <= 100; kl += 67) {
+      fio_blake2s_hash(s1, 32, data, 4, k1, kl);
+      fio_blake2s_hash(s2, 32, data, 4, k2, kl);
+      fio_u256 hk = fio_blake2s(k1, kl);
+      fio_blake2s_hash(sh, 32, data, 4, hk.u8, 32);
+      FIO_ASSERT(!FIO_MEMCMP(s1, sh, 32),
+                 "BLAKE2s long key should equal BLAKE2s-256(key) as key");
+      FIO_ASSERT(kl < 100 || FIO_MEMCMP(s1, s2, 32),
+                 "BLAKE2s long keys sharing a prefix collided");
+      fio_blake2s_s ha;
+      fio_blake2s_init_at(&ha, 32, k1, kl);
+      fio_blake2s_consume(&ha, data, 4);
+      fio_u256 ra = fio_blake2s_finalize(&ha);
+      FIO_ASSERT(!FIO_MEMCMP(s1, ra.u8, 32), "BLAKE2s init_at mismatch");
+    }
+    /* Max standard key length is unchanged (not pre-hashed). */
+    fio_blake2b_hash(b1, 64, data, 4, k1, 64);
+    fio_u512 hk = fio_blake2b(k1, 64);
+    fio_blake2b_hash(bh, 64, data, 4, hk.u8, 64);
+    FIO_ASSERT(FIO_MEMCMP(b1, bh, 64), "BLAKE2b 64-byte key was pre-hashed");
   }
 
   /* Block-boundary inputs. */

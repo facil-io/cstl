@@ -452,8 +452,13 @@ FIOBJ Strings
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                          new_cstr)(const char *ptr, size_t len) {
   FIOBJ s = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
-  FIO_ASSERT_ALLOC(FIOBJ_PTR_UNTAG(s));
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(s, ptr, len);
+  if (!s)
+    return FIOBJ_INVALID;
+  if (FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(s, ptr, len).len !=
+      len) {
+    fiobj_free(s);
+    return FIOBJ_INVALID;
+  }
   return s;
 }
 
@@ -461,8 +466,14 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                          new_buf)(size_t capa) {
   FIOBJ s = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
-  FIO_ASSERT_ALLOC(FIOBJ_PTR_UNTAG(s));
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), reserve)(s, capa);
+  if (!s)
+    return FIOBJ_INVALID;
+  if (capa >= 0x7FFFFFFFULL ||
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), reserve)(s, capa).capa <=
+          capa) {
+    fiobj_free(s);
+    return FIOBJ_INVALID;
+  }
   return s;
 }
 
@@ -470,9 +481,14 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
 FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
                          new_copy)(FIOBJ original) {
   FIOBJ s = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
-  FIO_ASSERT_ALLOC(FIOBJ_PTR_UNTAG(s));
+  if (!s)
+    return FIOBJ_INVALID;
   fio_str_info_s i = FIO_NAME2(fiobj, cstr)(original);
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(s, i.buf, i.len);
+  if (FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(s, i.buf, i.len)
+          .len != i.len) {
+    fiobj_free(s);
+    return FIOBJ_INVALID;
+  }
   return s;
 }
 
@@ -644,16 +660,19 @@ FIOBJ JSON support
  * Returns a JSON valid FIOBJ String, representing the object.
  *
  * If `dest` is an existing String, the formatted JSON data will be appended to
- * the existing string.
+ * the existing string. Returns FIOBJ_INVALID on allocation failure; an existing
+ * destination keeps its original length. Bytes past that length are
+ * unspecified.
  */
 FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify);
 
 /**
  * Updates a Hash using JSON data (the JSON root must be an object).
  *
- * Nested objects merge into existing Hash members and nested arrays append to
- * existing Array members; any other conflicting value is overwritten
- * (preferring the new over the old).
+ * With FIOBJ_JSON_APPEND enabled, nested objects merge into existing Hash
+ * members and nested arrays append to existing Array members. Otherwise nested
+ * containers replace existing members. Other conflicting values are
+ * overwritten.
  *
  * On a parsing error, members merged before the error remain in the Hash. A
  * non-object root changes nothing.
@@ -715,8 +734,8 @@ FIOBJ Mustache support
 /**
  * Builds a Mustache template using a FIOBJ context (usually a Hash).
  *
- * Returns a FIOBJ String with the rendered template. May return `FIOBJ_INVALID`
- * if nothing was written.
+ * Returns a FIOBJ String with the rendered template. Returns FIOBJ_INVALID
+ * if nothing was written or allocation fails.
  */
 FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx);
 
@@ -725,8 +744,10 @@ FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx);
  *
  * Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
  *
- * Returns `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was
- * written and `dest` was empty.
+ * Returns `dest` (or a new String). Returns `FIOBJ_INVALID` on allocation
+ * failure; a caller-owned destination retains its original length (bytes past
+ * that length are unspecified). An empty result returns `dest` if supplied,
+ * or `FIOBJ_INVALID` otherwise.
  */
 FIO_IFUNC FIOBJ fiobj_mustache_build2(fio_mustache_s *m, FIOBJ dest, FIOBJ ctx);
 
@@ -813,7 +834,12 @@ FIO_IFUNC void fiobj_free(FIOBJ o) {
   case FIOBJ_T_HASH:
     FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), free)(o);
     return;
-  case FIOBJ_T_OTHER: (*fiobj_object_metadata(o))->free2(o); return;
+  case FIOBJ_T_OTHER:
+    if ((*fiobj_object_metadata(o))->free2)
+      (*fiobj_object_metadata(o))->free2(o);
+    else if ((*fiobj_object_metadata(o)) == &FIOBJ___OBJECT_CLASS_VTBL)
+      fiobj_object_free(o);
+    return;
   }
 }
 
@@ -841,6 +867,9 @@ FIO_IFUNC unsigned char FIO_NAME_BL(fiobj, eq)(FIOBJ a, FIOBJ b) {
   case FIOBJ_T_ARRAY: return fiobj___test_eq_nested(a, b, 0);
   case FIOBJ_T_HASH: return fiobj___test_eq_nested(a, b, 0);
   case FIOBJ_T_OTHER:
+    if ((*fiobj_object_metadata(a))->type_id !=
+        (*fiobj_object_metadata(b))->type_id)
+      return 0;
     if ((*fiobj_object_metadata(a))->count(a) ||
         (*fiobj_object_metadata(b))->count(b)) {
       if ((*fiobj_object_metadata(a))->count(a) !=
@@ -901,7 +930,17 @@ FIO_IFUNC intptr_t FIO_NAME2(fiobj, i)(FIOBJ o) {
     tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(o);
     if (!tmp.len)
       return 0;
-    return fio_atol(&tmp.buf);
+    {
+      char stack[128];
+      fio_str_info_s copy = FIO_STR_INFO3(stack, 0, sizeof(stack));
+      if (fio_string_write(&copy, FIO_STRING_ALLOC_COPY, tmp.buf, tmp.len))
+        return 0;
+      char *p = copy.buf;
+      intptr_t result = fio_atol(&p);
+      if (copy.buf != stack)
+        FIO_STRING_FREE2(copy);
+      return result;
+    }
   case FIOBJ_T_ARRAY:
     return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
   case FIOBJ_T_HASH:
@@ -932,7 +971,17 @@ FIO_IFUNC double FIO_NAME2(fiobj, f)(FIOBJ o) {
     tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(o);
     if (!tmp.len)
       return 0;
-    return (double)fio_atof(&tmp.buf);
+    {
+      char stack[128];
+      fio_str_info_s copy = FIO_STR_INFO3(stack, 0, sizeof(stack));
+      if (fio_string_write(&copy, FIO_STRING_ALLOC_COPY, tmp.buf, tmp.len))
+        return 0;
+      char *p = copy.buf;
+      double result = (double)fio_atof(&p);
+      if (copy.buf != stack)
+        FIO_STRING_FREE2(copy);
+      return result;
+    }
   case FIOBJ_T_ARRAY:
     return (double)FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
   case FIOBJ_T_HASH:
@@ -986,7 +1035,8 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER),
   if (FIO_NUMBER_DECODE(o) == i)
     return o;
   o = fiobj___bignum_new2();
-
+  if (!o)
+    return FIOBJ_INVALID;
   FIO_PTR_MATH_RMASK(intptr_t, o, 3)[0] = i;
   return o;
 }
@@ -1064,14 +1114,23 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), new)(double i) {
     }
   }
   ui = fiobj___bigfloat_new2();
-
+  if (!ui)
+    return FIOBJ_INVALID;
   FIO_PTR_MATH_RMASK(double, ui, 3)[0] = i;
   return ui;
 }
 
 /** Reads the integer part from a FIOBJ Float. */
 FIO_IFUNC intptr_t FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), i)(FIOBJ i) {
-  return (intptr_t)floor(FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i));
+  double value = floor(FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(i));
+  /* Saturate non-finite and out-of-range values before the integer cast. */
+  if (isnan(value))
+    return 0;
+  if (value >= -((double)INTPTR_MIN))
+    return INTPTR_MAX;
+  if (value <= (double)INTPTR_MIN)
+    return INTPTR_MIN;
+  return (intptr_t)value;
 }
 
 /** Reads the number from a FIOBJ number, fitting it in a double. */
@@ -1240,29 +1299,65 @@ FIOBJ Basic Iteration
  *
  * Returns the "stop" position - the number of elements processed + `start_at`.
  */
+typedef struct {
+  int (*task)(fiobj_each_s *);
+  void *udata;
+} fiobj___each_adapter_s;
+
+FIO_SFUNC int fiobj___each_array_adapter(
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each_s) * e) {
+  fiobj___each_adapter_s *state = (fiobj___each_adapter_s *)e->udata;
+  fiobj_each_s info = {.parent = e->parent,
+                       .index = e->index,
+                       .task = state->task,
+                       .udata = state->udata,
+                       .value = e->value,
+                       .key = FIOBJ_INVALID};
+  int result = info.task(&info);
+  state->task = info.task;
+  state->udata = info.udata;
+  e->index = info.index;
+  return result;
+}
+
+FIO_SFUNC int fiobj___each_hash_adapter(
+    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each_s) * e) {
+  fiobj___each_adapter_s *state = (fiobj___each_adapter_s *)e->udata;
+  fiobj_each_s info = {.parent = e->parent,
+                       .index = e->index,
+                       .task = state->task,
+                       .udata = state->udata,
+                       .value = e->value,
+                       .key = e->key};
+  int result = info.task(&info);
+  state->task = info.task;
+  state->udata = info.udata;
+  e->index = info.index;
+  return result;
+}
+
 FIO_SFUNC uint32_t fiobj_each1(FIOBJ o,
                                int (*task)(fiobj_each_s *e),
                                void *udata,
                                int32_t start_at) {
+  fiobj___each_adapter_s state = {.task = task, .udata = udata};
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE: /* fall through */
   case FIOBJ_T_NUMBER:    /* fall through */
   case FIOBJ_T_STRING:    /* fall through */
   case FIOBJ_T_FLOAT: return 0;
   case FIOBJ_T_ARRAY:
-    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each)(
-        o,
-        (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), each_s *)))task,
-        udata,
-        start_at);
+    return FIO_NAME(
+        FIO_NAME(fiobj, FIOBJ___NAME_ARRAY),
+        each)(o, task ? fiobj___each_array_adapter : NULL, &state, start_at);
   case FIOBJ_T_HASH:
-    return FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each)(
-        o,
-        (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each_s *)))task,
-        udata,
-        start_at);
+    return FIO_NAME(
+        FIO_NAME(fiobj, FIOBJ___NAME_HASH),
+        each)(o, task ? fiobj___each_hash_adapter : NULL, &state, start_at);
   case FIOBJ_T_OTHER:
-    return (*fiobj_object_metadata(o))->each1(o, task, udata, start_at);
+    return (*fiobj_object_metadata(o))->each1
+               ? (*fiobj_object_metadata(o))->each1(o, task, udata, start_at)
+               : 0;
   }
   return 0;
 }
@@ -1272,7 +1367,11 @@ FIOBJ Hash Maps
 ***************************************************************************** */
 
 /** Calculates an object's hash value for a specific hash map object. */
-FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ o) {
+FIO_IFUNC uint64_t fiobj___hash_bounded(FIOBJ o, size_t depth) {
+  /* Match equality's depth boundary: descendants beyond this point are
+   * intentionally ignored. */
+  if (depth >= FIOBJ_MAX_NESTING)
+    return 0;
   uint64_t seed = (uint64_t)(uintptr_t)&FIO_NAME2(fiobj, hash);
   switch (FIOBJ_TYPE_CLASS(o)) {
   case FIOBJ_T_PRIMITIVE:
@@ -1296,7 +1395,7 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ o) {
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
       if (a) {
         for (size_t i = 0; i < count; ++i) {
-          h += FIO_NAME2(fiobj, hash)(a[i]);
+          h += fiobj___hash_bounded(a[i], depth + 1);
         }
       }
     }
@@ -1307,17 +1406,24 @@ FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ o) {
     h += fio_risky_hash(&h, sizeof(h), seed + FIOBJ_T_HASH);
     FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, i) {
       h += i.hash;
-      h += FIO_NAME2(fiobj, hash)(i.value);
+      h += fiobj___hash_bounded(i.value, depth + 1);
     }
     return h;
   }
   case FIOBJ_T_OTHER: {
+    if ((*fiobj_object_metadata(o))->type_id == FIOBJ_T_FLOAT) {
+      double tmp = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(o);
+      return fio_risky_hash(&tmp, sizeof(tmp), seed);
+    }
     /* TODO: can we avoid "stringifying" the object? */
     fio_str_info_s tmp = (*fiobj_object_metadata(o))->to_s(o);
     return fio_risky_hash(tmp.buf, tmp.len, seed);
   }
   }
   return 0;
+}
+FIO_IFUNC uint64_t FIO_NAME2(fiobj, hash)(FIOBJ o) {
+  return fiobj___hash_bounded(o, 0);
 }
 
 /**
@@ -1330,7 +1436,13 @@ FIO_IFUNC FIOBJ FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
                                size_t len,
                                FIOBJ value) {
   FIOBJ tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(tmp, (char *)key, len);
+  if (!tmp ||
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(tmp, key, len)
+              .len != len) {
+    fiobj_free(tmp);
+    fiobj_free(value); /* set2 consumes the value on every path. */
+    return FIOBJ_INVALID;
+  }
   FIOBJ v =
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), set)(hash, tmp, value, NULL);
   fiobj_free(tmp);
@@ -1369,10 +1481,10 @@ FIO_IFUNC int FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
 FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
                                                                     FIOBJ src) {
   if (FIOBJ_TYPE_CLASS(dest) != FIOBJ_T_HASH ||
-      FIOBJ_TYPE_CLASS(src) != FIOBJ_T_HASH)
+      FIOBJ_TYPE_CLASS(src) != FIOBJ_T_HASH || dest == src)
     return;
   FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), src, i) {
-    if (i.key == FIOBJ_INVALID || FIOBJ_TYPE_CLASS(i.key) == FIOBJ_T_NULL) {
+    if (i.value == FIOBJ_INVALID || FIOBJ_TYPE_CLASS(i.value) == FIOBJ_T_NULL) {
       FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), remove)(dest, i.key, NULL);
       continue;
     }
@@ -1382,6 +1494,8 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
       /* TODO? decide if we should merge elements or overwrite...? */
       tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(dest, i.key);
       if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_ARRAY) {
+        if (tmp == i.value)
+          continue;
         FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), concat)
         (tmp, i.value);
         continue;
@@ -1389,11 +1503,12 @@ FIO_IFUNC void FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(FIOBJ dest,
       break;
     case FIOBJ_T_HASH:
       tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), get)(dest, i.key);
-      if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_HASH)
-        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)
-      (dest, i.value);
-      else break;
-      continue;
+      if (FIOBJ_TYPE_CLASS(tmp) == FIOBJ_T_HASH) {
+        if (tmp != i.value)
+          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), update)(tmp, i.value);
+        continue;
+      }
+      break;
     case FIOBJ_T_NUMBER:    /* fall through */
     case FIOBJ_T_PRIMITIVE: /* fall through */
     case FIOBJ_T_STRING:    /* fall through */
@@ -1413,7 +1528,32 @@ typedef struct {
   FIOBJ json;
   size_t level;
   uint8_t beautify;
+  uint8_t failed;
 } fiobj___json_format_internal__s;
+
+/* Stage only if the output is reachable from input (or a cycle / depth limit
+ * prevents proving otherwise); writes could invalidate borrowed string views.
+ */
+FIO_IFUNC int fiobj___render_alias(FIOBJ input, FIOBJ dest, size_t depth) {
+  if (input == dest)
+    return 1;
+  if (depth >= FIOBJ_MAX_NESTING || FIOBJ_TYPE_CLASS(input) == FIOBJ_T_OTHER)
+    return 1; /* Custom objects can expose destination through to_s / var2str.
+               */
+  if (FIOBJ_TYPE_CLASS(input) == FIOBJ_T_ARRAY) {
+    uint32_t len = fiobj_array_count(input);
+    for (uint32_t i = 0; i < len; ++i)
+      if (fiobj___render_alias(fiobj_array_get(input, i), dest, depth + 1))
+        return 1;
+  } else if (FIOBJ_TYPE_CLASS(input) == FIOBJ_T_HASH) {
+    FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), input, pair) {
+      if (fiobj___render_alias(pair.key, dest, depth + 1) ||
+          fiobj___render_alias(pair.value, dest, depth + 1))
+        return 1;
+    }
+  }
+  return 0;
+}
 
 /* internal helper function for recursive JSON formatting. */
 SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *,
@@ -1430,15 +1570,40 @@ FIO_IFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
  * Returns a JSON valid FIOBJ String, representing the object.
  *
  * If `dest` is an existing String, the formatted JSON data will be appended to
- * the existing string.
+ * the existing string. Returns FIOBJ_INVALID on allocation failure; an existing
+ * destination keeps its original length. Bytes past that length are
+ * unspecified.
  */
 FIO_IFUNC FIOBJ FIO_NAME2(fiobj, json)(FIOBJ dest, FIOBJ o, uint8_t beautify) {
+  int has_dest = FIOBJ_TYPE_CLASS(dest) == FIOBJ_T_STRING;
+  int staged = has_dest && fiobj___render_alias(o, dest, 0);
+  FIOBJ output = (!has_dest || staged) ? fiobj_str_new() : dest;
+  if (!output)
+    return FIOBJ_INVALID;
+  size_t before = fiobj_str_info(output).len;
   fiobj___json_format_internal__s args =
-      (fiobj___json_format_internal__s){.json = dest, .beautify = beautify};
-  if (FIOBJ_TYPE_CLASS(dest) != FIOBJ_T_STRING)
-    args.json = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), new)();
+      (fiobj___json_format_internal__s){.json = output, .beautify = beautify};
   fiobj___json_format_internal__(&args, o);
-  return args.json;
+  if (args.failed) {
+    if (output == dest)
+      fiobj_str_resize(dest, before);
+    else
+      fiobj_free(output);
+    return FIOBJ_INVALID;
+  }
+  if (!staged)
+    return output;
+  fio_str_info_s info =
+      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), info)(output);
+  size_t dest_before = fiobj_str_info(dest).len;
+  fio_str_info_s appended = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
+                                     write)(dest, info.buf, info.len);
+  fiobj_free(output);
+  if (info.len <= SIZE_MAX - dest_before &&
+      appended.len == dest_before + info.len)
+    return dest;
+  fiobj_str_resize(dest, dest_before);
+  return FIOBJ_INVALID;
 }
 
 #undef FIO___RECURSIVE_INCLUDE /* from now on, type helpers are internal */
@@ -1466,21 +1631,31 @@ FIO_SFUNC int fiobj___mustache_var_is_truthful(void *ctx);
 /**
  * Builds a Mustache template using a FIOBJ context (usually a Hash).
  *
- * Returns a FIOBJ String with the rendered template. May return `FIOBJ_INVALID`
- * if nothing was written.
+ * Returns a FIOBJ String with the rendered template. Returns FIOBJ_INVALID
+ * if nothing was written or allocation fails.
  */
+typedef struct {
+  FIOBJ output;
+  uint8_t failed;
+} fiobj___mustache_output_s;
+
 FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx) {
-  return (FIOBJ)fio_mustache_build(
-      m,
-      .write_text = fiobj___mustache_write_text,
-      .write_text_escaped = fiobj___mustache_write_text_escaped,
-      .get_var = fiobj___mustache_get_var,
-      .array_length = fiobj___mustache_array_length,
-      .get_var_index = fiobj___mustache_get_var_index,
-      .var2str = fiobj___mustache_var2str,
-      .var_is_truthful = fiobj___mustache_var_is_truthful,
-      .ctx = ctx,
-      .udata = NULL);
+  fiobj___mustache_output_s state = {0};
+  fio_mustache_build(m,
+                     .write_text = fiobj___mustache_write_text,
+                     .write_text_escaped = fiobj___mustache_write_text_escaped,
+                     .get_var = fiobj___mustache_get_var,
+                     .array_length = fiobj___mustache_array_length,
+                     .get_var_index = fiobj___mustache_get_var_index,
+                     .var2str = fiobj___mustache_var2str,
+                     .var_is_truthful = fiobj___mustache_var_is_truthful,
+                     .ctx = ctx,
+                     .udata = &state);
+  if (state.failed) {
+    fiobj_free(state.output);
+    return FIOBJ_INVALID;
+  }
+  return state.output;
 }
 
 /**
@@ -1488,42 +1663,94 @@ FIO_IFUNC FIOBJ fiobj_mustache_build(fio_mustache_s *m, FIOBJ ctx) {
  *
  * Writes output to `dest` string (may be `FIOBJ_INVALID` / `NULL`).
  *
- * Returns `dest` (or a new String). May return `FIOBJ_INVALID` if nothing was
- * written and `dest` was empty.
+ * Returns `dest` (or a new String). Returns `FIOBJ_INVALID` on allocation
+ * failure; a caller-owned destination retains its original length (bytes past
+ * that length are unspecified). An empty result returns `dest` if supplied,
+ * or `FIOBJ_INVALID` otherwise.
  */
 FIO_IFUNC FIOBJ fiobj_mustache_build2(fio_mustache_s *m,
                                       FIOBJ dest,
                                       FIOBJ ctx) {
-  dest = (FIOBJ)fio_mustache_build(
-      m,
-      .write_text = fiobj___mustache_write_text,
-      .write_text_escaped = fiobj___mustache_write_text_escaped,
-      .get_var = fiobj___mustache_get_var,
-      .array_length = fiobj___mustache_array_length,
-      .get_var_index = fiobj___mustache_get_var_index,
-      .var2str = fiobj___mustache_var2str,
-      .var_is_truthful = fiobj___mustache_var_is_truthful,
-      .ctx = ctx,
-      .udata = dest);
-  return dest;
+  /* Render directly unless the context can reference the destination. */
+  int has_dest = FIOBJ_TYPE_CLASS(dest) == FIOBJ_T_STRING;
+  int staged = has_dest && fiobj___render_alias(ctx, dest, 0);
+  fiobj___mustache_output_s state = {.output =
+                                         (has_dest && !staged) ? dest : NULL};
+  size_t before = (has_dest && !staged) ? fiobj_str_info(dest).len : 0;
+  fio_mustache_build(m,
+                     .write_text = fiobj___mustache_write_text,
+                     .write_text_escaped = fiobj___mustache_write_text_escaped,
+                     .get_var = fiobj___mustache_get_var,
+                     .array_length = fiobj___mustache_array_length,
+                     .get_var_index = fiobj___mustache_get_var_index,
+                     .var2str = fiobj___mustache_var2str,
+                     .var_is_truthful = fiobj___mustache_var_is_truthful,
+                     .ctx = ctx,
+                     .udata = &state);
+  if (state.failed) {
+    if (state.output == dest)
+      fiobj_str_resize(dest, before);
+    else
+      fiobj_free(state.output);
+    return FIOBJ_INVALID;
+  }
+  FIOBJ output = state.output;
+  if (!output)
+    return dest;
+  if (!staged)
+    return output;
+  fio_str_info_s text = fiobj_str_info(output);
+  size_t dest_before = fiobj_str_info(dest).len;
+  fio_str_info_s appended = fiobj_str_write(dest, text.buf, text.len);
+  fiobj_free(output);
+  if (text.len <= SIZE_MAX - dest_before &&
+      appended.len == dest_before + text.len)
+    return dest;
+  fiobj_str_resize(dest, dest_before);
+  return FIOBJ_INVALID;
 }
 
 /* callback should write `txt` to output and return updated `udata.` */
 FIO_SFUNC void *fiobj___mustache_write_text(void *udata, fio_buf_info_s txt) {
-  FIOBJ d = (FIOBJ)udata;
-  if (!d)
-    d = fiobj_str_new_buf(txt.len + 32);
-  fiobj_str_write(d, txt.buf, txt.len);
-  return (void *)d;
+  fiobj___mustache_output_s *state = (fiobj___mustache_output_s *)udata;
+  if (state->failed || !txt.len)
+    return udata;
+  if (!state->output) {
+    if (txt.len > SIZE_MAX - 32 ||
+        !(state->output = fiobj_str_new_buf(txt.len + 32))) {
+      state->failed = 1;
+      return udata;
+    }
+  }
+  size_t before = fiobj_str_info(state->output).len;
+  fio_str_info_s after = fiobj_str_write(state->output, txt.buf, txt.len);
+  if (txt.len > SIZE_MAX - before || after.len != before + txt.len)
+    state->failed = 1;
+  return udata;
 }
 /* same as `write_text`, but should also  HTML escape (sanitize) data. */
 FIO_SFUNC void *fiobj___mustache_write_text_escaped(void *ud,
                                                     fio_buf_info_s raw) {
-  FIOBJ d = (FIOBJ)ud;
-  if (!d)
-    d = fiobj_str_new_buf(raw.len + 32);
-  fiobj_str_write_html_escape(d, raw.buf, raw.len);
-  return (void *)d;
+  fiobj___mustache_output_s *state = (fiobj___mustache_output_s *)ud;
+  if (state->failed || !raw.len)
+    return ud;
+  if (!state->output) {
+    if (raw.len > SIZE_MAX - 32 ||
+        !(state->output = fiobj_str_new_buf(raw.len + 32))) {
+      state->failed = 1;
+      return ud;
+    }
+  }
+  fio_str_info_s info = fiobj_str___mutable_info(state->output);
+  if (!info.capa ||
+      fio_string_write_html_escape(&info,
+                                   fiobj_str___realloc_func(state->output),
+                                   raw.buf,
+                                   raw.len))
+    state->failed = 1;
+  if (info.capa)
+    fiobj_str___info_update(state->output, info);
+  return ud;
 }
 /* callback should return a new context pointer with the value of `name`. */
 FIO_SFUNC void *fiobj___mustache_get_var(void *ctx, fio_buf_info_s name) {
@@ -1671,17 +1898,14 @@ SFUNC uint32_t fiobj_each2(FIOBJ o, int (*task)(fiobj_each_s *), void *udata) {
       .next = FIOBJ_INVALID,
       .stack = FIO_ARRAY_INIT,
   };
-  struct FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), each_s) e_tmp = {
-
-      .parent = FIOBJ_INVALID,
-      .task = (int (*)(FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
-                                each_s) *))fiobj____each2_wrapper_task,
-      .udata = &d,
-      .value = o,
-  };
+  fiobj_each_s e_tmp = {.parent = FIOBJ_INVALID,
+                        .task = fiobj____each2_wrapper_task,
+                        .udata = &d,
+                        .value = o,
+                        .key = FIOBJ_INVALID};
   fiobj___stack_element_s i = {.obj = o, .pos = 0};
   uint32_t end = fiobj____each2_element_count(o);
-  fiobj____each2_wrapper_task((fiobj_each_s *)&e_tmp);
+  fiobj____each2_wrapper_task(&e_tmp);
   while (!d.stop && i.obj && i.pos < end) {
     i.pos =
         fiobj_each1(i.obj, fiobj____each2_wrapper_task, &d, (uint32_t)i.pos);
@@ -1829,23 +2053,11 @@ FIOBJ Floats (bigger / smaller doubles)
 
 FIO_SFUNC unsigned char FIO_NAME_BL(fiobj___float, eq)(FIOBJ restrict a,
                                                        FIOBJ restrict b) {
-  unsigned char r = 0;
-  union {
-    uint64_t u;
-    double f;
-  } da, db;
-  da.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(a);
-  db.f = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(b);
-  /* regular equality? */
-  r |= da.f == db.f;
-  /* test for small rounding errors (4 bit difference) on normalize floats */
-  r |= !((da.u ^ db.u) & UINT64_C(0xFFFFFFFFFFFFFFF0)) &&
-       (da.u & UINT64_C(0x7FF0000000000000));
-  /* test for small ULP: */
-  r |= (((da.u > db.u) ? da.u - db.u : db.u - da.u) < 2);
-  /* test for +-0 */
-  r |= !((da.u | db.u) & UINT64_C(0x7FFFFFFFFFFFFFFF));
-  return r;
+  /* Exact representation equality is transitive and matches the hash input,
+   * including distinct signed zeros and NaN payloads. */
+  double da = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(a);
+  double db = FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(b);
+  return !FIO_MEMCMP(&da, &db, sizeof(da));
 }
 
 SFUNC fio_str_info_s FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT),
@@ -1946,54 +2158,83 @@ FIOBJ_EXTERN_OBJ_IMP const FIOBJ_class_vtable_s FIOBJ___DATA_CLASS_VTBL = {
 FIOBJ JSON support - output
 ***************************************************************************** */
 
-FIO_IFUNC void fiobj___json_format_internal_beauty_pad(FIOBJ json,
-                                                       size_t level) {
-  size_t pos = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), len)(json);
-  fio_str_info_s tmp = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING),
-                                resize)(json, (level << 1) + pos + 2);
-  tmp.buf[pos++] = '\r';
-  tmp.buf[pos++] = '\n';
-  for (size_t i = 0; i < level; ++i) {
-    tmp.buf[pos++] = ' ';
-    tmp.buf[pos++] = ' ';
+FIO_IFUNC void fiobj___json_write(fiobj___json_format_internal__s *args,
+                                  const char *text,
+                                  size_t len) {
+  if (args->failed)
+    return;
+  size_t before = fiobj_str_info(args->json).len;
+  fio_str_info_s result = fiobj_str_write(args->json, text, len);
+  if (len > SIZE_MAX - before || result.len != before + len)
+    args->failed = 1;
+}
+FIO_IFUNC void fiobj___json_escape(fiobj___json_format_internal__s *args,
+                                   const char *text,
+                                   size_t len) {
+  if (args->failed)
+    return;
+  fio_str_info_s info = fiobj_str___mutable_info(args->json);
+  if (!info.capa ||
+      fio_string_write_escape(&info,
+                              fiobj_str___realloc_func(args->json),
+                              text,
+                              len))
+    args->failed = 1;
+  if (info.capa)
+    fiobj_str___info_update(args->json, info);
+}
+FIO_IFUNC void fiobj___json_number(fiobj___json_format_internal__s *args,
+                                   int64_t number) {
+  if (args->failed)
+    return;
+  size_t before = fiobj_str_info(args->json).len;
+  fio_str_info_s result = fiobj_str_write_i(args->json, number);
+  size_t len = fio_digits10(number);
+  if (len > SIZE_MAX - before || result.len != before + len)
+    args->failed = 1;
+}
+FIO_IFUNC void fiobj___json_format_internal_beauty_pad(
+    fiobj___json_format_internal__s *args,
+    size_t level) {
+  static const char spaces[] =
+      "                                                                ";
+  fiobj___json_write(args, "\r\n", 2);
+  if (level > SIZE_MAX / 2)
+    return;
+  size_t remaining = level * 2;
+  while (remaining) {
+    size_t n = remaining < sizeof(spaces) - 1 ? remaining : sizeof(spaces) - 1;
+    fiobj___json_write(args, spaces, n);
+    remaining -= n;
   }
 }
 
 SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *args,
                                           FIOBJ o) {
+  if (args->failed)
+    return;
   switch (FIOBJ_TYPE(o)) {
-  case FIOBJ_T_TRUE:
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-    (args->json, "true", 4);
-    return;
-  case FIOBJ_T_FALSE:
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-    (args->json, "false", 5);
-    return;
-  case FIOBJ_T_NULL:
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-    (args->json, "null", 4);
-    return;
+  case FIOBJ_T_TRUE: fiobj___json_write(args, "true", 4); return;
+  case FIOBJ_T_FALSE: fiobj___json_write(args, "false", 5); return;
+  case FIOBJ_T_NULL: fiobj___json_write(args, "null", 4); return;
   case FIOBJ_T_NUMBER:
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_i)
-    (args->json, FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(o));
+    fiobj___json_number(args,
+                        FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_NUMBER), i)(o));
     return;
   case FIOBJ_T_FLOAT: {
     char tmp_buf[256];
     size_t len = fio_ftoa(tmp_buf,
                           FIO_NAME2(FIO_NAME(fiobj, FIOBJ___NAME_FLOAT), f)(o),
                           10);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-    (args->json, tmp_buf, len);
+    fiobj___json_write(args, tmp_buf, len);
     return;
   }
   case FIOBJ_T_STRING: /* fall through */
   default: {
     fio_str_info_s info = FIO_NAME2(fiobj, cstr)(o);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "\"", 1);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
-    (args->json, info.buf, info.len);
-    FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "\"", 1);
+    fiobj___json_write(args, "\"", 1);
+    fiobj___json_escape(args, info.buf, info.len);
+    fiobj___json_write(args, "\"", 1);
     return;
   }
   case FIOBJ_T_ARRAY:
@@ -2003,11 +2244,11 @@ SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *args,
       goto err_array_nesting;
     {
       ++args->level;
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "[", 1);
+      fiobj___json_write(args, "[", 1);
       const uint32_t len =
           FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), count)(o);
       if (args->beautify) {
-        fiobj___json_format_internal_beauty_pad(args->json, args->level);
+        fiobj___json_format_internal_beauty_pad(args, args->level);
       }
       fiobj___json_format_internal__(
           args,
@@ -2016,25 +2257,23 @@ SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *args,
         for (size_t i = 1; i < len; ++i) {
           FIOBJ child =
               FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, ",", 1);
-          fiobj___json_format_internal_beauty_pad(args->json, args->level);
+          fiobj___json_write(args, ",", 1);
+          fiobj___json_format_internal_beauty_pad(args, args->level);
           fiobj___json_format_internal__(args, child);
         }
       } else {
         for (size_t i = 1; i < len; ++i) {
           FIOBJ child =
               FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_ARRAY), get)(o, i);
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-          (args->json, ",", 1);
+          fiobj___json_write(args, ",", 1);
           fiobj___json_format_internal__(args, child);
         }
       }
       --args->level;
       if (args->beautify) {
-        fiobj___json_format_internal_beauty_pad(args->json, args->level);
+        fiobj___json_format_internal_beauty_pad(args, args->level);
       }
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)(args->json, "]", 1);
+      fiobj___json_write(args, "]", 1);
     }
     return;
   case FIOBJ_T_HASH:
@@ -2044,49 +2283,39 @@ SFUNC void fiobj___json_format_internal__(fiobj___json_format_internal__s *args,
       goto err_hash_nesting;
     {
       size_t i = FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH), count)(o);
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-      (args->json, "{", 1);
+      fiobj___json_write(args, "{", 1);
       ++args->level;
       FIO_MAP_EACH(FIO_NAME(fiobj, FIOBJ___NAME_HASH), o, couplet) {
         if (args->beautify) {
-          fiobj___json_format_internal_beauty_pad(args->json, args->level);
+          fiobj___json_format_internal_beauty_pad(args, args->level);
         }
         fio_str_info_s info = FIO_NAME2(fiobj, cstr)(couplet.key);
-        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-        (args->json, "\"", 1);
-        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write_escape)
-        (args->json, info.buf, info.len);
-        FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-        (args->json, "\":", 2);
+        fiobj___json_write(args, "\"", 1);
+        fiobj___json_escape(args, info.buf, info.len);
+        fiobj___json_write(args, "\":", 2);
         fiobj___json_format_internal__(args, couplet.value);
         if (--i)
-          FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-        (args->json, ",", 1);
+          fiobj___json_write(args, ",", 1);
       }
       --args->level;
       if (args->beautify) {
-        fiobj___json_format_internal_beauty_pad(args->json, args->level);
+        fiobj___json_format_internal_beauty_pad(args, args->level);
       }
-      FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-      (args->json, "}", 1);
+      fiobj___json_write(args, "}", 1);
     }
     return;
   }
 empty_hash:
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-  (args->json, "{}", 2);
+  fiobj___json_write(args, "{}", 2);
   return;
 empty_array:
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-  (args->json, "[]", 2);
+  fiobj___json_write(args, "[]", 2);
   return;
 err_array_nesting:
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-  (args->json, "[ ]", 3);
+  fiobj___json_write(args, "[ ]", 3);
   goto log_nesting_error;
 err_hash_nesting:
-  FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_STRING), write)
-  (args->json, "{ }", 3);
+  fiobj___json_write(args, "{ }", 3);
 log_nesting_error:
   FIO_LOG_ERROR("JSON formatting truncated - nesting level too deep.");
 }
@@ -2107,42 +2336,75 @@ FIO_SFUNC fio_json_obj_result_s fiobj___json_on_false(void *udata) {
   (void)udata;
   return FIOBJ___JSON_OBJ(fiobj_false());
 }
-FIO_SFUNC fio_json_obj_result_s fiobj___json_on_number(void *udata,
-                                                       int64_t i) {
+FIO_SFUNC fio_json_obj_result_s fiobj___json_on_number(void *udata, int64_t i) {
   (void)udata;
-  return FIOBJ___JSON_OBJ(FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_NUMBER, new))(i));
+#if INTPTR_MAX < INT64_MAX
+  /* Preserve wide JSON integers as Floats rather than narrowing to intptr_t. */
+  if (i > (int64_t)INTPTR_MAX || i < (int64_t)INTPTR_MIN) {
+    FIOBJ obj = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_FLOAT, new))((double)i);
+    return obj ? FIOBJ___JSON_OBJ(obj)
+               : (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
+  }
+#endif
+  FIOBJ obj = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_NUMBER, new))((intptr_t)i);
+  return obj ? FIOBJ___JSON_OBJ(obj)
+             : (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
 }
 FIO_SFUNC fio_json_obj_result_s fiobj___json_on_float(void *udata, double f) {
   (void)udata;
-  return FIOBJ___JSON_OBJ(FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_FLOAT, new))(f));
+  FIOBJ obj = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_FLOAT, new))(f);
+  return obj ? FIOBJ___JSON_OBJ(obj)
+             : (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
 }
 FIO_SFUNC fio_json_obj_result_s fiobj___json_on_string(void *udata,
                                                        fio_buf_info_s s) {
   (void)udata;
   FIOBJ str = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, new))();
-  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, write_unescape))
-  (str, s.buf, s.len);
+  if (!str)
+    return (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
+  /* Reserve the maximum decoded size before writing so an OOM cannot
+   * publish a partially unescaped scalar. */
+  if (s.len &&
+      FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, reserve))(str, s.len)
+              .capa <= s.len) {
+    fiobj_free(str);
+    return (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
+  }
+  fio_str_info_s result = FIO_NAME(
+      fiobj,
+      FIO_NAME(FIOBJ___NAME_STRING, write_unescape))(str, s.buf, s.len);
+  if (s.len && !result.len) {
+    fiobj_free(str);
+    return (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
+  }
   return FIOBJ___JSON_OBJ(str);
 }
-FIO_SFUNC fio_json_obj_result_s fiobj___json_on_string_simple(void *udata,
-                                                              fio_buf_info_s s) {
+FIO_SFUNC fio_json_obj_result_s
+fiobj___json_on_string_simple(void *udata, fio_buf_info_s s) {
   (void)udata;
   FIOBJ str = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, new))();
-  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, write))(str, s.buf, s.len);
+  if (!str)
+    return (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
+  if (FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_STRING, write))(str, s.buf, s.len)
+          .len != s.len) {
+    fiobj_free(str);
+    return (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
+  }
   return FIOBJ___JSON_OBJ(str);
 }
 /* Opens a container: reuses a matching one (merge / append), otherwise
  * overwrites (frees) any other existing value. */
-FIO_IFUNC fio_json_push_result_s fiobj___json_on_container(void *parent,
-                                                           fio_buf_info_s key,
-                                                           fiobj_class_en type) {
+FIO_IFUNC fio_json_push_result_s
+fiobj___json_on_container(void *parent,
+                          fio_buf_info_s key,
+                          fiobj_class_en type) {
   fio_json_push_result_s r = {0};
   FIOBJ o = FIOBJ_INVALID;
   if (parent && key.buf) {
     o = FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, get2))((FIOBJ)parent,
                                                            key.buf,
                                                            key.len);
-    if (FIOBJ_TYPE_CLASS(o) == type) {
+    if (FIOBJ_JSON_APPEND && FIOBJ_TYPE_CLASS(o) == type) {
       r.obj = (void *)o;
       return r;
     }
@@ -2150,12 +2412,28 @@ FIO_IFUNC fio_json_push_result_s fiobj___json_on_container(void *parent,
   o = (type == FIOBJ_T_HASH)
           ? FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, new))()
           : FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_ARRAY, new))();
+  if (!o) {
+    r.err = FIO_JSON_ERROR_GENERIC;
+    return r;
+  }
   if (parent) {
-    if (!key.buf)
-      FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_ARRAY, push))((FIOBJ)parent, o);
-    else
-      FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, set2))
-      ((FIOBJ)parent, key.buf, key.len, o);
+    if (!key.buf) {
+      if (!FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_ARRAY, push))((FIOBJ)parent,
+                                                               o)) {
+        r.err = FIO_JSON_ERROR_GENERIC;
+        return r;
+      }
+    } else {
+      /* set2 consumes the value even when insertion fails. */
+      FIOBJ stored =
+          FIO_NAME(fiobj,
+                   FIO_NAME(FIOBJ___NAME_HASH,
+                            set2))((FIOBJ)parent, key.buf, key.len, o);
+      if (stored != o) {
+        r.err = FIO_JSON_ERROR_GENERIC;
+        return r;
+      }
+    }
   }
   r.obj = (void *)o;
   return r;
@@ -2178,15 +2456,20 @@ FIO_SFUNC fio_json_obj_result_s fiobj___json_map_push(void *udata,
                                                       fio_buf_info_s key,
                                                       void *value) {
   (void)udata;
-  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_HASH, set2))
-  ((FIOBJ)map, key.buf, key.len, (FIOBJ)value);
+  FIOBJ stored =
+      FIO_NAME(fiobj,
+               FIO_NAME(FIOBJ___NAME_HASH,
+                        set2))((FIOBJ)map, key.buf, key.len, (FIOBJ)value);
+  if (stored != (FIOBJ)value)
+    return (fio_json_obj_result_s){.err = FIO_JSON_ERROR_GENERIC};
   return FIOBJ___JSON_OBJ(NULL);
 }
 FIO_SFUNC int fiobj___json_array_push(void *udata, void *array, void *value) {
   (void)udata;
-  FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_ARRAY, push))
-  ((FIOBJ)array, (FIOBJ)value);
-  return 0;
+  return FIO_NAME(fiobj, FIO_NAME(FIOBJ___NAME_ARRAY, push))((FIOBJ)array,
+                                                             (FIOBJ)value)
+             ? 0
+             : FIO_JSON_ERROR_GENERIC;
 }
 FIO_SFUNC int fiobj___json_is_array(void *udata, void *obj) {
   (void)udata;
@@ -2218,13 +2501,32 @@ static const fio_json_parser_callbacks_s FIOBJ_JSON_PARSER_CALLBACKS = {
 };
 #undef FIOBJ___JSON_OBJ
 
+/* Public slices need not have the JSON parser's readable NUL guard. */
+FIO_SFUNC fio_json_result_s fiobj___json_parse_guarded(fio_str_info_s str,
+                                                       void *root,
+                                                       int always_copy) {
+  char storage[256];
+  fio_str_info_s copy = FIO_STR_INFO3(storage, 0, sizeof(storage));
+  if (!str.len)
+    str.buf = (char *)"";
+  else if (always_copy || str.capa <= str.len || str.buf[str.len]) {
+    if (fio_string_write(&copy, FIO_STRING_ALLOC_COPY, str.buf, str.len))
+      return (fio_json_result_s){.ctx = root, .err = FIO_JSON_ERROR_GENERIC};
+    str.buf = copy.buf;
+  }
+  fio_json_result_s r = fio_json_parse(&FIOBJ_JSON_PARSER_CALLBACKS,
+                                       NULL,
+                                       root,
+                                       str.buf,
+                                       str.len);
+  if (copy.buf != storage)
+    FIO_STRING_FREE2(copy);
+  return r;
+}
+
 /** Returns a JSON valid FIOBJ String, representing the object. */
 SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
-  fio_json_result_s result = fio_json_parse(&FIOBJ_JSON_PARSER_CALLBACKS,
-                                            NULL,
-                                            NULL,
-                                            str.buf,
-                                            str.len);
+  fio_json_result_s result = fiobj___json_parse_guarded(str, NULL, 0);
   if (consumed_p)
     *consumed_p = result.stop_pos;
   if (result.err) {
@@ -2243,9 +2545,10 @@ SFUNC FIOBJ fiobj_json_parse(fio_str_info_s str, size_t *consumed_p) {
 /**
  * Updates a Hash using JSON data (the JSON root must be an object).
  *
- * Nested objects merge into existing Hash members and nested arrays append to
- * existing Array members; any other conflicting value is overwritten
- * (preferring the new over the old).
+ * With FIOBJ_JSON_APPEND enabled, nested objects merge into existing Hash
+ * members and nested arrays append to existing Array members. Otherwise nested
+ * containers replace existing members. Other conflicting values are
+ * overwritten.
  *
  * On a parsing error, members merged before the error remain in the Hash. A
  * non-object root changes nothing.
@@ -2258,12 +2561,7 @@ SFUNC size_t FIO_NAME(FIO_NAME(fiobj, FIOBJ___NAME_HASH),
   if (hash == FIOBJ_INVALID)
     return 0;
   /* `hash` is the explicit root: it stays caller-owned, even on error. */
-  return fio_json_parse(&FIOBJ_JSON_PARSER_CALLBACKS,
-                        NULL,
-                        (void *)hash,
-                        str.buf,
-                        str.len)
-      .stop_pos;
+  return fiobj___json_parse_guarded(str, (void *)hash, 1).stop_pos;
 }
 
 /** Uses JSON (JavaScript) notation to find data in an object structure. Returns
@@ -2281,7 +2579,10 @@ SFUNC FIOBJ fiobj_json_find(FIOBJ o, fio_str_info_s n) {
       ++n.buf;
       --n.len;
       while (n.len && fio_c2i(n.buf[0]) < 10) {
-        i = (i * 10) + fio_c2i(n.buf[0]);
+        size_t digit = fio_c2i(n.buf[0]);
+        if (i > (UINT32_MAX - digit) / 10)
+          return FIOBJ_INVALID;
+        i = (i * 10) + digit;
         ++n.buf;
         --n.len;
       }

@@ -1,22 +1,8 @@
 /* *****************************************************************************
-Signal Monitoring Tests
+Signal Monitoring Registration Tests
 
-NOTE: Signal handling is inherently difficult to unit test safely because:
-1. Sending actual signals (SIGINT, SIGTERM, etc.) could terminate the test
-process
-2. Signal behavior varies between platforms (POSIX vs Windows)
-3. Signal handlers run in an async context with limited safe operations
-
-These tests focus on what CAN be safely tested:
-- Signal handler registration/deregistration API
-- Edge cases and error handling
-- The fio_signal_review() function with no pending signals
-
-What CANNOT be safely unit tested (requires integration/manual testing):
-- Actual signal delivery and callback invocation
-- Signal propagation to previous handlers
-- The `immediate` vs deferred callback behavior
-- Race conditions in signal handling
+Actual delivery, propagation, and immediate/deferred callbacks are covered
+by the bounded child tests in signals-delivery.c.
 ***************************************************************************** */
 #include "test-helpers.h"
 
@@ -216,7 +202,7 @@ FIO_SFUNC void FIO_NAME_TEST(stl, signal)(void) {
   size_t e = 0;
   fprintf(stderr, "* testing signal monitoring (setup / cleanup only).\n");
   for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); ++i) {
-    if (fio_signal_monitor(t[i].sig, NULL, NULL, 1)) {
+    if (fio_signal_monitor(.sig = t[i].sig, .propagate = 1)) {
       FIO_LOG_ERROR("couldn't set signal monitoring for %s (%d)",
                     t[i].name,
                     t[i].sig);

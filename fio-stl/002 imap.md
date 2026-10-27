@@ -196,7 +196,7 @@ Finds an element or the place to insert it.
 FIO_IFUNC int array_name_reserve(array_name_s *a, imap_type min);
 ```
 
-Grows the backing storage to at least `min` slots. Returns `0` on success, `-1` on failure.
+Grows the backing storage to at least `min` slots (minimum 8). Returns `0` on success, `-1` on failure (allocation failure, or `min` exceeds what `imap_type` can index). Growth builds a new buffer, so the map is unchanged on failure.
 
 #### `array_name_rehash`
 
@@ -204,7 +204,7 @@ Grows the backing storage to at least `min` slots. Returns `0` on success, `-1` 
 FIO_IFUNC int array_name_rehash(array_name_s *a);
 ```
 
-Rebuilds the index map from the current array contents. Call after sorting or other position-changing operations. Returns `0` on success, `-1` on failure.
+Rebuilds the index map from the current array contents, compacting removed (invalid) elements. Call after sorting or other position-changing operations. Returns `0` on success, `-1` on failure (the index may then be incomplete).
 
 #### `array_name_set`
 
@@ -215,6 +215,8 @@ FIO_IFUNC array_type *array_name_set(array_name_s *a,
 ```
 
 Inserts or updates an element. If `overwrite` is zero and the key already exists, returns the existing element. Returns a pointer to the stored element or `NULL` on failure.
+
+Failure leaves the map unchanged. It occurs on allocation failure, when `imap_type` cannot index more elements, or when too many elements share a hash (a sparse map is not grown to resolve collisions).
 
 #### `array_name_get`
 
@@ -231,6 +233,8 @@ FIO_IFUNC int array_name_remove(array_name_s *a, array_type obj);
 ```
 
 Zeros the matching element and marks its index-map slot as freed. Returns `0` on success, `-1` if not found.
+
+Removal requires a zeroed element to be invalid; maps where it is valid (e.g., `FIO_IMAP_ALWAYS_VALID`) always return `-1`.
 
 ### Internal Seeker Types
 

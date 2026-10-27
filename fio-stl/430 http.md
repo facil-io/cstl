@@ -140,6 +140,7 @@ typedef struct fio_http_settings_s {
   intptr_t reserved2;
   /* timeouts and flags */
   uint16_t connect_timeout;
+  uint8_t verify;
   uint8_t timeout;
   uint8_t ws_timeout;
   uint8_t sse_timeout;
@@ -167,7 +168,7 @@ listener, route, or client is created.
 | `on_authenticate_websocket` | Before a WebSocket upgrade. Return non-zero to deny with `403`. | server: deny; client: allow |
 | `on_open` | Once a WebSocket or SSE upgrade is complete. | no-op |
 | `on_message` | For each complete WebSocket message. | no-op |
-| `on_eventsource` | For each complete SSE event (client). | passes `data` to `on_message` (as text) when `on_message` is set; otherwise no-op |
+| `on_eventsource` | For each complete SSE event with data (client). `id` is the last event ID (it persists across events); the views are valid only during the callback. | passes `data` to `on_message` (as text) when `on_message` is set; otherwise no-op |
 | `on_eventsource_reconnect` | When an SSE request carries a `Last-Event-ID` header. | no-op |
 | `on_ready` | When an upgraded connection's outgoing buffer is empty. | no-op |
 | `on_shutdown` | For open upgraded connections during IO shutdown. WebSocket connections then send a `1001` (going away) close frame. | no-op |
@@ -183,7 +184,7 @@ listener, route, or client is created.
 | `queue` | Optional task queue for user callbacks (e.g., for multi-threaded responses). Defaults to the IO queue. |
 | `public_folder` | Static-file root (see *Static File Service*). The folder must exist when `fio_http_listen` or `fio_http_route` is called; otherwise the setting is ignored and an error is logged. |
 | `max_age` | `Cache-Control: max-age` value for static files, in seconds. `0` (default) omits the header. Not inherited by routes. |
-| `max_header_size` | Maximum bytes for the request line and headers combined. Default: `FIO_HTTP_DEFAULT_MAX_HEADER_SIZE` (32768). Raised to `max_line_len` when smaller. Larger requests receive `431`. |
+| `max_header_size` | Budget for header name and value bytes passed to the HTTP header callback during a message, including forwarded trailers. This limits header processing/storage, **not** bytes received on the wire: the start line, separators, trimmed whitespace, line terminators, and internally consumed fields (such as `Expect` and some `Content-Length` / `Transfer-Encoding` fields) do not count. Default: `FIO_HTTP_DEFAULT_MAX_HEADER_SIZE` (32768). Raised to `max_line_len` when smaller. Exceeding the budget yields `431` for a request; a client closes its connection on an over-budget response. Set a separate input/connection limit if total received header bytes must be bounded. |
 | `max_line_len` | Maximum bytes per request / header line. Default: `FIO_HTTP_DEFAULT_MAX_LINE_LEN` (8192). |
 | `max_body_size` | Maximum request body size, in bytes. Default: `FIO_HTTP_DEFAULT_MAX_BODY_SIZE` (32 MiB). Larger bodies receive `413`. |
 | `max_params` | Maximum query / form fields per params parsing call. Default: `FIO_HTTP_PARAMS_MAX_FIELDS` (4096). |
@@ -193,6 +194,7 @@ listener, route, or client is created.
 | `ws_timeout` | WebSocket timeout, in seconds. A ping is sent each time it expires. Default: `FIO_HTTP_DEFAULT_TIMEOUT_LONG` (50). |
 | `sse_timeout` | SSE timeout, in seconds. A ping is sent each time it expires. Default: the `ws_timeout` value. |
 | `connect_timeout` | Client connection timeout in milliseconds (up to 65535), passed to `fio_io_connect`; `0` selects the IO default (30 seconds). |
+| `verify` | Client only, opt-in: verify the TLS server against the system trust store when no trust is configured (see `fio_io_connect`'s `.verify`). Ignored for plain connections. |
 | `log` | Non-zero logs each request. |
 | `compress_static` | Opt-in: create missing `.br` / `.gz` static-file variants on demand (see *Static File Service*). Effective per route. May drop to `0` after repeated failures. |
 | `compress_dynamic` | Opt-in: compress dynamic responses. Connection-global: per-route values are ignored. |
@@ -551,20 +553,35 @@ fio_http_connect("http://example.com/", NULL, .on_http = on_response);
 - `h` - the request handle, or `NULL` to create one. The connection takes
   ownership of the caller's reference. Unset fields get defaults: the method
   is `GET`, the path and query come from `url` (path `/` when missing), and a
-  missing `Host` header comes from `url`. A `udata` already set on `h` is
-  kept.
+  missing `Host` header is the `url` authority (`host[:port]`, IPv6 in
+  brackets, without user info). A `udata` already set on `h` is kept.
 
 **Named Arguments:** any `fio_http_settings_s` field. `on_http` receives the
 response handle.
 
 **Returns:** the connecting IO object, or `NULL` on error. The reactor owns it.
 The pointer is valid only until the next event is processed. On failure the
-connection frees `h` later, on the IO thread, even when `NULL` is returned. Do
-not use or free `h` after the call.
+connection frees `h` later, on the IO thread, even when `NULL` is returned
+(allocation failures before connecting free it immediately). Do not use or
+free `h` after the call.
 
 If the server accepts a WebSocket or SSE upgrade, the connection switches
 protocol and uses the upgraded callbacks (`on_open`, `on_message` /
 `on_eventsource`, `on_close`) instead of `on_http`.
+
+**Note**: TLS clients (`https`, `wss`, `sses`) don't verify the server
+certificate unless trust is configured. Opt in with `.verify = 1` (system
+trust store), or pass a `.tls` object holding trust entries (explicit trust
+is never replaced). Once trust is set, the certificate must also match the
+URL host (DNS name or IP address SAN):
+
+```c
+fio_http_connect("https://example.com/", NULL, .on_http = on_response,
+                 .verify = 1);
+```
+
+The `trust=sys` / `trust=<ca-file>` URL query also works, but the URL query
+is sent to the server as the request query unless `h` already has one.
 
 **Note**: interim `1xx` responses other than `101` (e.g., `100 Continue`,
 `103 Early Hints`) are skipped (RFC 9110 §15.2). `on_http` runs once, for
@@ -686,6 +703,7 @@ marked as upgraded and finished.
 Incoming messages are collected up to `ws_max_msg_size` bytes, then
 `on_message` runs on the HTTP task queue. A connection delivers one message
 at a time. The module handles control frames (ping, pong, close).
+Invalid UTF-8 text messages or close reasons close the connection with code 1007.
 
 #### `fio_http_websocket_write`
 
@@ -760,13 +778,18 @@ fio_http_sse_write(h, .data = FIO_BUF_INFO1((char *)"hello"));
 ```
 
 **Named Arguments:**
-- `id` - the event ID; optional.
-- `event` - the event name; optional.
-- `data` - the event data; required. Each line is sent as its own `data:`
-  line.
+- `id` - the event ID; optional. Must not contain CR, LF or NUL.
+- `event` - the event name; optional. Must not contain CR, LF or NUL.
+- `data` - the event data; required. Each line (ending in CR, LF or CRLF) is
+  sent as its own `data:` line, so receivers get the data with line ends
+  normalized to LF.
 
-**Returns:** `0` on success, or `-1` when `data` is empty, `h` is `NULL` or
-not an established SSE connection, or the connection has closed.
+**Returns:** `0` once the event is queued, or `-1` when `data` is empty, `id`
+or `event` contain CR, LF or NUL, the event can't be allocated, `h` is `NULL`
+or not an established SSE connection, or the connection has closed.
+
+`fio_http_write` on an SSE handle sends each chunk (`buf + offset`, or `len`
+bytes read from `fd` at `offset`) as one event's `data`.
 
 **Note**: SSE is a UTF-8 text format. The data is not validated.
 
@@ -814,7 +837,8 @@ SFUNC void FIO_HTTP_SSE_SUBSCRIBE_DIRECT(fio_pubsub_msg_s *msg);
 
 A subscription callback that writes each published message as an SSE event.
 The event name is the channel, the data is the message, and the ID is the
-message ID in hex. Messages must be UTF-8.
+message ID in hex. Messages must be UTF-8. Messages on channels containing CR,
+LF or NUL are not sent (see `fio_http_sse_write`).
 
 ---
 
@@ -1492,26 +1516,24 @@ typedef struct FIO_ALIGN(64) {
 
   /* ===== File Uploads (multipart) ===== */
 
-  /** Called when a file upload starts. Returns an owned file object, or NULL
-   * to skip the file. The object is stored at the field name once the upload
-   * ends, or freed through `free_unused_object` if parsing failed. */
-  void *(*on_file)(void *udata,
-                   fio_str_info_s name,
-                   fio_str_info_s filename,
-                   fio_str_info_s content_type,
-                   fio_str_info_s headers);
-  /** Called for each chunk of file data. A non-zero return aborts parsing
-   * (returned unchanged in `err`); the file object is then freed. */
-  int (*on_file_data)(void *udata, void *file, fio_buf_info_s data);
+  /** Called once for each complete file upload (borrowed `data`). Returns an
+   * optional owned value, stored at the field name; a NULL `obj` stores
+   * nothing. A non-zero `err` aborts parsing (returned unchanged). */
+  fio_json_obj_result_s (*on_file)(void *udata,
+                                   fio_str_info_s name,
+                                   fio_str_info_s filename,
+                                   fio_str_info_s content_type,
+                                   fio_str_info_s headers,
+                                   fio_buf_info_s data);
 } fio_http_params_parse_callbacks_s;
 ```
 
-The parser callbacks: 16 pointers, aligned to 64 bytes (128 bytes in total).
+The parser callbacks: 15 pointers, aligned to 64 bytes (128 bytes in total).
 The first 14 members match `fio_json_parser_callbacks_s` exactly (same order,
 types and contract), so the table is handed to the JSON parser as is. They
 follow the [JSON callback contract](./012%20json.md#fio_json_parser_callbacks_s),
 which defines the result types, decoded keys, ownership, `old` and the
-conflict rules. The last two members handle multipart file uploads.
+conflict rules. The last member handles multipart file uploads.
 
 **Contract:**
 - **Ownership transfers:** value callbacks return owned values. `map_push` and
@@ -1542,12 +1564,13 @@ conflict rules. The last two members handle multipart file uploads.
   missing callback counts as "false". `fio_http_params_parse` needs `is_map`
   to merge a JSON object body into the params map.
 - `free_unused_object` - frees an owned value the parser didn't use.
-- `on_file` - a file upload starts; returns an owned file object, or `NULL`
-  to skip the file. When the upload ends, the object is stored like any other
-  value, or passed to `free_unused_object` if parsing already failed
-  (including truncated uploads).
-- `on_file_data` - receives the next chunk of file data; a non-zero return
-  aborts parsing (returned unchanged in `err`) and frees the file object.
+- `on_file` - optional; called once for each complete file upload. `data`
+  holds the whole file, borrowed only during the call (see below). Returns an
+  optional owned value, stored at the field name like any other value; a
+  `NULL` `obj` stores nothing (e.g., the file was handled through `udata`). A
+  non-zero `err` aborts parsing and is returned unchanged. Truncated or
+  malformed uploads never reach `on_file`, so no file object is ever left
+  half-built.
 
 There is no general duplicate-key rule: a callback either frees a replaced
 value itself or hands it back (see the JSON conflict rules).
@@ -1746,9 +1769,14 @@ application charge several parses against one budget; for example, parse the
 body with `.limit = budget - r.count` after parsing the query.
 
 **Multipart uploads:** malformed syntax and ordinary EOF before the closing
-boundary report `ERROR`; a failed body read reports `IO`. File data is
-streamed in chunks to `on_file_data`, so large uploads can be written to
-storage while they are parsed. The `headers` argument of `on_file` holds the
+boundary report `ERROR`; a failed body read reports `IO`. Each part is
+reported once, complete. `on_file` receives the whole file as a pointer into
+the request body: bodies in RAM or memory mapped (spilled to a temporary file)
+are never copied. Without a memory mapping (`FIO_DATA_NO_MMAP`, Windows, or a
+failed mapping), the pending part is read into the body's heap buffer, so set
+the body size limit to match the memory you can spend on one upload. Callbacks
+must not call `fio_http_body_*` functions on the request being parsed. The
+`headers` argument of `on_file` holds the
 raw part headers (without the blank line) and
 is valid only during the call. The filename is cut to the bytes after its last
 `/` or `\`. A file with an empty (cut) filename or an empty field name is
@@ -1975,9 +2003,15 @@ With status `0` (a client handle), the same calls write a request.
 **Named Arguments:**
 - `buf`, `len` - the data to write.
 - `offset` - where writing starts, in `buf` or in the file.
-- `fd` - a file to send instead of a buffer. Set `len` too: a finished
-  response uses it as its `content-length`. `fd` is closed once sent, or on
-  error. With `copy` set, `fd` is never closed and stays the caller's.
+- `fd` - a file to send instead of a buffer. A finished response uses `len`
+  as its `content-length`. Without `len` (on any write), a regular file sends
+  the rest of the file from `offset` and that length frames it; a file whose
+  length can't be known (i.e., a pipe) or an empty range (`offset` at or past
+  the end) sends no data - the write continues as an empty one, so a finished
+  response is `content-length: 0`. A regular file shorter than `offset + len`
+  closes the connection instead of sending a short body. `fd` is closed once
+  sent, or on error. With `copy` set, `fd` is never closed and stays the
+  caller's.
 - `dealloc` - frees `buf` once it was sent. Setting it passes ownership of
   `buf` to `fio_http_write`, which frees it even on error. Without `dealloc`
   or `copy`, `buf` must stay valid until it is sent.

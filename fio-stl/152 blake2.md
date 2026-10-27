@@ -75,8 +75,8 @@ Flexible-output BLAKE2b with optional keyed hashing.
 - `outlen` — digest length (1–64; defaults to 64 if 0).
 - `data` — bytes to hash.
 - `len` — data length.
-- `key` — optional secret key (NULL for unkeyed).
-- `keylen` — key length (0–64; clamped to 64 if larger).
+- `key` — optional secret key (NULL for unkeyed; a NULL `key` ignores `keylen`).
+- `keylen` — key length. 0–64 is standard keyed BLAKE2b. Longer keys are never truncated: the key is replaced by `BLAKE2b-512(key)` (64 bytes), like HMAC does. This is **non-standard** (other BLAKE2 libraries reject such keys), so use keys of at most 64 bytes for interoperable output.
 
 **Note:** keyed BLAKE2b is a built-in MAC mode; for RFC-2104 HMAC, use `fio_blake2b_hmac`.
 
@@ -111,8 +111,21 @@ Initializes a BLAKE2b streaming context.
 
 **Parameters:**
 - `outlen` — desired digest length (1–64; defaults to 64 if 0).
-- `key` — optional secret key (NULL for unkeyed).
-- `keylen` — key length (0–64; clamped to 64 if larger).
+- `key` — optional secret key (NULL for unkeyed; a NULL `key` ignores `keylen`, producing the standard unkeyed digest).
+- `keylen` — key length; keys over 64 bytes are pre-hashed (non-standard), as in `fio_blake2b_hash`.
+
+The context is built directly in the returned object (no intermediate key copy with compilers that apply return-value optimization, e.g. clang at any level, GCC at `-O1`+). Assign the result in its declaration (`fio_blake2b_s h = fio_blake2b_init(...)`) rather than to an existing variable, so no temporary key copy is created. To avoid key copies regardless of compiler, use `fio_blake2b_init_at`. The one-shot `fio_blake2b_hash` never copies the key.
+
+#### `fio_blake2b_init_at`
+
+```c
+SFUNC void fio_blake2b_init_at(fio_blake2b_s *h,
+                               size_t outlen,
+                               const void *key,
+                               size_t keylen);
+```
+
+Initializes `h` in place, with the same arguments and results as `fio_blake2b_init`. The padded key is written only into `h` (and wiped by `fio_blake2b_finalize`).
 
 #### `fio_blake2b_consume`
 
@@ -130,7 +143,7 @@ Feeds more data into a BLAKE2b streaming context. May be called repeatedly.
 SFUNC fio_u512 fio_blake2b_finalize(fio_blake2b_s *h);
 ```
 
-Finalizes the stream and returns the digest.
+Finalizes the stream and returns the digest. The context (including any key material) is securely wiped; re-initialize it before reuse.
 
 **Returns:** digest as `fio_u512`. Only the first `outlen` bytes are valid.
 
@@ -155,7 +168,7 @@ SFUNC void fio_blake2s_hash(void *restrict out,
                             size_t keylen);
 ```
 
-Flexible-output BLAKE2s with optional keyed hashing. `outlen` is 1–32 (defaults to 32 if 0).
+Flexible-output BLAKE2s with optional keyed hashing. `outlen` is 1–32 (defaults to 32 if 0). `keylen` 0–32 is standard keyed BLAKE2s; longer keys are replaced by `BLAKE2s-256(key)` (non-standard, HMAC-like, never truncated). A NULL `key` is unkeyed and ignores `keylen`.
 
 #### `fio_blake2s_hmac`
 
@@ -176,7 +189,18 @@ SFUNC fio_blake2s_s fio_blake2s_init(size_t outlen,
                                      size_t keylen);
 ```
 
-Initializes a BLAKE2s streaming context. `outlen` is 1–32 (defaults to 32 if 0).
+Initializes a BLAKE2s streaming context. `outlen` is 1–32 (defaults to 32 if 0). Key handling matches `fio_blake2s_hash` (NULL key is unkeyed; keys over 32 bytes are pre-hashed) and the context is built in place in the returned object, as with `fio_blake2b_init`.
+
+#### `fio_blake2s_init_at`
+
+```c
+SFUNC void fio_blake2s_init_at(fio_blake2s_s *h,
+                               size_t outlen,
+                               const void *key,
+                               size_t keylen);
+```
+
+Initializes `h` in place, with the same arguments and results as `fio_blake2s_init`, so no key copy is left elsewhere on the stack.
 
 #### `fio_blake2s_consume`
 
@@ -194,7 +218,7 @@ Feeds more data into a BLAKE2s streaming context.
 SFUNC fio_u256 fio_blake2s_finalize(fio_blake2s_s *h);
 ```
 
-Finalizes the stream and returns the digest.
+Finalizes the stream and returns the digest. The context (including any key material) is securely wiped; re-initialize it before reuse.
 
 ### Examples
 
@@ -231,7 +255,7 @@ void examples(void) {
 | Word size | 64-bit | 32-bit |
 | Block size | 128 bytes | 64 bytes |
 | Max digest | 64 bytes | 32 bytes |
-| Max key | 64 bytes | 32 bytes |
+| Max standard key | 64 bytes | 32 bytes (longer keys are pre-hashed) |
 | Rounds | 12 | 10 |
 | Result type | `fio_u512` | `fio_u256` |
 

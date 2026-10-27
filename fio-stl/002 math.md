@@ -25,7 +25,7 @@ Divides the `number_array_length`-word number `a` by `b`, storing the quotient i
 
 **Note:** not constant time. Uses binary long division, which is simple but not the fastest algorithm on earth.
 
-If `b` is zero, logs an error and fills both outputs with `0xFF`.
+Supports up to 1024 words (65,536 bits). If `b` is zero, or `number_array_length` exceeds 1024, logs an error and fills both outputs with `0xFF`.
 
 #### `fio_math_shr`
 
@@ -36,7 +36,7 @@ FIO_IFUNC void fio_math_shr(uint64_t *dest,
                             size_t number_array_length);
 ```
 
-Shifts `n` right by `right_shift_bits` and stores the result in `dest`.
+Shifts `n` right by `right_shift_bits` and stores the result in `dest`. Shifting by `number_array_length * 64` bits or more zeroes `dest`. `dest` may equal `n` (in-place), but must not otherwise overlap it.
 
 #### `fio_math_shl`
 
@@ -47,7 +47,7 @@ FIO_IFUNC void fio_math_shl(uint64_t *dest,
                             const size_t number_array_length);
 ```
 
-Shifts `n` left by `left_shift_bits` and stores the result in `dest`.
+Shifts `n` left by `left_shift_bits` and stores the result in `dest`. Shifting by `number_array_length * 64` bits or more zeroes `dest`. `dest` may equal `n` (in-place), but must not otherwise overlap it.
 
 #### `fio_math_inv`
 
@@ -55,7 +55,7 @@ Shifts `n` left by `left_shift_bits` and stores the result in `dest`.
 FIO_IFUNC void fio_math_inv(uint64_t *dest, uint64_t *n, size_t len);
 ```
 
-Two's-complement negation of the `len`-word number `n`.
+Two's-complement negation of the `len`-word number `n`, stored in `dest`. `dest` may equal `n` (in-place), but must not otherwise overlap it.
 
 #### `fio_math_msb_index`
 

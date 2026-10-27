@@ -61,7 +61,7 @@ Set these **before** `#include`, after `FIO_REF_NAME`.
 |---|---|---|
 | `FIO_REF_FLEX_TYPE` | _(not defined)_ | When defined, the constructor allocates extra memory for a `FIO_REF_FLEX_TYPE[]` array immediately after the main struct. The constructor accepts a `size_t members` argument and stores the count internally. The `members` value is also available inside `FIO_REF_INIT`. |
 
-> **Note:** `FIO_REF_FLEX_TYPE` shrinks the reference counter to 32 bits (instead of the native word size). Do not combine this with a custom `FIO_MEM_FREE` that depends on the byte-count argument, because the flex free call reports a size that omits `sizeof(FIO_REF_TYPE)`.
+> **Note:** `FIO_REF_FLEX_TYPE` shrinks the reference counter to 32 bits (instead of the native word size). The constructor rejects counts above `UINT32_MAX` and allocations whose byte size would overflow `size_t`. A flex suffix must be naturally aligned immediately after the wrapped type (enforced at compile time). Allocation and deallocation report the same byte size to custom allocators.
 
 ### Pointer tagging
 
@@ -92,7 +92,7 @@ FIO_REF_TYPE *REF_dup(const FIO_REF_TYPE *obj);    /* FIO_REF_CONSTRUCTOR_ONLY *
 FIO_REF_TYPE *REF_dup2(const FIO_REF_TYPE *obj);   /* default */
 ```
 
-Atomically increments the reference count. Returns the same pointer, or `NULL` if the input is `NULL`. Thread-safe.
+Atomically increments the reference count. Returns the same pointer, or `NULL` if the input is `NULL`. Thread-safe. The caller must hold a live reference while duplicating it; neither this function nor the debugging helper can safely operate on an object already being destroyed.
 
 ### Decrement reference count / free
 
@@ -223,7 +223,7 @@ void example(void) {
 
 The `_wrapper_s` header holds the reference count (and optional `flx_size` / `metadata` fields). Callers never see it — they only receive a pointer to the `FIO_REF_TYPE` that immediately follows.
 
-The header's declared alignment matches `_Alignof(FIO_REF_TYPE)`, so its size rounds up to a multiple of that alignment and the object that follows it is always correctly aligned. Allocation goes through `FIO_MEM_REALLOC_ALIGNED_` with the type's alignment (the allocator treats smaller-than-default requests as the default), so over-aligned types work in every allocator configuration.
+The header's declared alignment is at least `_Alignof(FIO_REF_TYPE)` and may be greater if metadata needs it. Its size is a multiple of the wrapped type's alignment, keeping the object aligned. Allocation goes through `FIO_MEM_REALLOC_ALIGNED_` with the header's alignment (the allocator treats smaller-than-default requests as the default), so over-aligned types and metadata work in every allocator configuration.
 
 ---
 

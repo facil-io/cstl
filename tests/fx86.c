@@ -331,6 +331,41 @@ int main(void) {
     }
   }
 
+  { /* SHA-512 rounds: independent scalar two-round reference. */
+    const uint64_t initial[8] = {0x6a09e667f3bcc908ULL,
+                                 0xbb67ae8584caa73bULL,
+                                 0x3c6ef372fe94f82bULL,
+                                 0xa54ff53a5f1d36f1ULL,
+                                 0x510e527fade682d1ULL,
+                                 0x9b05688c2b3e6c1fULL,
+                                 0x1f83d9abfb41bd6bULL,
+                                 0x5be0cd19137e2179ULL};
+    const uint64_t wk[2] = {0x428a2f98d728ae22ULL,
+                            0x7137449123ef65cdULL};
+    uint64_t dest[4] = {initial[7], initial[6], initial[3], initial[2]};
+    uint64_t src[4] = {initial[5], initial[4], initial[1], initial[0]};
+    uint64_t got[4];
+    uint64_t a = initial[0], b = initial[1], c = initial[2], d = initial[3];
+    uint64_t e = initial[4], f = initial[5], g = initial[6], h = initial[7];
+    for (unsigned i = 0; i < 2; ++i) {
+      uint64_t s1 = ((e >> 14) | (e << 50)) ^ ((e >> 18) | (e << 46)) ^
+                    ((e >> 41) | (e << 23));
+      uint64_t s0 = ((a >> 28) | (a << 36)) ^ ((a >> 34) | (a << 30)) ^
+                    ((a >> 39) | (a << 25));
+      uint64_t t1 = h + s1 + ((e & f) ^ (~e & g)) + wk[i];
+      uint64_t t2 = s0 + ((a & b) ^ (a & c) ^ (b & c));
+      h = g; g = f; f = e; e = d + t1;
+      d = c; c = b; b = a; a = t1 + t2;
+    }
+    fio_fx86_256_storeu_si256(
+        got, fio_fx86_256_sha512rnds2_epi64(fio_fx86_256_loadu_si256(dest),
+                                           fio_fx86_256_loadu_si256(src),
+                                           fio_fx86_loadu_si128(wk)));
+    uint64_t expected[4] = {f, e, b, a};
+    FIO_ASSERT(!FIO_MEMCMP(got, expected, sizeof got),
+               "SHA-512 rounds intrinsic layout mismatch");
+  }
+
   fprintf(stderr, "* fx86 tests passed\n");
   return 0;
 }

@@ -55,7 +55,7 @@ uint32_t fio_xor_rrot2_shr_32(uint32_t x, uint8_t a, uint8_t b, uint8_t c);
 uint64_t fio_xor_rrot2_shr_64(uint64_t x, uint8_t a, uint8_t b, uint8_t c);
 ```
 
-Computes `ROTR(x,a) ^ ROTR(x,b) ^ (x >> c)`. Used by SHA-256/SHA-512 lowercase sigma functions for message scheduling.
+Computes `ROTR(x,a) ^ ROTR(x,b) ^ (x >> c)`. Used by SHA-256/SHA-512 lowercase sigma functions for message scheduling. Rotation and shift counts are reduced modulo the operand width.
 
 ## XOR masking
 
@@ -124,7 +124,7 @@ uint32_t fio_has_full_byte32(uint32_t row);
 
 * `fio_has_zero_byte32` detects `0x00` bytes.
 * `fio_has_byte32` detects an arbitrary byte value.
-* `fio_has_full_byte32` detects `0x00` bytes — the source's inline comment claims `0xFF`, but the implementation calls `fio_has_zero_byte32(row)`.
+* `fio_has_full_byte32` detects `0xFF` bytes (exact, no false positives).
 
 ### 64-bit vectors
 

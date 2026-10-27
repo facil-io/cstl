@@ -81,10 +81,12 @@ These macros are defined in [`./001 header.h`](./001%20header.h) and are re-eval
 - **`FIO_MEMORY_DISABLE`** — Define to disable all custom facil.io allocators and force system `malloc`/`free` for temporary allocations.
 - **`FIO_MALLOC_TMP_USE_SYSTEM`** — Force the recursive allocator variant to use the system `realloc`/`free`. Useful when a custom `FIO_MEM_REALLOC` needs an allocation path that will not recurse back into facil.io.
 - **`FIO_MEM_REALLOC_` / `FIO_MEM_FREE_`** — Recursive-safe copies of `FIO_MEM_REALLOC`/`FIO_MEM_FREE`. Override these when the custom allocator itself needs to allocate or free memory without re-entering the override.
-- **`FIO_MEM_REALLOC_ALIGNED(ptr, old_size, new_size, copy_len, alignment)`** — Reallocate with a minimum pointer alignment, **assigning** the result to `ptr` (save a copy first if failure must be recoverable). `alignment` of `0` selects the allocator default; non power-of-2 values are rounded down to a power of 2; effective alignment never drops below the current alignment of `ptr` nor below the allocator default. Routes to `fio_realloc_aligned` when the facil.io allocator is available, or to the system backends (`_aligned_realloc` on Windows, `posix_memalign`-based emulation on POSIX).
+- **`FIO_MEM_REALLOC_ALIGNED(ptr, old_size, new_size, copy_len, alignment)`** — Reallocate with a minimum pointer alignment, **assigning** the result to `ptr` (save a copy first if failure must be recoverable). `alignment` of `0` selects the allocator default; non power-of-2 values are rounded down to a power of 2; effective alignment never drops below the current alignment of `ptr` nor below the allocator default. Routes to `fio_realloc_aligned` when the facil.io allocator is available, or to allocate-copy-free system backends (`_aligned_malloc` on Windows, `posix_memalign` on POSIX, checked over-allocation elsewhere). Without the facil.io allocator, the default is the larger of `_Alignof(long double)` and `sizeof(void *)`, not `sizeof(long double)`. Overflow in the portable backend returns `NULL` with `errno = ENOMEM`, leaving the old allocation intact.
 - **`FIO_MEM_FREE_ALIGNED(ptr, size)`** — Free a block obtained through `FIO_MEM_REALLOC_ALIGNED`. With the facil.io allocator this is simply `fio_free` (which accepts interior pointers); with the system backends it routes to `_aligned_free` on Windows or `free` on POSIX. Custom allocators that stash alignment bookkeeping near the returned pointer should override this pair together.
 - **`FIO_MEM_ALLOC_SIZE(size)`** — The usable bytes the allocator reserves for a `size` request (`fio_alloc_size`, or the identity function with the system allocator).
 - **`FIO_MEM_REALLOC_ALIGNED_` / `FIO_MEM_FREE_ALIGNED_`** — Recursive-safe copies of the aligned pair, mirroring `FIO_MEM_REALLOC_` / `FIO_MEM_FREE_`.
+
+**Aligned reallocation contract:** a non-`NULL` source must come from the same aligned allocator backend and remain live. `copy_len` must not exceed its readable, initialized bytes; the copy is limited by `new_size`, not by `old_size`. Default backends may ignore `old_size`, so it does not validate the source bounds. Save the old pointer before calling the assigning macro if allocation failure must be recoverable.
 
 ### Pointer tagging
 
@@ -99,7 +101,7 @@ These macros are defined in [`./001 header.h`](./001%20header.h) and let include
 - **`FIO_PTR_TAG_VALID_OR_GOTO(tagged_ptr, label)`** — Validates the tagged pointer and jumps to `label` if it fails validation.
 - **`FIO_PTR_TAG_GET_UNTAGGED(untagged_type, tagged_ptr)`** — Cast the untagged pointer to `untagged_type *`.
 
-Pointer tagging is used by dynamic-type wrappers (for example, FIOBJ) to distinguish object kinds without a separate type field.
+Pointer tagging is used by dynamic-type wrappers (for example, FIOBJ) to distinguish object kinds without a separate type field. For a pointer whose low bit is always zero, a matching tag/untag pair is `((uintptr_t)(p) | (uintptr_t)1)` and `((uintptr_t)(p) & ~(uintptr_t)1)`. Only clear reserved tag bits, preserve all other pointer bits, and make custom validation reject both `NULL` and a tagged `NULL`.
 
 ## See Also
 

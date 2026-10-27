@@ -568,8 +568,25 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___pubsub_history_channel,
 #undef FIO___PUBSUB_HISTORY_CHANNEL_HASH
 #undef FIO___PUBSUB_HISTORY_CHANNEL_CMP
 
+/** Cache bytes accounted for `len` data bytes - saturates at SIZE_MAX. */
+FIO_IFUNC size_t fio___pubsub_history_cache_bytes(size_t len) {
+  const size_t overhead = sizeof(fio_ipc_s) + 8;
+  return (len > SIZE_MAX - overhead) ? SIZE_MAX : len + overhead;
+}
+
+/**
+ * True if `bytes` more can be stored: exact (not saturated), within `limit`
+ * (larger entries could only evict everything, themselves included) and
+ * without wrapping the `size` total. History is best effort: else rejected.
+ */
+FIO_IFUNC int fio___pubsub_history_cache_fits(size_t size,
+                                              size_t limit,
+                                              size_t bytes) {
+  return bytes < SIZE_MAX && bytes <= limit && bytes <= SIZE_MAX - size;
+}
+
 FIO_IFUNC size_t fio___pubsub_history_cache_ipc_size(fio_ipc_s *ipc) {
-  return ipc->len + sizeof(*ipc) + 8;
+  return fio___pubsub_history_cache_bytes((size_t)ipc->len);
 }
 
 FIO_IFUNC int fio___pubsub_history_channel_push(
@@ -578,15 +595,34 @@ FIO_IFUNC int fio___pubsub_history_channel_push(
   fio_ipc_s **pos = fio___pubsub_history_channel_get(map, msg);
   if (pos) {
     FIO_LOG_DDEBUG2("(%d) History message push filtered (existing): %p-%p",
+                    fio_io_pid(),
                     (void *)msg->timestamp,
                     (void *)msg->id);
     return -1;
   }
   pos = fio___pubsub_history_channel_set(map, fio_ipc_dup(msg), 1);
+  if (!pos) {
+    fio_ipc_free(msg); /* release the reference taken by `fio_ipc_dup` */
+    return -1;
+  }
+  if (map->count != map->w) { /* compact removed (NULL) slots before sort */
+    fio___pubsub_history_channel_rehash(map);
+    pos = fio___pubsub_history_channel_get(map, msg);
+  }
   fio___pubsub_history_channel_sort(map->ary, map->w);
-  if (*pos != msg) /* did the order change? */
+  if (!pos || *pos != msg) /* did the order change? */
     fio___pubsub_history_channel_rehash(map);
   return 0;
+}
+
+/**
+ * Compacts removed (NULL) slots so `ary[0..w)` is dense and time ordered.
+ * Eviction (`channel_pop`) leaves holes; every ordered reader calls this.
+ */
+FIO_IFUNC void fio___pubsub_history_channel_compact(
+    fio___pubsub_history_channel_s *map) {
+  if (map->count != map->w)
+    fio___pubsub_history_channel_rehash(map);
 }
 
 FIO_IFUNC size_t
@@ -594,6 +630,8 @@ fio___pubsub_history_channel_pop(fio___pubsub_history_channel_s *map) {
   size_t r = 0;
   if (!map->count)
     return r;
+  if (map->count != map->w) /* compact, so ary[0] is the oldest message */
+    fio___pubsub_history_channel_rehash(map);
   fio_ipc_s *old = map->ary[0];
   r = fio___pubsub_history_cache_ipc_size(old);
   fio___pubsub_history_channel_remove(map, old);
@@ -683,6 +721,17 @@ fio___pubsub_history_cache_channel_new(fio___pubsub_history_cache_s *cache,
 Global State
 ***************************************************************************** */
 
+/* builtin engine callbacks (constant initializers below, never re-written) */
+FIO_SFUNC void fio___pubsub_engine_ipc_noop(const fio_pubsub_engine_s *eng);
+FIO_SFUNC void fio___pubsub_engine_ipc_sub_noop(const fio_pubsub_engine_s *eng,
+                                                const fio_buf_info_s channel,
+                                                int16_t filter);
+FIO_SFUNC void fio___pubsub_engine_ipc_publish(const fio_pubsub_engine_s *eng,
+                                               const fio_pubsub_msg_s *msg);
+FIO_SFUNC void fio___pubsub_engine_cluster_publish(
+    const fio_pubsub_engine_s *eng,
+    const fio_pubsub_msg_s *msg);
+
 static struct {
   fio___pubsub_channel_map_s channels;
   fio___pubsub_channel_map_s patterns;
@@ -694,7 +743,26 @@ static struct {
   fio_pubsub_engine_s cluster_engine;
   fio_pubsub_history_s cache_manager;
   fio___pubsub_history_cache_s cache;
-} FIO___PUBSUB_POSTOFFICE;
+} FIO___PUBSUB_POSTOFFICE = {
+    .local_engine =
+        {
+            .detached = fio___pubsub_engine_ipc_noop,
+            .subscribe = fio___pubsub_engine_ipc_sub_noop,
+            .psubscribe = fio___pubsub_engine_ipc_sub_noop,
+            .unsubscribe = fio___pubsub_engine_ipc_sub_noop,
+            .punsubscribe = fio___pubsub_engine_ipc_sub_noop,
+            .publish = fio___pubsub_engine_ipc_publish,
+        },
+    .cluster_engine =
+        {
+            .detached = fio___pubsub_engine_ipc_noop,
+            .subscribe = fio___pubsub_engine_ipc_sub_noop,
+            .psubscribe = fio___pubsub_engine_ipc_sub_noop,
+            .unsubscribe = fio___pubsub_engine_ipc_sub_noop,
+            .punsubscribe = fio___pubsub_engine_ipc_sub_noop,
+            .publish = fio___pubsub_engine_cluster_publish,
+        },
+};
 
 /* *****************************************************************************
 Pattern Matching & Defaults
@@ -729,13 +797,23 @@ SFUNC fio_pubsub_engine_s const *fio_pubsub_engine_default_set(
 Initialization & Cleanup
 ***************************************************************************** */
 
-FIO_SFUNC void fio___pubsub_cleanup(void *ignr_) {
+/**
+ * Releases engine and history manager collections.
+ *
+ * In a forked worker (`in_child`), engines are NOT notified: `detached` is a
+ * master-only callback, the master still owns (and may free) the engines, and
+ * workers may keep publishing through them (e.g., the default engine). The
+ * worker only drops its collection.
+ */
+FIO_SFUNC void fio___pubsub_cleanup(int in_child) {
   /* Cleanup engines.
    * Note: FIO_IMAP_EACH is safe on empty/destroyed arrays (w == 0).
    * fio___pubsub_engines_destroy is safe to call multiple times. */
-  FIO_IMAP_EACH(fio___pubsub_engines, &FIO___PUBSUB_POSTOFFICE.engines, i) {
-    fio_pubsub_engine_s *e = FIO___PUBSUB_POSTOFFICE.engines.ary[i];
-    e->detached(e);
+  if (!in_child) {
+    FIO_IMAP_EACH(fio___pubsub_engines, &FIO___PUBSUB_POSTOFFICE.engines, i) {
+      fio_pubsub_engine_s *e = FIO___PUBSUB_POSTOFFICE.engines.ary[i];
+      e->detached(e);
+    }
   }
   fio___pubsub_engines_destroy(&FIO___PUBSUB_POSTOFFICE.engines);
 
@@ -754,11 +832,11 @@ FIO_SFUNC void fio___pubsub_cleanup(void *ignr_) {
   /* clearns and destroys the history cache, just in case */
   FIO___PUBSUB_POSTOFFICE.cache_manager.detached(
       &FIO___PUBSUB_POSTOFFICE.cache_manager);
-  (void)ignr_;
 }
 
 FIO_SFUNC void fio___pubsub_at_exit(void *ignr_) {
-  fio___pubsub_cleanup(ignr_);
+  (void)ignr_;
+  fio___pubsub_cleanup(0);
   fio___pubsub_channel_map_destroy(&FIO___PUBSUB_POSTOFFICE.channels);
   fio___pubsub_channel_map_destroy(&FIO___PUBSUB_POSTOFFICE.patterns);
 }
@@ -780,8 +858,8 @@ FIO_SFUNC void fio___pubsub_on_fork(void *ignr_) {
   (void)ignr_;
   if (fio_io_is_master())
     return;
-  /* Clean up engines and history managers inherited from master */
-  fio___pubsub_cleanup(ignr_);
+  /* Drop engines and history managers inherited from master */
+  fio___pubsub_cleanup(1);
 
   /* Unsubscribe from master_only subscriptions.
    * These should be removed from workers - remove them and clean them up,
@@ -812,8 +890,7 @@ FIO_CONSTRUCTOR(fio___pubsub_init) {
   FIO___PUBSUB_POSTOFFICE.match_fn = fio_glob_match;
   FIO___PUBSUB_POSTOFFICE.default_engine =
       (fio_pubsub_engine_s *)fio_pubsub_engine_ipc();
-  fio_pubsub_engine_cluster(); /* initialize cluster engine */
-  fio_pubsub_history_cache(0); /* initialize history limit */
+  fio_pubsub_history_cache(0); /* initialize history limit (env / default) */
   /* Register op-code for receiving messages */
   if (fio_ipc_opcode_register(.opcode = FIO___PUBSUB_OPCODE_PUBLISH,
                               .call =
@@ -821,8 +898,6 @@ FIO_CONSTRUCTOR(fio___pubsub_init) {
     FIO_LOG_ERROR("fio_pubsub_cluster_init: failed to register op-code");
     return;
   }
-
-  fio_pubsub_history_cache(FIO_PUBSUB_HISTORY_DEFAULT_CACHE_SIZE_LIMIT);
   fio_state_callback_add(FIO_CALL_PRE_START, fio___pubsub_pre_start, NULL);
   fio_state_callback_add(FIO_CALL_IN_CHILD, fio___pubsub_on_fork, NULL);
   fio_state_callback_add(FIO_CALL_AT_EXIT, fio___pubsub_at_exit, NULL);
@@ -832,18 +907,46 @@ FIO_CONSTRUCTOR(fio___pubsub_init) {
 IPC to fio_pubsub_msg_s Format Helper
 ***************************************************************************** */
 
-/** Extract pub/sub message from IPC message */
-FIO_IFUNC fio_pubsub_msg_s fio___pubsub_ipc2msg(fio_ipc_s *ipc) {
-  fio_pubsub_msg_s m = {
+/**
+ * Extracts a pub/sub message from an IPC payload, validating the layout:
+ *
+ *     [u32 channel_len][u32 message_len][channel]\0[message]\0
+ *
+ * Returns 0 on success, -1 (leaving `m` untouched) if malformed. Bounds use
+ * subtraction only, so peer supplied lengths cannot wrap the arithmetic.
+ */
+FIO_IFUNC int fio___pubsub_ipc2msg_checked(fio_pubsub_msg_s *m,
+                                           fio_ipc_s *ipc) {
+  size_t len = (size_t)ipc->len;
+  if (FIO_UNLIKELY(len < sizeof(uint32_t[2]) + 2))
+    return -1;
+  const size_t clen = (size_t)fio_buf2u32u(ipc->data);
+  const size_t mlen = (size_t)fio_buf2u32u(ipc->data + 4);
+  len -= sizeof(uint32_t[2]) + 2;
+  if (FIO_UNLIKELY(clen > len || mlen > len - clen))
+    return -1;
+  char *const cbuf = ipc->data + sizeof(uint32_t[2]);
+  if (FIO_UNLIKELY(cbuf[clen] | cbuf[clen + 1 + mlen]))
+    return -1; /* both buffers are NUL terminated by every writer */
+  *m = (fio_pubsub_msg_s){
       .timestamp = ipc->timestamp,
       .id = ipc->id,
-      .channel = FIO_BUF_INFO2(ipc->data + 8, fio_buf2u32u(ipc->data)),
-      .message = FIO_BUF_INFO2(ipc->data + 9 + fio_buf2u32u(ipc->data),
-                               fio_buf2u32u(ipc->data + 4)),
+      .channel = FIO_BUF_INFO2(cbuf, clen),
+      .message = FIO_BUF_INFO2(cbuf + clen + 1, mlen),
       .filter = (int16_t)ipc->flags,
   };
-  if (m.channel.len + m.message.len + 2 > ipc->len)
-    m.channel = m.message = FIO_BUF_INFO0;
+  return 0;
+}
+
+/** Extract pub/sub message (empty channel / message if malformed). */
+FIO_IFUNC fio_pubsub_msg_s fio___pubsub_ipc2msg(fio_ipc_s *ipc) {
+  fio_pubsub_msg_s m;
+  if (FIO_UNLIKELY(fio___pubsub_ipc2msg_checked(&m, ipc)))
+    m = (fio_pubsub_msg_s){
+        .timestamp = ipc->timestamp,
+        .id = ipc->id,
+        .filter = (int16_t)ipc->flags,
+    };
   return m;
 }
 
@@ -907,18 +1010,23 @@ SFUNC fio_ipc_s *fio_pubsub_msg2ipc(fio_pubsub_msg_s *msg) {
 Message Delivery to History Managers
 ***************************************************************************** */
 
-FIO_SFUNC void fio___pubsub_history_ipc_push(fio_ipc_s *ipc) {
-  fio_pubsub_msg_s msg = fio___pubsub_ipc2msg(ipc);
-  msg.io = NULL;
-
-  /* update history engines (if any) about message */
+/** Pushes a message to every history manager (`msg` MUST be IPC backed). */
+FIO_IFUNC void fio___pubsub_history_push_msg(fio_pubsub_msg_s *msg) {
   FIO_IMAP_EACH(fio___pubsub_history_managers,
                 &FIO___PUBSUB_POSTOFFICE.history_managers,
                 i) {
     fio_pubsub_history_s *mgr =
         FIO___PUBSUB_POSTOFFICE.history_managers.ary[i].manager;
-    mgr->push(mgr, &msg);
+    mgr->push(mgr, msg);
   }
+}
+
+FIO_SFUNC void fio___pubsub_history_ipc_push(fio_ipc_s *ipc) {
+  fio_pubsub_msg_s msg;
+  if (FIO_UNLIKELY(fio___pubsub_ipc2msg_checked(&msg, ipc)))
+    return; /* history managers rebuild the IPC from `msg` - never malformed */
+  msg.io = NULL;
+  fio___pubsub_history_push_msg(&msg);
 }
 
 SFUNC void fio_pubsub_history_push_all(fio_pubsub_msg_s *msg) {
@@ -943,9 +1051,9 @@ FIO_SFUNC void fio___pubsub_notify_master_of_subscription(fio_ipc_s *ipc) {
   if (ipc->len < 5)
     return;
   fio_buf_info_s chname = FIO_BUF_INFO2(ipc->data + 5, fio_buf2u32u(ipc->data));
-  if (chname.len + 5 > ipc->len)
+  if (chname.len > (size_t)ipc->len - 5)
     return;
-  uint8_t is_pattern = ipc->data[4];
+  uint8_t is_pattern = (uint8_t) !!ipc->data[4]; /* untrusted byte: 0 / 1 */
   int16_t filter = (int16_t)ipc->flags;
   fio_pubsub_subscribe(.io = ipc->from,
                        .channel = chname,
@@ -958,9 +1066,9 @@ FIO_SFUNC void fio___pubsub_notify_master_of_unsubscription(fio_ipc_s *ipc) {
   if (ipc->len < 5)
     return;
   fio_buf_info_s chname = FIO_BUF_INFO2(ipc->data + 5, fio_buf2u32u(ipc->data));
-  if (chname.len + 5 > ipc->len)
+  if (chname.len > (size_t)ipc->len - 5)
     return;
-  uint8_t is_pattern = ipc->data[4];
+  uint8_t is_pattern = (uint8_t) !!ipc->data[4]; /* untrusted byte: 0 / 1 */
   int16_t filter = (int16_t)ipc->flags;
   fio_pubsub_unsubscribe(.io = ipc->from,
                          .channel = chname,
@@ -973,10 +1081,11 @@ FIO_SFUNC void fio___pubsub_channel_on_create(fio_pubsub_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
   ch->is_pattern = !!ch->is_pattern;
   FIO_IMAP_EACH(fio___pubsub_engines, &FIO___PUBSUB_POSTOFFICE.engines, i) {
-    (&FIO___PUBSUB_POSTOFFICE.engines.ary[i]->subscribe)[ch->is_pattern](
-        FIO___PUBSUB_POSTOFFICE.engines.ary[i],
-        name,
-        ch->filter);
+    fio_pubsub_engine_s *e = FIO___PUBSUB_POSTOFFICE.engines.ary[i];
+    if (ch->is_pattern)
+      e->psubscribe(e, name, ch->filter);
+    else
+      e->subscribe(e, name, ch->filter);
   }
   if (!fio_io_is_master()) {
     fio_ipc_call(.call = fio___pubsub_notify_master_of_subscription,
@@ -995,10 +1104,11 @@ FIO_SFUNC void fio___pubsub_channel_on_create(fio_pubsub_channel_s *ch) {
 FIO_SFUNC void fio___pubsub_channel_on_destroy(fio_pubsub_channel_s *ch) {
   fio_buf_info_s name = FIO_BUF_INFO2(ch->name, ch->name_len);
   FIO_IMAP_EACH(fio___pubsub_engines, &FIO___PUBSUB_POSTOFFICE.engines, i) {
-    (&FIO___PUBSUB_POSTOFFICE.engines.ary[i]->unsubscribe)[ch->is_pattern](
-        FIO___PUBSUB_POSTOFFICE.engines.ary[i],
-        name,
-        ch->filter);
+    fio_pubsub_engine_s *e = FIO___PUBSUB_POSTOFFICE.engines.ary[i];
+    if (ch->is_pattern)
+      e->punsubscribe(e, name, ch->filter);
+    else
+      e->unsubscribe(e, name, ch->filter);
   }
   if (!fio_io_is_master()) {
     fio_ipc_call(.call = fio___pubsub_notify_master_of_unsubscription,
@@ -1061,14 +1171,22 @@ FIO_SFUNC void fio___pubsub_engine_ipc_deliver2channel(fio_pubsub_channel_s *ch,
 
 /** Called in every process for message delivery */
 FIO_SFUNC void fio___pubsub_engine_ipc_publish_deliver(fio_ipc_s *ipc) {
-  fio_pubsub_msg_s msg = fio___pubsub_ipc2msg(ipc);
+  fio_pubsub_msg_s msg;
+  /* reject malformed (e.g., cluster peer) payloads before any delivery or
+   * history callback - history rebuilds the IPC pointer from `msg.channel` */
+  if (FIO_UNLIKELY(fio___pubsub_ipc2msg_checked(&msg, ipc))) {
+    FIO_LOG_DEBUG2("(%d) pub/sub dropped malformed message (%zu bytes)",
+                   fio_io_pid(),
+                   (size_t)ipc->len);
+    return;
+  }
   fio_str_info_s ch_name =
       FIO_STR_INFO3(msg.channel.buf,
                     msg.channel.len,
                     FIO___PUBSUB_CHANNEL_ENCODE_CAPA(msg.filter, 0));
   /* future scheduling - delivered only to the history buffer - stop here */
   if (ipc->timestamp >
-      (uint64_t)(fio_io_last_tick() + FIO_PUBSUB_FUTURE_LIMIT_MS))
+      (uint64_t)(fio_io_last_tick_time() + FIO_PUBSUB_FUTURE_LIMIT_MS))
     return;
 
   /* find channel match, schedule subscription tasks */
@@ -1095,7 +1213,8 @@ FIO_SFUNC void fio___pubsub_engine_ipc_publish_deliver(fio_ipc_s *ipc) {
   }
 
   /* Push to history manager - must be now, to sync history and publishing */
-  fio___pubsub_history_ipc_push(ipc);
+  msg.io = NULL;
+  fio___pubsub_history_push_msg(&msg);
   return;
 }
 
@@ -1142,30 +1261,14 @@ FIO_SFUNC void fio___pubsub_engine_cluster_publish(
   (void)eng; /* unused */
 }
 
+/* The builtin engines are constant-initialized and never written (read-only
+ * from any thread - the returned pointers are `const`). */
 SFUNC fio_pubsub_engine_s const *fio_pubsub_engine_ipc(void) {
-  /* just in case someone played nasty with our previously returned pointer */
-  FIO___PUBSUB_POSTOFFICE.local_engine = (fio_pubsub_engine_s){
-      .detached = fio___pubsub_engine_ipc_noop,
-      .subscribe = fio___pubsub_engine_ipc_sub_noop,
-      .psubscribe = fio___pubsub_engine_ipc_sub_noop,
-      .unsubscribe = fio___pubsub_engine_ipc_sub_noop,
-      .punsubscribe = fio___pubsub_engine_ipc_sub_noop,
-      .publish = fio___pubsub_engine_ipc_publish,
-  };
   return &FIO___PUBSUB_POSTOFFICE.local_engine;
 }
 
 /** Returns the builtin engine for multi-machine cluster publishing (RPC). */
 SFUNC fio_pubsub_engine_s const *fio_pubsub_engine_cluster(void) {
-  /* just in case someone played nasty with our previously returned pointer */
-  FIO___PUBSUB_POSTOFFICE.cluster_engine = (fio_pubsub_engine_s){
-      .detached = fio___pubsub_engine_ipc_noop,
-      .subscribe = fio___pubsub_engine_ipc_sub_noop,
-      .psubscribe = fio___pubsub_engine_ipc_sub_noop,
-      .unsubscribe = fio___pubsub_engine_ipc_sub_noop,
-      .punsubscribe = fio___pubsub_engine_ipc_sub_noop,
-      .publish = fio___pubsub_engine_cluster_publish,
-  };
   return &FIO___PUBSUB_POSTOFFICE.cluster_engine;
 }
 
@@ -1239,7 +1342,7 @@ SFUNC void fio_pubsub_publish FIO_NOOP(fio_pubsub_publish_args_s args) {
       .io = args.from,
       .id = args.id ? args.id : fio_rand64(),
       .timestamp = args.timestamp ? (uint64_t)args.timestamp
-                                  : (uint64_t)fio_io_last_tick(),
+                                  : (uint64_t)fio_io_last_tick_time(),
       .channel = args.channel,
       .message = args.message,
       .filter = args.filter,
@@ -1489,7 +1592,7 @@ FIO_SFUNC void fio___pubsub_subscription_on_destroy(
 
   FIO_ASSERT_ALLOC(c);
   /* no more subscribers - remove channel from channel collection */
-  if (!FIO_LIST_IS_EMPTY(&c->subscriptions))
+  if (FIO_LIST_IS_EMPTY(&c->subscriptions))
     fio___pubsub_channel_map_remove(
         (&FIO___PUBSUB_POSTOFFICE.channels + c->is_pattern),
         FIO_STR_INFO3(
@@ -1505,10 +1608,10 @@ History Request Implementation
 
 /** IPC handler: Worker receives history reply from master */
 FIO_SFUNC void fio___pubsub_worker_on_history_reply(fio_ipc_s *ipc) {
-  if (ipc->len < sizeof(uint32_t[2])) {
-    /* Empty reply or done signal - nothing to deliver */
+  fio_pubsub_msg_s msg;
+  /* Empty reply / done signal (or malformed) - nothing to deliver */
+  if (fio___pubsub_ipc2msg_checked(&msg, ipc))
     return;
-  }
 
   // FIO_LOG_DEBUG2("(%d) worker_on_history_reply: channel=%.*s",
   //                fio_io_pid(),
@@ -1550,8 +1653,11 @@ FIO_SFUNC void fio___pubsub_history_replay_ipc_cb(fio_pubsub_msg_s *msg,
       .done = 0);
 }
 
+/** Terminal replay callback: replies `done` and releases the request. */
 FIO_SFUNC void fio___pubsub_history_replay_ipc_done_cb(void *udata) {
-  fio_ipc_reply(udata, .done = 1);
+  fio_ipc_s *ipc = (fio_ipc_s *)udata;
+  fio_ipc_reply(ipc, .done = 1);
+  fio_ipc_free(ipc); /* the replay's reference (see `on_history_request`) */
 }
 
 /** IPC handler: Master receives history request from worker */
@@ -1567,6 +1673,13 @@ FIO_SFUNC void fio___pubsub_master_on_history_request(fio_ipc_s *ipc) {
 
   fio___pubsub_history_request_s *req =
       (fio___pubsub_history_request_s *)ipc->data;
+  if (req->channel_len >
+      (size_t)ipc->len - FIO___PUBSUB_HISTORY_REQUEST_HEADER_LEN) {
+    FIO_LOG_ERROR("(%d) master_on_history_request: invalid channel length",
+                  fio_io_pid());
+    fio_ipc_reply(ipc, .done = 1);
+    return;
+  }
   /* Filter is carried in IPC header flags */
   int16_t filter = (int16_t)ipc->flags;
 
@@ -1596,7 +1709,10 @@ FIO_SFUNC void fio___pubsub_master_on_history_request(fio_ipc_s *ipc) {
       break;
   }
 
-  /* Replay from selected manager, sending each message via IPC reply */
+  /* Replay from selected manager, sending each message via IPC reply.
+   * `replay` may complete asynchronously (after this handler returns and the
+   * IPC layer releases `ipc`): it owns a reference until `on_done` (which
+   * must be called exactly once). `channel` points into the request. */
   if (best)
     best->replay(best,
                  channel,
@@ -1604,7 +1720,7 @@ FIO_SFUNC void fio___pubsub_master_on_history_request(fio_ipc_s *ipc) {
                  req->replay_since,
                  fio___pubsub_history_replay_ipc_cb,
                  fio___pubsub_history_replay_ipc_done_cb,
-                 ipc);
+                 fio_ipc_dup(ipc));
   else
     fio_ipc_reply(ipc, .done = 1);
 }
@@ -1784,16 +1900,32 @@ FIO_SFUNC void fio___pubsub_history_cache_detached(
 FIO_SFUNC int fio___pubsub_history_cache_push(
     const struct fio_pubsub_history_s *hist,
     fio_pubsub_msg_s *msg) {
+  fio_ipc_s *ipc = fio___pubsub_msg2ipc(msg);
+  /* Accounting decided first: the size total can never wrap, and an entry
+   * larger than the limit is rejected (it could never fit, so eviction below
+   * would never reach the limit). */
+  if (!fio___pubsub_history_cache_fits(
+          FIO___PUBSUB_POSTOFFICE.cache.size,
+          FIO___PUBSUB_POSTOFFICE.cache.limit,
+          fio___pubsub_history_cache_ipc_size(ipc)))
+    return -1;
   fio___pubsub_history_channel_s *cache =
       fio___pubsub_history_cache_channel_new(&FIO___PUBSUB_POSTOFFICE.cache,
                                              msg->channel,
                                              msg->filter);
   if (!cache)
     return -1;
-  fio_ipc_s *ipc = fio___pubsub_msg2ipc(msg);
   fio_ipc_detach(ipc);
-  if (fio___pubsub_history_channel_push(cache, ipc))
-    return 0; /* exists */
+  if (fio___pubsub_history_channel_push(cache, ipc)) {
+    if (!cache->count) /* don't keep an empty channel created above */
+      fio___pubsub_history_map_remove(
+          &FIO___PUBSUB_POSTOFFICE.cache.map,
+          FIO_STR_INFO3(msg->channel.buf,
+                        msg->channel.len,
+                        (size_t)(uint16_t)msg->filter),
+          NULL);
+    return 0; /* exists (or OOM - history is best effort) */
+  }
   FIO___PUBSUB_POSTOFFICE.cache.size +=
       fio___pubsub_history_cache_ipc_size(ipc);
   for (; FIO___PUBSUB_POSTOFFICE.cache.size >
@@ -1815,7 +1947,7 @@ FIO_SFUNC int fio___pubsub_history_cache_push(
   }
 done:
   if (msg->timestamp >
-      (uint64_t)(fio_io_last_tick() + FIO_PUBSUB_FUTURE_LIMIT_MS)) {
+      (uint64_t)(fio_io_last_tick_time() + FIO_PUBSUB_FUTURE_LIMIT_MS)) {
     /* TODO: add timer for publishing the message using fio_pubsub_publish */
   }
   return 0;
@@ -1842,28 +1974,17 @@ FIO_SFUNC int fio___pubsub_history_cache_replay(
                                          filter);
   if (!cache || !cache->count)
     goto done;
+  fio___pubsub_history_channel_compact(cache);
+  const uint64_t now = (uint64_t)fio_io_last_tick_time();
+  /* lower bound: first message with `timestamp >= since` */
   size_t index = 0;
-  uint64_t now = fio_io_last_tick();
-  if (since > cache->ary[cache->w - 1]->timestamp)
-    goto done;
-  if (since <= cache->ary[index]->timestamp)
-    goto loop;
-  /* find best position in array (mini binary search) */
-  for (size_t step = cache->w; (step >>= 1);) {
-    if (!cache->ary[index]) {
-      --index;
-      continue;
-    }
-    if (since > cache->ary[index]->timestamp)
-      index += step;
-    else if (since < cache->ary[index]->timestamp)
-      index -= step;
+  for (size_t end = cache->w; index < end;) {
+    const size_t mid = index + ((end - index) >> 1);
+    if (cache->ary[mid]->timestamp < since)
+      index = mid + 1;
     else
-      goto loop;
+      end = mid;
   }
-  index -= (since < cache->ary[index]->timestamp);
-
-loop:
   for (; index < cache->w && cache->ary[index]->timestamp <= now; ++index) {
     fio_pubsub_msg_s msg = fio___pubsub_ipc2msg(cache->ary[index]);
     on_message(&msg, udata);
@@ -1887,16 +2008,18 @@ fio___pubsub_history_cache_oldest(const struct fio_pubsub_history_s *hist,
       fio___pubsub_history_cache_channel(&FIO___PUBSUB_POSTOFFICE.cache,
                                          channel,
                                          filter);
-  if (!cache)
+  if (!cache || !cache->count)
     return UINT64_MAX;
-  if (!cache->count)
-    return UINT64_MAX;
+  fio___pubsub_history_channel_compact(cache);
   return cache->ary[0]->timestamp;
   (void)hist;
 }
 
 SFUNC const fio_pubsub_history_s *fio_pubsub_history_cache(size_t size_limit) {
-  if (!size_limit && !FIO___PUBSUB_POSTOFFICE.cache.limit) {
+  /* takes effect on the next push, which evicts down to the new limit */
+  if (size_limit)
+    FIO___PUBSUB_POSTOFFICE.cache.limit = size_limit;
+  else if (!FIO___PUBSUB_POSTOFFICE.cache.limit) {
     size_t mul = 1024 * 1024;
     int64_t tmp;
     char *env = fio_sys_env("WEBSITE_MEMORY_LIMIT_MB");
@@ -1909,7 +2032,9 @@ SFUNC const fio_pubsub_history_s *fio_pubsub_history_cache(size_t size_limit) {
       env = fio_sys_env("WEBSITE_MEMORY_LIMIT");
     }
     if (env && (tmp = fio_atol(&env)) > 0)
-      size_limit = mul * tmp;
+      size_limit = ((uint64_t)tmp > (uint64_t)(SIZE_MAX / mul))
+                       ? SIZE_MAX
+                       : mul * (size_t)tmp;
     if (!size_limit)
       size_limit = FIO_PUBSUB_HISTORY_DEFAULT_CACHE_SIZE_LIMIT;
     FIO___PUBSUB_POSTOFFICE.cache.limit = size_limit;

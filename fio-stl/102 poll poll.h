@@ -20,16 +20,33 @@
 
 Copyright and License: see header file (000 copyright.h) or top of file
 ***************************************************************************** */
-#ifdef POLLRDHUP
+#if !FIO_OS_WIN && defined(POLLRDHUP)
 #define FIO_POLL_EX_FLAGS POLLRDHUP
 #else
 #define FIO_POLL_EX_FLAGS 0
 #endif
+/* WSAPoll rejects POLLPRI, even when combined with a valid event. */
+#if FIO_OS_WIN
+#define FIO___POLL_REQUEST_FLAGS (FIO_POLL_POSSIBLE_FLAGS & ~POLLPRI)
+#else
+#define FIO___POLL_REQUEST_FLAGS FIO_POLL_POSSIBLE_FLAGS
+#endif
+
+/* Empty reviews have no pollfd to wait on. Keep each wait below 2^32 ns so
+ * FIO_THREAD_WAIT remains safe on 32-bit platforms and for time_t / DWORD. */
+FIO_IFUNC void fio___poll_wait_ms(size_t timeout) {
+  while (timeout) {
+    const size_t chunk = timeout > 4000 ? 4000 : timeout;
+    FIO_THREAD_WAIT((uint64_t)chunk * UINT64_C(1000000));
+    timeout -= chunk;
+  }
+}
 
 typedef struct {
   void *udata;
   fio_socket_i fd;
   unsigned short flags;
+  size_t generation;
 } fio___poll_i_s;
 
 #define FIO___POLL_IMAP_CMP(a, b) ((a)->fd == (b)->fd)
@@ -38,7 +55,8 @@ typedef struct {
  * Removed slots are zeroed by the imap (fd == 0), so validity must reject
  * both FIO_SOCKET_INVALID and zeroed slots (fd 0 is never monitored here) -
  * otherwise rehashes resurrect removed entries as fd 0 zombies, duplicated
- * fd 0 entries then fail every __fill_imap and the map expands without bound. */
+ * fd 0 entries then fail every __fill_imap and the map expands without bound.
+ */
 #define FIO___POLL_IMAP_VALID(o) (FIO_SOCK_FD_ISVALID((o)->fd) && (o)->fd)
 FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
                        fio___poll_i_s,
@@ -50,12 +68,13 @@ FIO_TYPEDEF_IMAP_ARRAY(fio___poll_map,
 #undef FIO___POLL_IMAP_VALID
 #undef FIO___POLL_IMAP_HASH
 
-/* poll_review allocates this transient buffer after detaching the map. */
+/* poll_review allocates this transient snapshot before consuming map flags. */
 FIO_LEAK_COUNTER_DEF(fio___poll_review_buffer)
 
 struct fio_poll_s {
   fio_poll_settings_s settings;
   fio___poll_map_s map;
+  size_t next_generation;
   FIO___LOCK_TYPE lock;
 };
 
@@ -63,20 +82,23 @@ struct fio_poll_s {
 Poll Monitoring Implementation - inline static functions
 ***************************************************************************** */
 
-/** Initializes the polling object, allocating its resources. */
-FIO_IFUNC void fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
-  if (p) {
-    *p = (fio_poll_s){
-        .settings = args,
-        .map = {0},
-        .lock = FIO___LOCK_INIT,
-    };
-    FIO_POLL_VALIDATE(p->settings);
+/** Initializes the polling object. Returns 0 on success, -1 on error. */
+IFUNC int fio_poll_init FIO_NOOP(fio_poll_s *p, fio_poll_settings_s args) {
+  if (!p) {
+    errno = EINVAL;
+    return -1;
   }
+  *p = (fio_poll_s){
+      .settings = args,
+      .map = {0},
+      .lock = FIO___LOCK_INIT,
+  };
+  FIO_POLL_VALIDATE(p->settings);
+  return 0;
 }
 
 /** Destroys the polling object, freeing its resources. */
-FIO_IFUNC void fio_poll_destroy(fio_poll_s *p) {
+IFUNC void fio_poll_destroy(fio_poll_s *p) {
   if (!p)
     return;
   fio___poll_map_destroy(&p->map);
@@ -117,10 +139,19 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
                            void *udata,
                            unsigned short flags) {
   int r = -1;
-  if (!p || fd == FIO_SOCKET_INVALID)
+  if (!p || !FIO_SOCK_FD_ISVALID(fd) || !fd)
     return r;
   r = 0;
-  flags &= FIO_POLL_POSSIBLE_FLAGS;
+#if FIO_OS_WIN
+  /* Reject priority-only requests rather than poisoning the whole WSAPoll
+   * batch; mixed requests retain their supported IN/OUT flags. */
+  if ((flags & FIO_POLL_POSSIBLE_FLAGS) &&
+      !(flags & FIO___POLL_REQUEST_FLAGS)) {
+    errno = EINVAL;
+    return -1;
+  }
+#endif
+  flags &= FIO___POLL_REQUEST_FLAGS;
   flags |= FIO_POLL_EX_FLAGS;
   FIO___LOCK_LOCK(p->lock);
   fio___poll_i_s *ptr = fio___poll_map_get(&p->map, (fio___poll_i_s){.fd = fd});
@@ -128,11 +159,17 @@ SFUNC int fio_poll_monitor(fio_poll_s *p,
     /* re-arm: OR in new flags, always update udata */
     ptr->flags |= flags;
     ptr->udata = udata;
-  } else if (!fio___poll_map_set(
-                 &p->map,
-                 (fio___poll_i_s){.udata = udata, .fd = fd, .flags = flags},
-                 1)) {
-    r = -1;
+  } else {
+    size_t generation = ++p->next_generation;
+    if (!generation)
+      generation = ++p->next_generation;
+    if (!fio___poll_map_set(&p->map,
+                            (fio___poll_i_s){.udata = udata,
+                                             .fd = fd,
+                                             .flags = flags,
+                                             .generation = generation},
+                            1))
+      r = -1;
   }
   FIO___LOCK_UNLOCK(p->lock);
   return r;
@@ -161,8 +198,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   const size_t max = p->map.count;
   if (!max) {
     FIO___LOCK_UNLOCK(p->lock);
-    if (timeout)
-      FIO_THREAD_WAIT((timeout * 1000000));
+    fio___poll_wait_ms(timeout);
     return 0;
   }
 
@@ -171,6 +207,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   void **uary = NULL;
   size_t pfd_bytes = 0;
   size_t alloc_size = 0;
+  size_t *generations = NULL;
   /* poll()/WSAPoll() receive an int-sized count here. Guard both that
    * narrowing and the one-block allocation arithmetic. */
   if (max > (size_t)INT_MAX ||
@@ -180,12 +217,12 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     return -1;
   }
   pfd_bytes = (max * sizeof(*pfd) + sizeof(void *) - 1) & ~(sizeof(void *) - 1);
-  if (max > ((SIZE_MAX - pfd_bytes) / sizeof(*uary))) {
+  if (max > ((SIZE_MAX - pfd_bytes) / (sizeof(*uary) + sizeof(*generations)))) {
     FIO___LOCK_UNLOCK(p->lock);
     errno = ENOMEM;
     return -1;
   }
-  alloc_size = pfd_bytes + max * sizeof(*uary);
+  alloc_size = pfd_bytes + max * (sizeof(*uary) + sizeof(*generations));
   pfd = (struct pollfd *)FIO_MEM_REALLOC_(NULL, 0, alloc_size, 0);
   if (!pfd) {
     FIO___LOCK_UNLOCK(p->lock);
@@ -198,14 +235,16 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
    * monitor calls update the live map without a fallible merge afterwards. */
   fio_poll_s cpy = {.settings = p->settings};
   uary = (void **)((char *)pfd + pfd_bytes);
-  const unsigned short flag_mask = FIO_POLL_POSSIBLE_FLAGS | FIO_POLL_EX_FLAGS;
+  generations = (size_t *)(uary + max);
+  const unsigned short flag_mask = FIO___POLL_REQUEST_FLAGS | FIO_POLL_EX_FLAGS;
   FIO_IMAP_EACH(fio___poll_map, (&p->map), pos) {
     fio___poll_i_s *entry = p->map.ary + pos;
     if (!(entry->flags & flag_mask))
       continue;
     pfd[r].fd = entry->fd;
-    pfd[r].events = (short)(entry->flags & FIO_POLL_POSSIBLE_FLAGS);
+    pfd[r].events = (short)(entry->flags & flag_mask);
     uary[r] = entry->udata;
+    generations[r] = entry->generation;
     entry->flags = 0;
     ++r;
   }
@@ -216,8 +255,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
   if (!r) {
     FIO_LEAK_COUNTER_ON_FREE(fio___poll_review_buffer);
     FIO_MEM_FREE_(pfd, alloc_size);
-    if (timeout)
-      FIO_THREAD_WAIT((timeout * 1000000));
+    fio___poll_wait_ms(timeout);
     return 0;
   }
 
@@ -226,6 +264,8 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
     int timeout_ms = (timeout > (size_t)INT_MAX) ? INT_MAX : (int)timeout;
 #if FIO_OS_WIN
     events = WSAPoll(pfd, r, timeout_ms);
+    if (events == -1)
+      fio___sock_wsa_set_errno_last();
 #else
     events = poll(pfd, r, timeout_ms);
 #endif
@@ -263,7 +303,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
       continue;
     fio___poll_i_s *entry =
         fio___poll_map_get(&p->map, (fio___poll_i_s){.fd = pfd[j].fd});
-    if (entry)
+    if (entry && entry->generation == generations[j])
       entry->flags |= (unsigned short)pfd[j].events;
   }
   FIO___LOCK_UNLOCK(p->lock);
@@ -274,7 +314,7 @@ SFUNC int fio_poll_review(fio_poll_s *p, size_t timeout) {
 
 /** Stops monitoring the specified file descriptor, returning -1 on error. */
 SFUNC int fio_poll_forget(fio_poll_s *p, fio_socket_i fd) {
-  if (!p || fd == FIO_SOCKET_INVALID)
+  if (!p || !FIO_SOCK_FD_ISVALID(fd) || !fd)
     return -1;
   FIO___LOCK_LOCK(p->lock);
   int r = fio___poll_map_remove(&p->map, (fio___poll_i_s){.fd = fd});
@@ -303,6 +343,7 @@ SFUNC void fio_poll_close_all(fio_poll_s *p) {
 Cleanup
 ***************************************************************************** */
 #undef FIO_POLL_EX_FLAGS
+#undef FIO___POLL_REQUEST_FLAGS
 #endif /* FIO_EXTERN_COMPLETE */
 #endif /* FIO_POLL_ENGINE_POLL */
 

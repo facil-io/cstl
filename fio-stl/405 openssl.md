@@ -54,9 +54,10 @@ Returns the `fio_io_functions_s` vtable that wires OpenSSL into the IO reactor:
 | Field | Role |
 |-------|------|
 | `build_context` | Converts `fio_io_tls_s` into an `SSL_CTX` wrapper |
-| `free_context` | Deferred free of `SSL_CTX` and the `fio_io_tls_s` reference |
-| `start` | Per-connection: `SSL_new`, custom BIO setup, initial handshake |
-| `read` | Non-blocking decrypt: advances handshake if needed, then `SSL_read_ex` |
+| `free_context` | Deferred release of one context reference; `SSL_CTX` and the `fio_io_tls_s` reference are freed after the last reference (including connections, until `cleanup`) |
+| `dup_context` | Returns another reference to the context (listeners pass one to each accepted connection) |
+| `start` | Per-connection: `SSL_new`, custom BIO setup, initial handshake; the connection takes over the IO's context reference. On setup failure the reference is released and the connection is closed |
+| `read` | Non-blocking decrypt: advances handshake if needed, then `SSL_read_ex`. Records already received before the peer's FIN are delivered before EOF; fatal TLS errors close the connection |
 | `write` | Non-blocking encrypt: `SSL_write_ex` → encrypt → socket |
 | `flush` | Sends any pending encrypted bytes from the internal buffer |
 | `finish` | Sends TLS `close_notify` before the TCP close |
@@ -109,18 +110,18 @@ fio_io_tls_alpn_add(tls, "http/1.1", on_http1_selected);
 fio_io_tls_trust_add(tls, NULL);      /* use system trust store */
 fio_io_tls_trust_add(tls, "ca.pem"); /* or a specific CA bundle */
 
-/* Listen */
+/* Listen: ownership of `tls` moves to the call (success or failure) */
 fio_io_listen(.url = "0.0.0.0:443",
               .protocol = &MY_PROTOCOL,
               .tls = tls);
 
-fio_io_tls_free(tls); /* release your reference; the listener holds its own */
 fio_io_start(0);
 ```
 
 `fio_io_tls_s` is reference-counted (`fio_io_tls_dup` / `fio_io_tls_free`).
-The backend duplicates the reference during `build_context`; freeing yours
-after `fio_io_listen` is always safe.
+`fio_io_listen` and `fio_io_connect` take ownership of `.tls`; to reuse the
+object, pass `fio_io_tls_dup(tls)` and later `fio_io_tls_free(tls)` your own
+reference.
 
 ### URL shorthand
 
@@ -142,12 +143,17 @@ See `fio_io_tls_from_url` in `401 io api.h` for the query syntax.
 When `public_cert_file` and `private_key_file` are both provided to
 `fio_io_tls_cert_add`, the backend:
 
-1. Sets a PEM password callback if `pk_password` is non-`NULL`.
-2. Loads the certificate chain via `SSL_CTX_use_certificate_chain_file`.
-3. Loads the private key via `SSL_CTX_use_PrivateKey_file` (PEM format).
-4. Verifies key-cert consistency with `SSL_CTX_check_private_key`.
+1. Reads the certificate chain (leaf first, then any extra `CERTIFICATE`
+   blocks) into an `X509` and a `STACK_OF(X509)`.
+2. Reads the PEM private key (decrypted with `pk_password`, if any).
+3. Verifies key-cert consistency with `X509_check_private_key`.
 
-Errors are logged with `FIO_LOG_ERROR` and the context build fails.
+Errors are logged with `FIO_LOG_ERROR` and the context build fails
+(`build_context` returns `NULL`, so `fio_io_listen` / `fio_io_connect` fail
+instead of running without TLS; the native TLS 1.3 backend behaves the same,
+including the key-cert check). Every
+certificate is loaded once, when the context is built; the default one is
+installed in the `SSL_CTX` (`SSL_CTX_use_cert_and_key`).
 
 ### Self-signed fallback
 
@@ -177,8 +183,21 @@ CA-issued certificate (e.g. Let's Encrypt) in production.
 Client connections send the SNI host name stored in the `fio_io_tls_s` object
 (`fio_io_tls_sni_set`, or the URL host name set automatically by
 `fio_io_connect`) via `SSL_set_tlsext_host_name` before the handshake starts.
-No SNI extension is sent when no host name is set (e.g., when connecting to an
-IP literal, which RFC 6066 forbids as an SNI value).
+The same name is bound to certificate verification (`SSL_set1_host`, no partial
+wildcards), so a trusted certificate issued for another host is rejected.
+An IP literal host (from `fio_io_connect`) is verified against the
+certificate's IP address SANs and never sent as SNI (RFC 6066).
+
+Servers with several certificates select one per handshake from the client's
+SNI, using the backend-neutral rules in the IO API documentation
+(`fio_io_tls_cert_add`: exact case-insensitive match, single-label wildcard,
+default certificate), identical to the native TLS 1.3 backend. All
+certificates are preloaded and indexed by lowercased name in the shared
+context; a certificate callback (`SSL_CTX_set_cert_cb`) performs one lookup and
+replaces the connection's certificates (`SSL_certs_clear` +
+`SSL_use_cert_and_key`) unless the default matches. There is one `SSL_CTX` per
+context, never one per name. OpenSSL itself aborts handshakes whose SNI host
+name is longer than 255 bytes or holds a NUL byte.
 
 ---
 
@@ -191,6 +210,10 @@ When a client sends an ALPN extension, the backend walks the offered names in
 order and picks the first that matches a registered protocol.  On match it calls
 `fio_io_tls_alpn_select`, which fires the `on_selected` callback for that
 connection.  If nothing matches, the handshake fails with a fatal alert.
+
+A client offers its registered names in registration order. When the handshake
+completes, the client calls the `on_selected` callback of the protocol the
+server chose (no callback if the server chose none). NPN is not supported.
 
 Protocol names must be 1–255 bytes. The internal wire-format list is capped at
 1 023 bytes total; more protocols than that will log an overflow error.
@@ -313,8 +336,7 @@ int main(void) {
 
   fio_io_listen(.url      = "0.0.0.0:8443",
                 .protocol = &ECHO_PROTO,
-                .tls      = tls);
-  fio_io_tls_free(tls);
+                .tls      = tls); /* takes ownership of `tls` */
 
   FIO_LOG_INFO("TLS echo server on :8443  (test: openssl s_client -connect localhost:8443)");
   fio_io_start(0);

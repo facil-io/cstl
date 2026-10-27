@@ -248,7 +248,8 @@ typedef struct fio_http_settings_s {
 
   /** Called when a WebSocket message is received. */
   void (*on_message)(fio_http_s *h, fio_buf_info_s msg, uint8_t is_text);
-  /** Called when an EventSource event is received. */
+  /** Called when an EventSource event with data is received. `id` is the last
+   * event ID (it persists across events); views are valid during the call. */
   void (*on_eventsource)(fio_http_s *h,
                          fio_buf_info_s id,
                          fio_buf_info_s event,
@@ -314,7 +315,16 @@ typedef struct fio_http_settings_s {
    */
   size_t max_age;
   /**
-   * The maximum size, in bytes, of the request line and all headers combined.
+   * Budget for header name and value bytes passed to the HTTP header callback
+   * during a message, including forwarded trailers. This limits header
+   * processing/storage, not raw bytes read from the connection: it excludes
+   * the start line, separators, whitespace trimmed by the parser, line
+   * terminators, and internally consumed fields (such as `Expect` and some
+   * `Content-Length` / `Transfer-Encoding` fields). A rejected request
+   * receives `431`; client responses close the connection.
+   *
+   * This is not a wire-size limit. Apply a separate input/connection limit
+   * if total bytes received before the body must be bounded.
    *
    * Defaults to FIO_HTTP_DEFAULT_MAX_HEADER_SIZE. Raised to `max_line_len` if
    * smaller.
@@ -354,6 +364,13 @@ typedef struct fio_http_settings_s {
    * milliseconds). 0 selects the `fio_io_connect` default.
    */
   uint16_t connect_timeout;
+  /**
+   * Client mode only: opt-in TLS peer verification, passed to
+   * `fio_io_connect` (see `fio_io_connect_args_s.verify`). A TLS connection
+   * without trust entries uses the system trust store. Ignored for plain
+   * (non-TLS) connections.
+   */
+  uint8_t verify;
   /**
    * The HTTP/1.x connection timeout, in seconds.
    *
@@ -888,9 +905,9 @@ SFUNC size_t fio_http_request_header_count(fio_http_s *, fio_str_info_s name);
  * - `fio_http_request_header_add` adds `value` to any existing values.
  *
  * An empty `value` removes the header for `set`. `set_if_missing` ignores it
- * and returns the existing value (if any); `add` ignores it. Returns an empty value on error: an empty or invalid `name`
- * (longer than 4095 bytes or with forbidden characters) or a `value` that
- * contains NUL, CR or LF.
+ * and returns the existing value (if any); `add` ignores it. Returns an empty
+ * value on error: an empty or invalid `name` (longer than 4095 bytes or with
+ * forbidden characters) or a `value` that contains NUL, CR or LF.
  */
 SFUNC fio_str_info_s fio_http_request_header_set(fio_http_s *,
                                                  fio_str_info_s name,
@@ -1008,11 +1025,11 @@ Path Section Looping
  * - `pos`: the name of the loop variable, a `fio_buf_info_s` holding the
  *   decoded, NUL-terminated section. It is valid only for one iteration.
  *
- * The loop also declares `<pos>_reminder` (the rest of the path) and a 4096
- * byte stack buffer named `buf`, which hides any outer `buf` in the loop body.
+ * The loop also declares `<pos>_reminder` (the rest of the path) and a ~4KB
+ * stack buffer named `buf`, which hides any outer `buf` in the loop body.
  *
- * **Note**: the loop stops early if a section is longer than about 4063
- * bytes.
+ * **Note**: the loop stops early if a decoded section is longer than 4063
+ * bytes (4079 bytes on 32-bit systems).
  */
 #define FIO_HTTP_PATH_EACH(path, pos)
 
@@ -1079,8 +1096,9 @@ typedef struct fio_http_cookie_args_s {
  * Invalid characters in the name or value are percent-encoded (with a one-time
  * warning). The new value is also visible to `fio_http_cookie`.
  *
- * Returns 0 on success, or -1 if `h` is NULL or the response headers were
- * already sent.
+ * Returns 0 on success, or -1 if `h` is NULL, the response headers were
+ * already sent, or cookie formatting fails (for example, on allocation
+ * failure).
  *
  * Note: long cookies only log an error. Many browsers and proxies limit
  * cookies to about 4KB (name and value combined).
@@ -1373,28 +1391,29 @@ typedef struct FIO_ALIGN(64) {
   /* ===== File Uploads (multipart) ===== */
 
   /**
-   * Called when a file upload starts.
+   * Called once for each complete file upload (optional: NULL skips files).
    *
-   * Returns an owned object for this file (e.g., fd, stream, buffer); NULL
-   * skips the file (`on_file_data` won't be called for it). Once the upload
-   * ends, the object is stored at the field name like any other value, or
-   * passed to `free_unused_object` if parsing failed (including truncated
-   * uploads).
+   * `data` holds the whole file. It points into the request body (no copy for
+   * bodies in RAM or memory mapped; otherwise the part is read into the body's
+   * heap buffer, so the body size limit bounds memory use) and, like all other
+   * arguments, is borrowed only during the call: callbacks must not call
+   * `fio_http_body_*` functions on the request being parsed.
    *
-   * File data is streamed in chunks (the body is never fully loaded), so large
-   * uploads can be written to storage as they are parsed. Filename is stripped
-   * of path components; empty filenames and empty field names are skipped.
-   * Missing Content-Type has a NULL buf. Raw part headers (without the blank
-   * line) are borrowed only for this call.
+   * Returns an optional owned value (`obj`), stored at the field name like any
+   * other value; a NULL `obj` stores nothing (e.g., the file was handled
+   * through `udata`). A non-zero `err` aborts parsing and is returned
+   * unchanged. Truncated or malformed uploads never reach this callback.
+   *
+   * Filename is stripped of path components; empty filenames and empty field
+   * names are skipped. Missing Content-Type has a NULL buf. `headers` holds the
+   * raw part headers (without the blank line).
    */
-  void *(*on_file)(void *udata,
-                   fio_str_info_s name,
-                   fio_str_info_s filename,
-                   fio_str_info_s content_type,
-                   fio_str_info_s headers);
-  /** Called for each chunk of file data. A non-zero return aborts parsing
-   * (returned unchanged in `err`); the file object is then freed. */
-  int (*on_file_data)(void *udata, void *file, fio_buf_info_s data);
+  fio_json_obj_result_s (*on_file)(void *udata,
+                                   fio_str_info_s name,
+                                   fio_str_info_s filename,
+                                   fio_str_info_s content_type,
+                                   fio_str_info_s headers,
+                                   fio_buf_info_s data);
 } fio_http_params_parse_callbacks_s;
 
 /** Named arguments for the HTTP params parsing functions. */
@@ -1874,10 +1893,11 @@ typedef struct {
 
 /**
  * Writes an SSE message (UTF-8). Multi-line `data` is sent as one `data:`
- * line per line.
+ * line per line (CR, LF and CRLF end a line; receivers get LF line ends).
  *
- * Returns 0 on success, or -1 if `data` is empty, `h` is not an upgraded SSE
- * handle, or the connection is gone.
+ * Returns 0 once queued, or -1 if `data` is empty, `id` / `event` contain CR,
+ * LF or NUL, allocation fails, `h` is not an upgraded SSE handle, or the
+ * connection is gone.
  */
 SFUNC int fio_http_sse_write(fio_http_s *h, fio_http_sse_write_args_s args);
 
@@ -2093,15 +2113,20 @@ fio_http_header_each_property_first(const fio_buf_info_s *properties) {
 HTTP Handle Implementation - inlined static functions
 ***************************************************************************** */
 
+/* `fio_http_s` is opaque here, yet these accessors must stay inline for
+ * declaration-only (FIO_EXTERN) consumers. `432 http types.h` must statically
+ * assert that its first four members are pointers at `index * sizeof(void *)`
+ * byte offsets; members are reached by that byte offset rather than by
+ * indexing the struct as a pointer array (undefined behavior). */
 #define FIO___HTTP_GETSET_PTR(type, name, index_, pre_set_code)                \
   /** Get the name property at its known pointer index. */                     \
   FIO_IFUNC type *fio_http_##name(fio_http_s *h) {                             \
-    return ((type **)h)[index_];                                               \
+    return *(type **)((char *)h + ((index_) * sizeof(void *)));                \
   }                                                                            \
   /** Set the name property at its known pointer index. */                     \
   FIO_IFUNC type *fio_http_##name##_set(fio_http_s *h, type *ptr) {            \
     pre_set_code;                                                              \
-    return (((type **)h)[index_] = ptr);                                       \
+    return (*(type **)((char *)h + ((index_) * sizeof(void *))) = ptr);        \
   }
 
 SFUNC fio_http_controller_s *fio___http_controller_validate(
@@ -2134,11 +2159,11 @@ Path Section Looping
  * - `pos`: the name of the loop variable, a `fio_buf_info_s` holding the
  *   decoded, NUL-terminated section. It is valid only for one iteration.
  *
- * The loop also declares `<pos>_reminder` (the rest of the path) and a 4096
- * byte stack buffer named `buf`, which hides any outer `buf` in the loop body.
+ * The loop also declares `<pos>_reminder` (the rest of the path) and a ~4KB
+ * stack buffer named `buf`, which hides any outer `buf` in the loop body.
  *
- * **Note**: the loop stops early if a section is longer than about 4063
- * bytes.
+ * **Note**: the loop stops early if a decoded section is longer than 4063
+ * bytes (4079 bytes on 32-bit systems).
  */
 #define FIO_HTTP_PATH_EACH(path, pos)                                          \
   for (fio_buf_info_s pos##_reminder = FIO_STR2BUF_INFO(path),                 \
@@ -2155,25 +2180,41 @@ FIO_IFUNC bool fio___http_path_each_next(fio_buf_info_s *restrict section,
   const char *p = path->buf;
   const char *e = p + path->len;
   char *w = (char *)mem;
-  const char *w_start = w;
-  const char *w_end = w + (4096 - ((sizeof(fio_buf_info_s) * 2) + 1));
+  char *const w_start = w;
+  /* capacity of the macro's buffer, minus one byte for the NUL terminator */
+  char *const w_end =
+      w +
+      ((sizeof(fio_buf_info_s) * ((4096 / sizeof(fio_buf_info_s)) - 2)) - 1);
   p += (*p == '/');
-  while (p < e && *p != '/' && w < w_end) {
-    while (p < e && *p != '%' && *p != '/' && w < w_end)
-      *(w++) = *(p++);
-    if (p == e || *p == '/')
-      break;
-    uint8_t hi, lo;
-    if (p + 3 > e || ((hi = fio_c2i((unsigned char)p[1])) > 15) ||
-        ((lo = fio_c2i((unsigned char)p[2])) > 15)) {
-      *(w++) = *(p++);
-      continue;
+  for (;;) {
+    /* plain copy, bounded once by both the input and the output capacity */
+    size_t n = (size_t)(e - p);
+    size_t i = 0;
+    if (n > (size_t)(w_end - w))
+      n = (size_t)(w_end - w);
+    while (i < n && p[i] != '/' && p[i] != '%') {
+      w[i] = p[i];
+      ++i;
     }
-    p += 3;
-    *(w++) = (char)((hi << 4) | lo);
+    p += i;
+    w += i;
+    if (i == n || *p == '/')
+      break; /* end of input, output cutoff or section separator */
+    /* `*p == '%'` and `w < w_end`: decode, or keep a bad escape literally */
+    char c = '%';
+    if ((size_t)(e - p) > 2) {
+      uint8_t hi = fio_c2i((unsigned char)p[1]);
+      uint8_t lo = fio_c2i((unsigned char)p[2]);
+      if ((hi | lo) < 16) {
+        c = (char)((hi << 4) | lo);
+        p += 2;
+      }
+    }
+    ++p;
+    *(w++) = c;
   }
   *w = 0;
-  *section = FIO_BUF_INFO2((char *)w_start, (size_t)(w - w_start));
+  *section = FIO_BUF_INFO2(w_start, (size_t)(w - w_start));
   *path = FIO_BUF_INFO2((char *)p, (size_t)(e - p));
   return (p == e || *p == '/');
 }

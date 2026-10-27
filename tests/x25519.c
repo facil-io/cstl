@@ -395,10 +395,95 @@ FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ed25519_conversion)(void) {
 }
 
 /* *****************************************************************************
+ECIES failure paths: no unauthenticated / partial output is released
+***************************************************************************** */
+
+/* decrypt-then-fail callback: writes a sentinel, then reports failure */
+static int fio___test_x25519_dec_fail(void *restrict mac,
+                                      void *restrict data,
+                                      size_t len,
+                                      const void *ad,
+                                      size_t adlen,
+                                      const void *key,
+                                      const void *nonce) {
+  (void)mac, (void)ad, (void)adlen, (void)key, (void)nonce;
+  FIO_MEMSET(data, 0xA5, len);
+  return 1; /* any non-zero value - wrapper must normalize to -1 */
+}
+/* encrypt callback that fails (e.g., cipher length limit) after writing */
+static int fio___test_x25519_enc_fail(void *restrict mac,
+                                      void *restrict data,
+                                      size_t len,
+                                      const void *ad,
+                                      size_t adlen,
+                                      const void *key,
+                                      const void *nonce) {
+  (void)ad, (void)adlen, (void)key, (void)nonce;
+  FIO_MEMSET(mac, 0xA5, 16);
+  FIO_MEMSET(data, 0xA5, len);
+  return -1;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, x25519_ecies_failure_wipe)(void) {
+  uint8_t sk[32], pk[32];
+  fio_x25519_keypair(sk, pk);
+  uint8_t msg[40], ct[40 + 48 + 1], pt[40 + 1];
+  FIO_MEMSET(msg, 'm', sizeof(msg));
+
+  /* encryption failure: -1 and the full 48 + n output is wiped */
+  ct[88] = 0x5A;
+  FIO_ASSERT(fio_x25519_encrypt(ct,
+                                msg,
+                                sizeof(msg),
+                                fio___test_x25519_enc_fail,
+                                pk) == -1,
+             "ECIES encrypt should propagate encryption failure");
+  for (size_t i = 0; i < 88; ++i)
+    FIO_ASSERT(!ct[i], "ECIES failed encryption output not wiped (%zu)", i);
+  FIO_ASSERT(ct[88] == 0x5A, "ECIES encrypt wrote past output");
+
+  /* oversized length is rejected before any work */
+  FIO_ASSERT(fio_x25519_encrypt(ct,
+                                msg,
+                                (size_t)-1,
+                                fio_chacha20_poly1305_enc,
+                                pk) == -1,
+             "ECIES encrypt should reject lengths that overflow + 48");
+
+  /* decryption failure: -1 and plaintext output is wiped */
+  FIO_ASSERT(!fio_x25519_encrypt(ct,
+                                 msg,
+                                 sizeof(msg),
+                                 fio_chacha20_poly1305_enc,
+                                 pk),
+             "ECIES encrypt failed");
+  pt[40] = 0x5A;
+  FIO_ASSERT(fio_x25519_decrypt(pt,
+                                ct,
+                                88,
+                                fio___test_x25519_dec_fail,
+                                sk) == -1,
+             "ECIES decrypt should report callback failure as -1");
+  for (size_t i = 0; i < 40; ++i)
+    FIO_ASSERT(!pt[i], "ECIES failed decryption output not wiped (%zu)", i);
+  FIO_ASSERT(pt[40] == 0x5A, "ECIES decrypt wrote past output");
+
+  /* real tag failure also wipes */
+  ct[50] ^= 1;
+  FIO_MEMSET(pt, 0x77, 40);
+  FIO_ASSERT(fio_x25519_decrypt(pt, ct, 88, fio_chacha20_poly1305_dec, sk) ==
+                 -1,
+             "ECIES tampered ciphertext must fail");
+  for (size_t i = 0; i < 40; ++i)
+    FIO_ASSERT(!pt[i], "ECIES tampered decryption output not wiped (%zu)", i);
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 
 int main(void) {
+  FIO_NAME_TEST(stl, x25519_ecies_failure_wipe)();
   FIO_NAME_TEST(stl, x25519_rfc7748)();
   FIO_NAME_TEST(stl, x25519_ecdh_roundtrip)();
   FIO_NAME_TEST(stl, x25519_ecies_chacha)();

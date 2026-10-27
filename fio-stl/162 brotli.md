@@ -25,11 +25,11 @@ Return values:
 | Condition | Return value |
 | --- | --- |
 | Success | Decompressed byte count, `<= out_len`. |
-| Output too small | Required buffer size, `> out_len`. |
+| Output too small | Required-size lower bound, `> out_len`; retrying may require further growth. |
 | Corrupt input | `0`. |
 | Size query | Required size, or `0` if corrupt / not knowable by scan. |
 
-Pass `out == NULL` or `out_len == 0` to query the decompressed size. The query path scans meta-block lengths without allocating.
+Pass `out == NULL` or `out_len == 0` to query the decompressed size. Header scans do not validate compressed bodies. Multiple compressed meta-blocks require decoding with growing temporary storage. For untrusted streams, decode into a caller-bounded buffer instead of using an unrestricted size query.
 
 ### `fio_brotli_decompress_bound`
 
@@ -37,7 +37,7 @@ Pass `out == NULL` or `out_len == 0` to query the decompressed size. The query p
 FIO_IFUNC size_t fio_brotli_decompress_bound(size_t in_len);
 ```
 
-Returns a conservative decompression bound. The practical formula is `in_len * 1032 + 1024`, capped at 4GB for very large inputs. Prefer the size-query mode of `fio_brotli_decompress` when possible.
+Returns a practical allocation estimate, **not** an upper bound for arbitrary streams. The formula is `in_len * 1032 + 1024`, with a 4GB estimate for inputs above 1GB on 64-bit systems; arithmetic saturates on 32-bit systems. Use bounded decoding for untrusted streams.
 
 ### `fio_brotli_compress`
 
@@ -63,7 +63,7 @@ Use an output buffer sized with `fio_brotli_compress_bound`. Returns compressed 
 FIO_IFUNC size_t fio_brotli_compress_bound(size_t in_len);
 ```
 
-Returns a generous compression bound: `in_len + (in_len >> 2) + 1024`.
+Returns a generous compression bound: `in_len + (in_len >> 2) + 1024`, saturated at `SIZE_MAX` if the calculation would overflow.
 
 ## Example
 

@@ -39,7 +39,7 @@ Renders a complete Markdown / GFM document into a `fio_bstr`.
 
 **Returns:** the output `fio_bstr`, or `NULL` on parser / allocation failure.
 
-**Ownership:** the returned buffer is owned by the caller and should be released with `fio_bstr_free`. If `bstr_target == NULL` and rendering fails, the newly allocated output is freed. If `bstr_target` was provided, ownership stays with the caller.
+**Ownership:** on success, retain the returned pointer (which may differ from `bstr_target`) and free it with `fio_bstr_free`. On parser or allocation failure, temporary output is freed and a supplied target remains unchanged and owned by the caller.
 
 ### Rendering Behavior
 

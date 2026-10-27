@@ -23,8 +23,13 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /* *****************************************************************************
 P-384 (secp384r1) ECDSA Module
 
-This module provides ECDSA signature verification for the P-384 curve,
-primarily for TLS 1.3 certificate chain validation (Let's Encrypt root CAs).
+This module provides ECDSA signature verification and signing for the P-384
+curve, primarily for TLS 1.3 certificate chain validation (Let's Encrypt root
+CAs) and P-384 certificate keys (CertificateVerify signing).
+
+Secret scalars (private keys, nonces) only reach the constant-time Montgomery
+ladder and the branch-free field / scalar arithmetic; verification keeps a
+faster variable-time path (public data only).
 
 P-384 curve parameters (NIST FIPS 186-4):
 - Prime p = 2^384 - 2^128 - 2^96 + 2^32 - 1
@@ -36,7 +41,7 @@ P-384 curve parameters (NIST FIPS 186-4):
 ***************************************************************************** */
 
 /* *****************************************************************************
-ECDSA P-384 Verification API
+ECDSA P-384 Verification / Signing API
 ***************************************************************************** */
 
 /**
@@ -45,9 +50,11 @@ ECDSA P-384 Verification API
  * @param sig DER-encoded signature (SEQUENCE { r INTEGER, s INTEGER })
  * @param sig_len Length of signature in bytes
  * @param msg_hash SHA-384 hash of the message (48 bytes)
- * @param pubkey Uncompressed public key (97 bytes: 0x04 || x || y)
- * @param pubkey_len Length of public key (must be 97)
- * @return 0 on success (valid signature), -1 on failure (invalid signature)
+ * @param pubkey SEC 1 public key: uncompressed (97 bytes: 0x04 || x || y)
+ *               or compressed (49 bytes: 0x02/0x03 || x)
+ * @param pubkey_len Length of public key (97 or 49)
+ * @return 0 on success (valid signature), -1 on failure (invalid signature or
+ *         an invalid / off-curve public key)
  */
 SFUNC int fio_ecdsa_p384_verify(const uint8_t *sig,
                                 size_t sig_len,
@@ -70,6 +77,45 @@ SFUNC int fio_ecdsa_p384_verify_raw(const uint8_t r[48],
                                     const uint8_t msg_hash[48],
                                     const uint8_t pubkey_x[48],
                                     const uint8_t pubkey_y[48]);
+
+/**
+ * Signs a message hash using ECDSA P-384 (random nonce).
+ *
+ * @param sig Output: DER-encoded signature (max 104 bytes)
+ * @param sig_len Output: actual signature length
+ * @param sig_capacity Capacity of signature buffer (must be >= 104)
+ * @param msg_hash SHA-384 hash of the message (48 bytes)
+ * @param secret_key 48-byte secret key (scalar, big-endian), in [1, n-1]
+ * @return 0 on success, -1 on failure (NULL arguments, a small buffer or an
+ *         out-of-range secret key)
+ */
+SFUNC int fio_ecdsa_p384_sign(uint8_t *sig,
+                              size_t *sig_len,
+                              size_t sig_capacity,
+                              const uint8_t msg_hash[48],
+                              const uint8_t secret_key[48]);
+
+/**
+ * Derives the P-384 public key for an existing secret key (`Q = d * G`).
+ *
+ * Uses the constant-time scalar multiplication ladder.
+ *
+ * @param public_key Output: 97-byte uncompressed public key (0x04 || x || y)
+ * @param secret_key 48-byte secret key (scalar, big-endian), in [1, n-1]
+ * @return 0 on success, -1 on NULL arguments or an out-of-range scalar
+ *         (`public_key`, when not NULL, is zeroed on failure).
+ */
+SFUNC int fio_p384_public_key(uint8_t public_key[97],
+                              const uint8_t secret_key[48]);
+
+/**
+ * Generates a random P-384 keypair.
+ *
+ * @param secret_key Output: 48-byte secret key (scalar, big-endian)
+ * @param public_key Output: 97-byte uncompressed public key (0x04 || x || y)
+ * @return 0 on success, -1 on failure
+ */
+SFUNC int fio_p384_keypair(uint8_t secret_key[48], uint8_t public_key[97]);
 
 /* *****************************************************************************
 Implementation - possibly externed functions.
@@ -187,12 +233,18 @@ FIO_IFUNC void fio___p384_fe_one(fio___p384_fe_s r) {
   r[5] = 0;
 }
 
-/** Check if field element is zero */
+/** Public-value check: returns 1 if field element is zero. */
 FIO_IFUNC int fio___p384_fe_is_zero(const fio___p384_fe_s a) {
   return (a[0] | a[1] | a[2] | a[3] | a[4] | a[5]) == 0;
 }
 
-/** Compare two field elements: returns 0 if equal */
+/** Secret-safe check: returns all-ones if field element is zero, else 0. */
+FIO_IFUNC uint64_t fio___p384_fe_ct_is_zero_mask(const fio___p384_fe_s a) {
+  uint64_t diff = a[0] | a[1] | a[2] | a[3] | a[4] | a[5];
+  return (uint64_t)0 - (uint64_t)fio_ct_false(diff);
+}
+
+/** Public-value compare: returns 0 if equal. */
 FIO_IFUNC int fio___p384_fe_eq(const fio___p384_fe_s a,
                                const fio___p384_fe_s b) {
   uint64_t diff = (a[0] ^ b[0]) | (a[1] ^ b[1]) | (a[2] ^ b[2]) |
@@ -209,6 +261,23 @@ FIO_IFUNC void fio___p384_fe_from_bytes(fio___p384_fe_s r,
   r[2] = fio_buf2u64_be(in + 24);
   r[1] = fio_buf2u64_be(in + 32);
   r[0] = fio_buf2u64_be(in + 40);
+}
+
+/** Public-value load: returns -1 (r undefined) if encoding is >= p. */
+FIO_IFUNC int fio___p384_fe_from_bytes_canonical(fio___p384_fe_s r,
+                                                 const uint8_t in[48]) {
+  /* Only the final borrow of r - p matters (set iff r < p); the difference
+   * words are discarded (sink keeps GCC's warn_unused_result quiet). */
+  uint64_t borrow = 0, diff;
+  fio___p384_fe_from_bytes(r, in);
+  diff = fio_math_subc64(r[0], FIO___P384_P[0], 0, &borrow);
+  diff = fio_math_subc64(r[1], FIO___P384_P[1], borrow, &borrow);
+  diff = fio_math_subc64(r[2], FIO___P384_P[2], borrow, &borrow);
+  diff = fio_math_subc64(r[3], FIO___P384_P[3], borrow, &borrow);
+  diff = fio_math_subc64(r[4], FIO___P384_P[4], borrow, &borrow);
+  diff = fio_math_subc64(r[5], FIO___P384_P[5], borrow, &borrow);
+  (void)diff;
+  return borrow ? 0 : -1; /* borrow means r < p */
 }
 
 /** Store field element to 48-byte big-endian output */
@@ -429,43 +498,22 @@ FIO_SFUNC void fio___p384_fe_reduce(fio___p384_fe_s r, const uint64_t t[12]) {
     acc[i + 1] += carry;
   }
 
-  /* Handle overflow/underflow in the top limb.
-   * p = 2^384 - 2^128 - 2^96 + 2^32 - 1
-   * In 32-bit words (little-endian):
-   * p[0]=0xFFFFFFFF, p[1]=0, p[2]=0, p[3]=0xFFFFFFFF, p[4]=0xFFFFFFFE,
-   * p[5..11]=0xFFFFFFFF */
-  while (acc[11] < 0 || acc[11] > (int64_t)0xFFFFFFFFLL) {
-    if (acc[11] < 0) {
-      /* Add p */
-      acc[0] += 0xFFFFFFFFLL;
-      acc[1] += 0;
-      acc[2] += 0;
-      acc[3] += 0xFFFFFFFFLL;
-      acc[4] += 0xFFFFFFFELL;
-      acc[5] += 0xFFFFFFFFLL;
-      acc[6] += 0xFFFFFFFFLL;
-      acc[7] += 0xFFFFFFFFLL;
-      acc[8] += 0xFFFFFFFFLL;
-      acc[9] += 0xFFFFFFFFLL;
-      acc[10] += 0xFFFFFFFFLL;
-      acc[11] += 0xFFFFFFFFLL;
-    } else {
-      /* Subtract p */
-      acc[0] -= 0xFFFFFFFFLL;
-      acc[1] -= 0;
-      acc[2] -= 0;
-      acc[3] -= 0xFFFFFFFFLL;
-      acc[4] -= 0xFFFFFFFELL;
-      acc[5] -= 0xFFFFFFFFLL;
-      acc[6] -= 0xFFFFFFFFLL;
-      acc[7] -= 0xFFFFFFFFLL;
-      acc[8] -= 0xFFFFFFFFLL;
-      acc[9] -= 0xFFFFFFFFLL;
-      acc[10] -= 0xFFFFFFFFLL;
-      acc[11] -= 0xFFFFFFFFLL;
-    }
-
-    /* Re-propagate carries */
+  /* Fold the signed top carry back in: 2^384 = 2^128 + 2^96 - 2^32 + 1 (mod
+   * p), i.e. H * 2^384 adds H to words 0, 3, 4 and subtracts it from word 1.
+   * Fixed work, no data-dependent branches (field values may be secret).
+   *
+   * Bound: the sum above is in (-3 * 2^384, 8 * 2^384), so after the carry
+   * propagation |H| <= 8 and the first fold leaves a value in
+   * (-2^133, 2^384 + 2^133). Its carry H' is then -1, 0 or 1, and the second
+   * fold lands in [0, 2^384) (for H' = 1 the low part is < 2^133, for H' = -1
+   * it is > 2^384 - 2^133). */
+  for (int pass = 0; pass < 2; ++pass) {
+    int64_t h = acc[11] >> 32;
+    acc[11] &= 0xFFFFFFFFLL;
+    acc[0] += h;
+    acc[1] -= h;
+    acc[3] += h;
+    acc[4] += h;
     for (int i = 0; i < 11; ++i) {
       int64_t carry = acc[i] >> 32;
       acc[i] = acc[i] & 0xFFFFFFFFLL;
@@ -482,8 +530,8 @@ FIO_SFUNC void fio___p384_fe_reduce(fio___p384_fe_s r, const uint64_t t[12]) {
   res[4] = ((uint64_t)(uint32_t)acc[9] << 32) | (uint32_t)acc[8];
   res[5] = ((uint64_t)(uint32_t)acc[11] << 32) | (uint32_t)acc[10];
 
-  /* Final reduction: if result >= p, subtract p */
-  for (int iter = 0; iter < 3; ++iter) {
+  /* Final reduction: res < 2^384 < 2p, so one branchless subtraction. */
+  {
     uint64_t borrow = 0;
     uint64_t sub[6];
     sub[0] = fio_math_subc64(res[0], FIO___P384_P[0], 0, &borrow);
@@ -492,18 +540,9 @@ FIO_SFUNC void fio___p384_fe_reduce(fio___p384_fe_s r, const uint64_t t[12]) {
     sub[3] = fio_math_subc64(res[3], FIO___P384_P[3], borrow, &borrow);
     sub[4] = fio_math_subc64(res[4], FIO___P384_P[4], borrow, &borrow);
     sub[5] = fio_math_subc64(res[5], FIO___P384_P[5], borrow, &borrow);
-
-    /* If no borrow (result >= p), use subtracted value */
-    if (!borrow) {
-      res[0] = sub[0];
-      res[1] = sub[1];
-      res[2] = sub[2];
-      res[3] = sub[3];
-      res[4] = sub[4];
-      res[5] = sub[5];
-    } else {
-      break;
-    }
+    const uint64_t keep = (uint64_t)0 - borrow; /* ~0 if res < p */
+    for (int i = 0; i < 6; ++i)
+      res[i] = fio_ct_mux64(keep, res[i], sub[i]);
   }
 
   r[0] = res[0];
@@ -608,12 +647,18 @@ FIO_IFUNC void fio___p384_scalar_from_bytes(fio___p384_scalar_s r,
   r[0] = fio_buf2u64_be(in + 40);
 }
 
-/** Check if scalar is zero */
+/** Public-value check: returns 1 if scalar is zero. */
 FIO_IFUNC int fio___p384_scalar_is_zero(const fio___p384_scalar_s a) {
   return (a[0] | a[1] | a[2] | a[3] | a[4] | a[5]) == 0;
 }
 
-/** Check if scalar >= n (curve order) */
+/** Secret-safe check: returns 1 if scalar is zero. */
+FIO_IFUNC int fio___p384_scalar_ct_is_zero(const fio___p384_scalar_s a) {
+  uint64_t diff = a[0] | a[1] | a[2] | a[3] | a[4] | a[5];
+  return (int)fio_ct_false(diff);
+}
+
+/** Public-value check: returns 1 if scalar >= n (curve order). */
 FIO_IFUNC int fio___p384_scalar_gte_n(const fio___p384_scalar_s a) {
   /* Compare from most significant limb */
   if (a[5] > FIO___P384_N[5])
@@ -641,57 +686,100 @@ FIO_IFUNC int fio___p384_scalar_gte_n(const fio___p384_scalar_s a) {
   return 0;
 }
 
-/** Scalar reduction mod n using fio_math_div */
-FIO_SFUNC void fio___p384_scalar_reduce(fio___p384_scalar_s r,
-                                        const uint64_t t[12]) {
-  /* Use fio_math_div to compute t mod n directly.
-   * We need to extend n to 12 limbs for the division. */
-  uint64_t n_ext[12] = {FIO___P384_N[0],
-                        FIO___P384_N[1],
-                        FIO___P384_N[2],
-                        FIO___P384_N[3],
-                        FIO___P384_N[4],
-                        FIO___P384_N[5],
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0};
-  uint64_t remainder[12] = {0};
-
-  /* Compute t mod n */
-  fio_math_div(NULL, remainder, t, n_ext, 12);
-
-  /* Copy the low 6 limbs to result */
-  r[0] = remainder[0];
-  r[1] = remainder[1];
-  r[2] = remainder[2];
-  r[3] = remainder[3];
-  r[4] = remainder[4];
-  r[5] = remainder[5];
+/** Secret-safe check: returns 1 if scalar >= n (curve order). */
+FIO_IFUNC int fio___p384_scalar_ct_gte_n(const fio___p384_scalar_s a) {
+  uint64_t borrow = 0, ignr;
+  ignr = fio_math_subc64(a[0], FIO___P384_N[0], 0, &borrow);
+  ignr = fio_math_subc64(a[1], FIO___P384_N[1], borrow, &borrow);
+  ignr = fio_math_subc64(a[2], FIO___P384_N[2], borrow, &borrow);
+  ignr = fio_math_subc64(a[3], FIO___P384_N[3], borrow, &borrow);
+  ignr = fio_math_subc64(a[4], FIO___P384_N[4], borrow, &borrow);
+  ignr = fio_math_subc64(a[5], FIO___P384_N[5], borrow, &borrow);
+  (void)ignr;
+  return (int)(borrow ^ 1);
 }
 
-/** Scalar multiplication: r = a * b mod n */
+/** Secret-safe conditional scalar subtraction: a = cond ? a - n : a. */
+FIO_IFUNC void fio___p384_scalar_sub_n_if(fio___p384_scalar_s a,
+                                          uint64_t cond) {
+  uint64_t borrow = 0;
+  uint64_t s[6];
+  const uint64_t mask = (uint64_t)0 - (cond & 1);
+  s[0] = fio_math_subc64(a[0], FIO___P384_N[0], 0, &borrow);
+  s[1] = fio_math_subc64(a[1], FIO___P384_N[1], borrow, &borrow);
+  s[2] = fio_math_subc64(a[2], FIO___P384_N[2], borrow, &borrow);
+  s[3] = fio_math_subc64(a[3], FIO___P384_N[3], borrow, &borrow);
+  s[4] = fio_math_subc64(a[4], FIO___P384_N[4], borrow, &borrow);
+  s[5] = fio_math_subc64(a[5], FIO___P384_N[5], borrow, &borrow);
+  for (int i = 0; i < 6; ++i)
+    a[i] = fio_ct_mux64(mask, s[i], a[i]);
+}
+
+/** Barrett constant: mu = floor(2^768 / n), little-endian 64-bit limbs. */
+static const uint64_t FIO___P384_N_MU[7] = {
+    0x1313E695333AD68DULL,
+    0xA7E5F24DB74F5885ULL,
+    0x389CB27E0BC8D220ULL,
+    0x0000000000000000ULL,
+    0x0000000000000000ULL,
+    0x0000000000000000ULL,
+    0x0000000000000001ULL,
+};
+
+/**
+ * Secret-safe scalar reduction: r = t mod n, for any t < 2^768.
+ *
+ * Barrett reduction (HAC 14.42, b = 2^64, k = 6) with fixed work and no
+ * secret-dependent branches or memory access (replaces the variable-time
+ * long division previously used here).
+ */
+FIO_SFUNC void fio___p384_scalar_reduce(fio___p384_scalar_s r,
+                                        const uint64_t t[12]) {
+  static const uint64_t n7[7] = {FIO___P384_N[0],
+                                 FIO___P384_N[1],
+                                 FIO___P384_N[2],
+                                 FIO___P384_N[3],
+                                 FIO___P384_N[4],
+                                 FIO___P384_N[5],
+                                 0};
+  uint64_t q[14], rr[7], s[7] = {0};
+  /* q3 = floor(floor(t / 2^320) * mu / 2^448) -> q[7..13] */
+  fio_math_mul(q, t + 5, FIO___P384_N_MU, 7);
+  /* s = (q3 * n) mod 2^448 (truncated schoolbook) */
+  for (size_t i = 0; i < 7; ++i) {
+    uint64_t carry = 0;
+    for (size_t j = 0; i + j < 7; ++j) {
+      uint64_t hi, c1 = 0, c2 = 0;
+      const uint64_t lo = fio_math_mulc64(q[7 + i], n7[j], &hi);
+      s[i + j] = fio_math_addc64(s[i + j], lo, 0, &c1);
+      s[i + j] = fio_math_addc64(s[i + j], carry, 0, &c2);
+      carry = hi + c1 + c2;
+    }
+  }
+  /* rr = (t mod 2^448) - s (mod 2^448); 0 <= rr < 3n */
+  const uint64_t ignored_borrow = fio_math_sub(rr, t, s, 7);
+  (void)ignored_borrow;
+  /* at most two conditional subtractions of n */
+  for (size_t round = 0; round < 2; ++round) {
+    const uint64_t borrow = fio_math_sub(s, rr, n7, 7);
+    const uint64_t mask = borrow - 1; /* all ones when rr >= n */
+    for (size_t i = 0; i < 7; ++i)
+      rr[i] = fio_ct_mux64(mask, s[i], rr[i]);
+  }
+  r[0] = rr[0];
+  r[1] = rr[1];
+  r[2] = rr[2];
+  r[3] = rr[3];
+  r[4] = rr[4];
+  r[5] = rr[5];
+}
+
+/** Scalar multiplication: r = a * b mod n (secret-safe, fixed work). */
 FIO_SFUNC void fio___p384_scalar_mul(fio___p384_scalar_s r,
                                      const fio___p384_scalar_s a,
                                      const fio___p384_scalar_s b) {
-  uint64_t t[12] = {0};
-
-  /* Schoolbook multiplication */
-  for (int i = 0; i < 6; ++i) {
-    uint64_t carry = 0;
-    for (int j = 0; j < 6; ++j) {
-      uint64_t hi;
-      uint64_t lo = fio_math_mulc64(a[i], b[j], &hi);
-      uint64_t c1 = 0, c2 = 0;
-      t[i + j] = fio_math_addc64(t[i + j], lo, 0, &c1);
-      t[i + j] = fio_math_addc64(t[i + j], carry, 0, &c2);
-      carry = hi + c1 + c2;
-    }
-    t[i + 6] += carry;
-  }
-
+  uint64_t t[12];
+  fio_math_mul(t, a, b, 6);
   fio___p384_scalar_reduce(r, t);
 }
 
@@ -789,28 +877,31 @@ FIO_IFUNC void fio___p384_point_to_jacobian(
   fio___p384_fe_one(j->z);
 }
 
-/** Convert Jacobian point to affine (x = X/Z^2, y = Y/Z^3) */
+/** Convert Jacobian point to affine (x = X/Z^2, y = Y/Z^3)
+ * Infinity has no affine form: it yields (0,0), which is NOT a curve point.
+ * Callers must check fio___p384_point_is_infinity() first. */
 FIO_SFUNC void fio___p384_point_to_affine(
     fio___p384_point_affine_s *a,
     const fio___p384_point_jacobian_s *j) {
-  if (fio___p384_point_is_infinity(j)) {
-    fio___p384_fe_zero(a->x);
-    fio___p384_fe_zero(a->y);
-    return;
-  }
-
   fio___p384_fe_s z_inv, z_inv2, z_inv3;
 
+  /* Inverting Z = 0 yields zero with this fixed-exponent inversion, so
+   * infinity maps to (0, 0) with no branch on (possibly secret) Z. */
   fio___p384_fe_inv(z_inv, j->z);
   fio___p384_fe_sqr(z_inv2, z_inv);
   fio___p384_fe_mul(z_inv3, z_inv2, z_inv);
 
   fio___p384_fe_mul(a->x, j->x, z_inv2);
   fio___p384_fe_mul(a->y, j->y, z_inv3);
+
+  fio_secure_zero(z_inv, sizeof(z_inv));
+  fio_secure_zero(z_inv2, sizeof(z_inv2));
+  fio_secure_zero(z_inv3, sizeof(z_inv3));
 }
 
 /**
- * Point doubling in Jacobian coordinates.
+ * Point doubling in Jacobian coordinates (variable time: public points only;
+ * secret scalars use fio___p384_point_double_ct).
  * Uses the formula from "Guide to Elliptic Curve Cryptography" (Hankerson et
  * al.)
  *
@@ -889,6 +980,9 @@ FIO_SFUNC void fio___p384_point_double(fio___p384_point_jacobian_s *r,
  * r = p + q where p is Jacobian and q is affine.
  *
  * Mixed addition is faster than full Jacobian addition.
+ *
+ * Variable time (branches on the operands): public points only; secret
+ * scalars use fio___p384_point_add_mixed_ct.
  */
 FIO_SFUNC void fio___p384_point_add_mixed(fio___p384_point_jacobian_s *r,
                                           const fio___p384_point_jacobian_s *p,
@@ -961,13 +1055,201 @@ FIO_SFUNC void fio___p384_point_add_mixed(fio___p384_point_jacobian_s *r,
 }
 
 /**
- * Scalar multiplication: r = k * P
- * Uses double-and-add algorithm (not constant-time for simplicity).
- * For production use, implement constant-time scalar multiplication.
+ * Constant-time conditional swap of two Jacobian points.
+ * swap must be exactly 0 or 1.
+ */
+FIO_IFUNC void fio___p384_point_cswap(fio___p384_point_jacobian_s *a,
+                                      fio___p384_point_jacobian_s *b,
+                                      uint64_t swap) {
+  const uint64_t mask = (uint64_t)0 - swap; /* 0x000...0 or 0xFFF...F */
+  for (int i = 0; i < 6; ++i) {
+    uint64_t tmp = mask & (a->x[i] ^ b->x[i]);
+    a->x[i] ^= tmp;
+    b->x[i] ^= tmp;
+    tmp = mask & (a->y[i] ^ b->y[i]);
+    a->y[i] ^= tmp;
+    b->y[i] ^= tmp;
+    tmp = mask & (a->z[i] ^ b->z[i]);
+    a->z[i] ^= tmp;
+    b->z[i] ^= tmp;
+  }
+}
+
+/**
+ * Constant-time point doubling (same formula as fio___p384_point_double).
+ *
+ * The infinity case (Z = 0) is selected with masks, never branched on.
+ */
+FIO_SFUNC void fio___p384_point_double_ct(
+    fio___p384_point_jacobian_s *r,
+    const fio___p384_point_jacobian_s *p) {
+  fio___p384_fe_s t1, t2, t3, t4, t5, yz;
+  fio___p384_point_jacobian_s generic, candidate;
+
+  fio___p384_fe_mul(yz, p->y, p->z); /* YZ (aliasing safe) */
+  fio___p384_fe_sqr(t1, p->z);       /* Z^2 */
+  fio___p384_fe_sub(t2, p->x, t1);   /* X - Z^2 */
+  fio___p384_fe_add(t3, p->x, t1);   /* X + Z^2 */
+  fio___p384_fe_mul(t2, t2, t3);     /* X^2 - Z^4 */
+  fio___p384_fe_add(t3, t2, t2);     /* lambda = 3(...) */
+  fio___p384_fe_add(t2, t3, t2);
+  fio___p384_fe_sqr(t4, p->y);     /* Y^2 */
+  fio___p384_fe_mul(t5, p->x, t4); /* XY^2 */
+  fio___p384_fe_add(t5, t5, t5);   /* S = 4XY^2 */
+  fio___p384_fe_add(t5, t5, t5);
+  fio___p384_fe_sqr(t3, t2);            /* lambda^2 */
+  fio___p384_fe_sub(generic.x, t3, t5); /* X' = lambda^2 - 2S */
+  fio___p384_fe_sub(generic.x, generic.x, t5);
+  fio___p384_fe_sqr(t4, t4);     /* Y^4 */
+  fio___p384_fe_add(t4, t4, t4); /* 8Y^4 */
+  fio___p384_fe_add(t4, t4, t4);
+  fio___p384_fe_add(t4, t4, t4);
+  fio___p384_fe_sub(t5, t5, generic.x); /* S - X' */
+  fio___p384_fe_mul(generic.y, t2, t5); /* Y' */
+  fio___p384_fe_sub(generic.y, generic.y, t4);
+  fio___p384_fe_add(generic.z, yz, yz); /* Z' = 2YZ */
+
+  /* Select infinity for an infinity input without branching on p->z. */
+  const uint64_t inf = fio___p384_fe_ct_is_zero_mask(p->z) & 1;
+  fio___p384_point_set_infinity(&candidate);
+  *r = generic;
+  fio___p384_point_cswap(r, &candidate, inf);
+
+  fio_secure_zero(t1, sizeof(t1));
+  fio_secure_zero(t2, sizeof(t2));
+  fio_secure_zero(t3, sizeof(t3));
+  fio_secure_zero(t4, sizeof(t4));
+  fio_secure_zero(t5, sizeof(t5));
+  fio_secure_zero(yz, sizeof(yz));
+  fio_secure_zero(&generic, sizeof(generic));
+  fio_secure_zero(&candidate, sizeof(candidate));
+}
+
+/**
+ * Constant-time mixed addition r = p + q (p Jacobian, q affine, q != O).
+ *
+ * Computes the generic sum, the doubling and the infinity / q results
+ * unconditionally and selects the right one with masks:
+ * - p infinity: q
+ * - H == 0 and R == 0 (p == q): 2p
+ * - H == 0 and R != 0 (p == -q): infinity
+ * - otherwise: the generic mixed-add result
+ */
+FIO_SFUNC void fio___p384_point_add_mixed_ct(
+    fio___p384_point_jacobian_s *r,
+    const fio___p384_point_jacobian_s *p,
+    const fio___p384_point_affine_s *q) {
+  fio___p384_fe_s t1, t2, t3, t4, t5, t6;
+  fio___p384_point_jacobian_s generic, selected, candidate;
+
+  fio___p384_fe_sqr(t1, p->z);            /* Z1^2 */
+  fio___p384_fe_mul(t2, t1, p->z);        /* Z1^3 */
+  fio___p384_fe_mul(t3, q->x, t1);        /* X2 Z1^2 */
+  fio___p384_fe_mul(t4, q->y, t2);        /* Y2 Z1^3 */
+  fio___p384_fe_sub(t3, t3, p->x);        /* H */
+  fio___p384_fe_sub(t4, t4, p->y);        /* R */
+  fio___p384_fe_sqr(t5, t3);              /* H^2 */
+  fio___p384_fe_mul(t6, t5, t3);          /* H^3 */
+  fio___p384_fe_mul(t1, p->x, t5);        /* X1 H^2 */
+  fio___p384_fe_mul(t2, p->y, t6);        /* Y1 H^3 */
+  fio___p384_fe_mul(generic.z, p->z, t3); /* Z3 = Z1 H */
+  fio___p384_fe_sqr(generic.x, t4);       /* X3 = R^2 - H^3 - 2X1H^2 */
+  fio___p384_fe_sub(generic.x, generic.x, t6);
+  fio___p384_fe_sub(generic.x, generic.x, t1);
+  fio___p384_fe_sub(generic.x, generic.x, t1);
+  fio___p384_fe_sub(t1, t1, generic.x); /* X1 H^2 - X3 */
+  fio___p384_fe_mul(generic.y, t4, t1); /* Y3 */
+  fio___p384_fe_sub(generic.y, generic.y, t2);
+
+  const uint64_t p_inf = fio___p384_fe_ct_is_zero_mask(p->z);
+  const uint64_t h_zero = fio___p384_fe_ct_is_zero_mask(t3);
+  const uint64_t r_zero = fio___p384_fe_ct_is_zero_mask(t4);
+  const uint64_t equal = ~p_inf & h_zero & r_zero;
+  const uint64_t opposite = ~p_inf & h_zero & ~r_zero;
+
+  selected = generic;
+  fio___p384_point_set_infinity(&candidate);
+  fio___p384_point_cswap(&selected, &candidate, opposite & 1);
+  fio___p384_point_double_ct(&candidate, p);
+  fio___p384_point_cswap(&selected, &candidate, equal & 1);
+  fio___p384_point_to_jacobian(&candidate, q);
+  fio___p384_point_cswap(&selected, &candidate, p_inf & 1);
+  *r = selected;
+
+  fio_secure_zero(t1, sizeof(t1));
+  fio_secure_zero(t2, sizeof(t2));
+  fio_secure_zero(t3, sizeof(t3));
+  fio_secure_zero(t4, sizeof(t4));
+  fio_secure_zero(t5, sizeof(t5));
+  fio_secure_zero(t6, sizeof(t6));
+  fio_secure_zero(&generic, sizeof(generic));
+  fio_secure_zero(&selected, sizeof(selected));
+  fio_secure_zero(&candidate, sizeof(candidate));
+}
+
+/**
+ * Scalar multiplication: r = k * P (constant-time Montgomery ladder).
+ *
+ * Use this for secret scalars (private keys, nonces). Ported from P-256:
+ * R[0] = infinity, R[1] = P, then for every one of the 384 scalar bits (MSB
+ * first, leading zeros included):
+ *
+ *   b = bit i of k
+ *   cswap(R[0], R[1], b)
+ *   D = 2 * R[0]
+ *   R[1] = D + (b ? -P : P)     (equals old R[0] + old R[1])
+ *   R[0] = D
+ *   cswap(R[0], R[1], b)
+ *
+ * After the first cswap R[1] = R[0] + P (b = 0) or R[0] - P (b = 1), so the
+ * ladder sum R[0] + R[1] is 2 * R[0] +/- P: one constant-time double and one
+ * constant-time mixed add per bit, with the sign of P selected by masks. No
+ * branch or memory index depends on k; the exceptional cases (infinity,
+ * doubling) are handled by mask selection inside the point operations.
  */
 FIO_SFUNC void fio___p384_point_mul(fio___p384_point_jacobian_s *r,
                                     const fio___p384_scalar_s k,
                                     const fio___p384_point_affine_s *p) {
+  fio___p384_point_affine_s p_sel;
+  fio___p384_fe_s p_neg_y;
+  fio___p384_point_jacobian_s r0, r1, d;
+
+  fio___p384_fe_neg(p_neg_y, p->y);
+  fio___p384_fe_copy(p_sel.x, p->x);
+  fio___p384_point_set_infinity(&r0);
+  fio___p384_point_to_jacobian(&r1, p);
+
+  for (int i = 383; i >= 0; --i) {
+    const uint64_t b = (k[i >> 6] >> (i & 63)) & 1ULL;
+    const uint64_t bmask = (uint64_t)0 - b;
+    fio___p384_point_cswap(&r0, &r1, b);
+    fio___p384_point_double_ct(&d, &r0);
+    for (int j = 0; j < 6; ++j)
+      p_sel.y[j] = fio_ct_mux64(bmask, p_neg_y[j], p->y[j]);
+    fio___p384_point_add_mixed_ct(&r1, &d, &p_sel);
+    r0 = d;
+    fio___p384_point_cswap(&r0, &r1, b);
+  }
+
+  *r = r0;
+
+  fio_secure_zero(&p_sel, sizeof(p_sel));
+  fio_secure_zero(p_neg_y, sizeof(p_neg_y));
+  fio_secure_zero(&r0, sizeof(r0));
+  fio_secure_zero(&r1, sizeof(r1));
+  fio_secure_zero(&d, sizeof(d));
+}
+
+/**
+ * Scalar multiplication: r = k * P (variable-time double-and-add).
+ *
+ * NOT constant time: public scalars / points only (tests and diagnostics);
+ * secret scalars must use fio___p384_point_mul.
+ */
+FIO_SFUNC void fio___p384_point_mul_vartime(
+    fio___p384_point_jacobian_s *r,
+    const fio___p384_scalar_s k,
+    const fio___p384_point_affine_s *p) {
   fio___p384_point_set_infinity(r);
 
   /* Find the highest set bit */
@@ -1012,6 +1294,9 @@ FIO_SFUNC void fio___p384_point_mul2(fio___p384_point_jacobian_s *r,
   fio___p384_point_jacobian_s gpq;
   fio___p384_point_to_jacobian(&gpq, &g);
   fio___p384_point_add_mixed(&gpq, &gpq, q);
+  /* G + Q is infinity iff Q == -G; adding infinity is then a no-op (never
+   * use the (0,0) affine placeholder as a point). */
+  const int gpq_inf = fio___p384_point_is_infinity(&gpq);
   fio___p384_point_affine_s gpq_affine;
   fio___p384_point_to_affine(&gpq_affine, &gpq);
 
@@ -1040,7 +1325,8 @@ FIO_SFUNC void fio___p384_point_mul2(fio___p384_point_jacobian_s *r,
     int b2 = (u2[limb] >> bit) & 1;
 
     if (b1 && b2) {
-      fio___p384_point_add_mixed(r, r, &gpq_affine);
+      if (!gpq_inf)
+        fio___p384_point_add_mixed(r, r, &gpq_affine);
     } else if (b1) {
       fio___p384_point_add_mixed(r, r, &g);
     } else if (b2) {
@@ -1054,8 +1340,47 @@ DER Signature Parsing
 ***************************************************************************** */
 
 /**
- * Parse DER-encoded ECDSA signature for P-384.
- * Format: SEQUENCE { r INTEGER, s INTEGER }
+ * Parse one strict DER INTEGER (short-form length, positive, minimal, at most
+ * 48 value bytes), right-aligned into `out`. Advances `*pp`.
+ *
+ * Returns 0 on success, -1 on error.
+ */
+FIO_SFUNC int fio___p384_parse_der_integer(uint8_t out[48],
+                                           const uint8_t **pp,
+                                           const uint8_t *end) {
+  const uint8_t *p = *pp;
+  if ((size_t)(end - p) < 2 || p[0] != 0x02)
+    return -1;
+  size_t len = p[1];
+  p += 2;
+  if (!len || len > 49 || len > (size_t)(end - p))
+    return -1;
+  if (p[0] & 0x80) /* negative */
+    return -1;
+  if (p[0] == 0x00 && len > 1) {
+    if (!(p[1] & 0x80)) /* non-minimal leading zero */
+      return -1;
+    ++p;
+    --len;
+  }
+  if (len > 48)
+    return -1;
+  FIO_MEMSET(out, 0, 48);
+  FIO_MEMCPY(out + (48 - len), p, len);
+  *pp = p + len;
+  return 0;
+}
+
+/**
+ * Parse strict DER-encoded ECDSA signature for P-384.
+ * Format: SEQUENCE { r INTEGER, s INTEGER }, with no trailing data.
+ *
+ * Intentionally strict (unlike the lenient `der.h`, which this does not use):
+ * every mainstream signer emits canonical DER and mainstream verifiers reject
+ * anything else, so leniency gains no interoperability; it would only let one
+ * (r, s) have many encodings (CVE-2014-8275 style malleability, e.g. of
+ * certificate fingerprints). The API reports no consumed length, so trailing
+ * data is an error. Negative INTEGERs are different values, not encodings.
  *
  * Returns 0 on success, -1 on error.
  */
@@ -1063,76 +1388,16 @@ FIO_SFUNC int fio___p384_parse_der_signature(uint8_t r[48],
                                              uint8_t s[48],
                                              const uint8_t *sig,
                                              size_t sig_len) {
-  if (!sig || sig_len < 8)
+  /* max content is 2 * (2 + 49) = 102 bytes, so DER requires short form */
+  if (!sig || sig_len < 8 || sig_len > 104)
     return -1;
-
-  const uint8_t *p = sig;
+  if (sig[0] != 0x30 || (size_t)sig[1] != sig_len - 2)
+    return -1;
+  const uint8_t *p = sig + 2;
   const uint8_t *end = sig + sig_len;
-
-  /* SEQUENCE tag */
-  if (*p++ != 0x30)
+  if (fio___p384_parse_der_integer(r, &p, end) ||
+      fio___p384_parse_der_integer(s, &p, end) || p != end)
     return -1;
-
-  /* SEQUENCE length */
-  size_t seq_len;
-  if (*p & 0x80) {
-    /* Long form length */
-    int len_bytes = *p++ & 0x7F;
-    if (len_bytes > 2 || p + len_bytes > end)
-      return -1;
-    seq_len = 0;
-    for (int i = 0; i < len_bytes; ++i)
-      seq_len = (seq_len << 8) | *p++;
-  } else {
-    seq_len = *p++;
-  }
-
-  if (p + seq_len > end)
-    return -1;
-
-  /* Parse r INTEGER */
-  if (*p++ != 0x02)
-    return -1;
-
-  size_t r_len = *p++;
-  if (p + r_len > end || r_len > 49)
-    return -1;
-
-  /* Skip leading zero if present (positive integer encoding) */
-  const uint8_t *r_data = p;
-  if (r_len > 0 && *r_data == 0x00) {
-    r_data++;
-    r_len--;
-  }
-  p += (r_len + (r_data != p ? 1 : 0));
-
-  /* Copy r, right-aligned in 48 bytes */
-  FIO_MEMSET(r, 0, 48);
-  if (r_len > 48)
-    return -1;
-  FIO_MEMCPY(r + (48 - r_len), r_data, r_len);
-
-  /* Parse s INTEGER */
-  if (*p++ != 0x02)
-    return -1;
-
-  size_t s_len = *p++;
-  if (p + s_len > end || s_len > 49)
-    return -1;
-
-  /* Skip leading zero if present */
-  const uint8_t *s_data = p;
-  if (s_len > 0 && *s_data == 0x00) {
-    s_data++;
-    s_len--;
-  }
-
-  /* Copy s, right-aligned in 48 bytes */
-  FIO_MEMSET(s, 0, 48);
-  if (s_len > 48)
-    return -1;
-  FIO_MEMCPY(s + (48 - s_len), s_data, s_len);
-
   return 0;
 }
 
@@ -1172,9 +1437,10 @@ SFUNC int fio_ecdsa_p384_verify_raw(const uint8_t r_bytes[48],
     e[5] = fio_math_subc64(e[5], FIO___P384_N[5], borrow, &borrow);
   }
 
-  /* Load public key point Q */
-  fio___p384_fe_from_bytes(q.x, pubkey_x);
-  fio___p384_fe_from_bytes(q.y, pubkey_y);
+  /* Load public key point Q (coordinates must be canonical: < p) */
+  if (fio___p384_fe_from_bytes_canonical(q.x, pubkey_x) ||
+      fio___p384_fe_from_bytes_canonical(q.y, pubkey_y))
+    return -1;
 
   /* Verify Q is on the curve: y^2 = x^3 - 3x + b (mod p) */
   {
@@ -1249,6 +1515,74 @@ SFUNC int fio_ecdsa_p384_verify_raw(const uint8_t r_bytes[48],
   return 0;
 }
 
+/**
+ * Decompress a compressed P-384 point (49 bytes: 0x02/0x03 || x), SEC 1
+ * section 2.3.4. Computes y from x using y^2 = x^3 - 3x + b and selects the
+ * root whose parity matches the prefix.
+ *
+ * Rejects any other prefix (incl. the identity `0x00` and the hybrid forms
+ * `0x06` / `0x07`, which RFC 5480 forbids), a non-canonical x (x >= p) and an
+ * x with no curve point (y^2 is not a square). The result is on the curve.
+ * (No point has y = 0: the group order is odd, so both prefixes are valid.)
+ *
+ * Public values only (not constant time).
+ *
+ * @return 0 on success, -1 on failure
+ */
+FIO_SFUNC int fio___p384_point_decompress(fio___p384_point_affine_s *p,
+                                          const uint8_t compressed[49]) {
+  /* (p+1)/4 in little-endian limbs: p = 3 (mod 4), so sqrt(a) = a^((p+1)/4) */
+  static const uint64_t exp[6] = {
+      0x0000000040000000ULL, /* exp[0] */
+      0xBFFFFFFFC0000000ULL, /* exp[1] */
+      0xFFFFFFFFFFFFFFFFULL, /* exp[2] */
+      0xFFFFFFFFFFFFFFFFULL, /* exp[3] */
+      0xFFFFFFFFFFFFFFFFULL, /* exp[4] */
+      0x3FFFFFFFFFFFFFFFULL, /* exp[5] */
+  };
+  const uint8_t prefix = compressed[0];
+  if (prefix != 0x02 && prefix != 0x03)
+    return -1;
+
+  /* Load x coordinate (must be canonical: x < p) */
+  if (fio___p384_fe_from_bytes_canonical(p->x, compressed + 1))
+    return -1;
+
+  /* y^2 = x^3 - 3x + b */
+  fio___p384_fe_s y2, t, y, base;
+  fio___p384_fe_sqr(t, p->x);
+  fio___p384_fe_mul(t, t, p->x);
+  fio___p384_fe_sub(t, t, p->x);
+  fio___p384_fe_sub(t, t, p->x);
+  fio___p384_fe_sub(t, t, p->x);
+  fio___p384_fe_add(y2, t, FIO___P384_B);
+
+  /* y = y2^((p+1)/4): square-and-multiply, LSB to MSB */
+  fio___p384_fe_one(y);
+  fio___p384_fe_copy(base, y2);
+  for (int i = 0; i < 6; ++i) {
+    uint64_t bits = exp[i];
+    for (int j = 0; j < 64; ++j) {
+      if (bits & 1)
+        fio___p384_fe_mul(y, y, base);
+      fio___p384_fe_sqr(base, base);
+      bits >>= 1;
+    }
+  }
+
+  /* y^2 must equal y2, otherwise x is not on the curve */
+  fio___p384_fe_sqr(t, y);
+  if (fio___p384_fe_eq(t, y2) != 0)
+    return -1;
+
+  /* Select the root with the parity requested by the prefix */
+  if ((y[0] & 1) != (uint64_t)(prefix & 1))
+    fio___p384_fe_neg(p->y, y);
+  else
+    fio___p384_fe_copy(p->y, y);
+  return 0;
+}
+
 SFUNC int fio_ecdsa_p384_verify(const uint8_t *sig,
                                 size_t sig_len,
                                 const uint8_t *msg_hash,
@@ -1257,9 +1591,24 @@ SFUNC int fio_ecdsa_p384_verify(const uint8_t *sig,
   if (!sig || !msg_hash || !pubkey)
     return -1;
 
-  /* Uncompressed public key format: 0x04 || x (48 bytes) || y (48 bytes) */
-  if (pubkey_len != 97 || pubkey[0] != 0x04)
+  /* SEC 1 public key: 0x04 || x || y (97 bytes) or 0x02/0x03 || x (49 bytes).
+   * verify_raw checks the coordinates are canonical and on the curve. */
+  const uint8_t *qx, *qy;
+  uint8_t xy[96];
+  if (pubkey_len == 97 && pubkey[0] == 0x04) {
+    qx = pubkey + 1;
+    qy = pubkey + 49;
+  } else if (pubkey_len == 49) {
+    fio___p384_point_affine_s q;
+    if (fio___p384_point_decompress(&q, pubkey))
+      return -1;
+    fio___p384_fe_to_bytes(xy, q.x);
+    fio___p384_fe_to_bytes(xy + 48, q.y);
+    qx = xy;
+    qy = xy + 48;
+  } else {
     return -1;
+  }
 
   /* Parse DER signature */
   uint8_t r[48], s[48];
@@ -1267,7 +1616,237 @@ SFUNC int fio_ecdsa_p384_verify(const uint8_t *sig,
     return -1;
 
   /* Verify */
-  return fio_ecdsa_p384_verify_raw(r, s, msg_hash, pubkey + 1, pubkey + 49);
+  return fio_ecdsa_p384_verify_raw(r, s, msg_hash, qx, qy);
+}
+
+/* *****************************************************************************
+ECDSA P-384 Signing Implementation
+***************************************************************************** */
+
+/**
+ * Encode a 48-byte integer as DER INTEGER (handles leading zero for positive).
+ * Returns number of bytes written (at most 51). Public output values only.
+ */
+FIO_SFUNC size_t fio___p384_encode_der_integer(uint8_t *out,
+                                               const uint8_t val[48]) {
+  /* Skip leading zeros */
+  size_t start = 0;
+  while (start < 47 && val[start] == 0)
+    ++start;
+
+  /* Need leading zero if high bit is set (to keep positive) */
+  int need_zero = (val[start] & 0x80) != 0;
+  size_t len = 48 - start + (need_zero ? 1 : 0);
+
+  out[0] = 0x02; /* INTEGER tag */
+  out[1] = (uint8_t)len;
+  size_t offset = 2;
+  if (need_zero)
+    out[offset++] = 0x00;
+  FIO_MEMCPY(out + offset, val + start, 48 - start);
+
+  return 2 + len;
+}
+
+/** Store a scalar as 48 big-endian bytes. */
+FIO_IFUNC void fio___p384_scalar_to_bytes(uint8_t out[48],
+                                          const fio___p384_scalar_s a) {
+  fio___p384_fe_to_bytes(out, a);
+}
+
+SFUNC int fio_ecdsa_p384_sign(uint8_t *sig,
+                              size_t *sig_len,
+                              size_t sig_capacity,
+                              const uint8_t msg_hash[48],
+                              const uint8_t secret_key[48]) {
+  if (!sig || !sig_len || !msg_hash || !secret_key || sig_capacity < 104)
+    return -1;
+
+  int rc = -1;
+  fio___p384_scalar_s d = {0}, e = {0}, k = {0}, k_inv = {0};
+  fio___p384_scalar_s r_scalar = {0}, s_scalar = {0}, tmp = {0};
+  fio___p384_point_affine_s g = {0}, R_aff = {0};
+  fio___p384_point_jacobian_s R_jac = {0};
+  uint8_t k_bytes[48] = {0};
+  uint8_t r_bytes[48] = {0}, s_bytes[48] = {0};
+  uint8_t r_der[51] = {0}, s_der[51] = {0};
+
+#define FIO___P384_SIGN_CLEAR_ATTEMPT()                                        \
+  do {                                                                         \
+    fio_secure_zero(k, sizeof(k));                                             \
+    fio_secure_zero(k_inv, sizeof(k_inv));                                     \
+    fio_secure_zero(r_scalar, sizeof(r_scalar));                               \
+    fio_secure_zero(s_scalar, sizeof(s_scalar));                               \
+    fio_secure_zero(tmp, sizeof(tmp));                                         \
+    fio_secure_zero(k_bytes, sizeof(k_bytes));                                 \
+    fio_secure_zero(r_bytes, sizeof(r_bytes));                                 \
+    fio_secure_zero(s_bytes, sizeof(s_bytes));                                 \
+    fio_secure_zero(r_der, sizeof(r_der));                                     \
+    fio_secure_zero(s_der, sizeof(s_der));                                     \
+    fio_secure_zero(&R_jac, sizeof(R_jac));                                    \
+    fio_secure_zero(&R_aff, sizeof(R_aff));                                    \
+  } while (0)
+
+  /* Load secret key as scalar d */
+  fio___p384_scalar_from_bytes(d, secret_key);
+
+  /* Validate d: 0 < d < n */
+  if (fio___p384_scalar_ct_is_zero(d) | fio___p384_scalar_ct_gte_n(d))
+    goto cleanup;
+
+  /* Load message hash as scalar e (public); reduce mod n if needed */
+  fio___p384_scalar_from_bytes(e, msg_hash);
+  fio___p384_scalar_sub_n_if(e, (uint64_t)fio___p384_scalar_gte_n(e));
+
+  fio___p384_fe_copy(g.x, FIO___P384_GX);
+  fio___p384_fe_copy(g.y, FIO___P384_GY);
+
+  /* Generate random k and compute signature. */
+  for (int attempts = 0; attempts < 100; ++attempts) {
+    /* Generate random nonce k in the valid scalar range 0 < k < n.
+     * Rejections consume an attempt, bounding total draws (stuck RNG). */
+    if (fio_rand_bytes_secure(k_bytes, 48))
+      fio_rand_bytes(k_bytes, 48);
+    fio___p384_scalar_from_bytes(k, k_bytes);
+    if (fio___p384_scalar_ct_is_zero(k) | fio___p384_scalar_ct_gte_n(k)) {
+      FIO___P384_SIGN_CLEAR_ATTEMPT();
+      continue;
+    }
+
+    /* Compute R = k * G (constant-time ladder) */
+    fio___p384_point_mul(&R_jac, k, &g);
+
+    if (fio___p384_point_is_infinity(&R_jac)) {
+      FIO___P384_SIGN_CLEAR_ATTEMPT();
+      continue;
+    }
+
+    /* Convert R to affine */
+    fio___p384_point_to_affine(&R_aff, &R_jac);
+
+    /* r = R.x mod n */
+    fio___p384_fe_to_bytes(r_bytes, R_aff.x);
+    fio___p384_scalar_from_bytes(r_scalar, r_bytes);
+
+    /* Reduce r mod n if needed. R.x < p < 2n, so one subtract is enough. */
+    fio___p384_scalar_sub_n_if(r_scalar,
+                               (uint64_t)fio___p384_scalar_ct_gte_n(r_scalar));
+
+    if (fio___p384_scalar_ct_is_zero(r_scalar)) {
+      FIO___P384_SIGN_CLEAR_ATTEMPT();
+      continue;
+    }
+
+    /* Compute s = k^(-1) * (e + r*d) mod n */
+    fio___p384_scalar_mul(tmp, r_scalar, d);
+
+    uint64_t carry = 0;
+    tmp[0] = fio_math_addc64(tmp[0], e[0], 0, &carry);
+    tmp[1] = fio_math_addc64(tmp[1], e[1], carry, &carry);
+    tmp[2] = fio_math_addc64(tmp[2], e[2], carry, &carry);
+    tmp[3] = fio_math_addc64(tmp[3], e[3], carry, &carry);
+    tmp[4] = fio_math_addc64(tmp[4], e[4], carry, &carry);
+    tmp[5] = fio_math_addc64(tmp[5], e[5], carry, &carry);
+
+    /* e and r*d are each < n, so one subtract is enough. */
+    fio___p384_scalar_sub_n_if(tmp,
+                               carry |
+                                   (uint64_t)fio___p384_scalar_ct_gte_n(tmp));
+
+    fio___p384_scalar_inv(k_inv, k);
+    fio___p384_scalar_mul(s_scalar, k_inv, tmp);
+
+    if (fio___p384_scalar_ct_is_zero(s_scalar)) {
+      FIO___P384_SIGN_CLEAR_ATTEMPT();
+      continue;
+    }
+
+    fio___p384_scalar_to_bytes(r_bytes, r_scalar);
+    fio___p384_scalar_to_bytes(s_bytes, s_scalar);
+
+    size_t r_der_len = fio___p384_encode_der_integer(r_der, r_bytes);
+    size_t s_der_len = fio___p384_encode_der_integer(s_der, s_bytes);
+    size_t seq_content_len = r_der_len + s_der_len;
+    size_t total_len = 2 + seq_content_len;
+
+    if (total_len > sig_capacity)
+      goto cleanup;
+
+    sig[0] = 0x30;
+    sig[1] = (uint8_t)seq_content_len; /* <= 102: short form */
+    FIO_MEMCPY(sig + 2, r_der, r_der_len);
+    FIO_MEMCPY(sig + 2 + r_der_len, s_der, s_der_len);
+    *sig_len = total_len;
+    rc = 0;
+    goto cleanup;
+  }
+
+cleanup:
+  fio_secure_zero(d, sizeof(d));
+  fio_secure_zero(e, sizeof(e));
+  fio_secure_zero(&g, sizeof(g));
+  FIO___P384_SIGN_CLEAR_ATTEMPT();
+#undef FIO___P384_SIGN_CLEAR_ATTEMPT
+  return rc;
+}
+
+/* *****************************************************************************
+P-384 Key Derivation / Generation
+***************************************************************************** */
+
+SFUNC int fio_p384_public_key(uint8_t public_key[97],
+                              const uint8_t secret_key[48]) {
+  if (!public_key)
+    return -1;
+  if (!secret_key) {
+    FIO_MEMSET(public_key, 0, 97);
+    return -1;
+  }
+
+  int rc = -1;
+  fio___p384_scalar_s k = {0};
+  fio___p384_point_affine_s g = {0}, pub_aff = {0};
+  fio___p384_point_jacobian_s pub_jac = {0};
+
+  /* Load and validate the secret scalar: 0 < k < n */
+  fio___p384_scalar_from_bytes(k, secret_key);
+  if (fio___p384_scalar_ct_is_zero(k) | fio___p384_scalar_ct_gte_n(k)) {
+    FIO_MEMSET(public_key, 0, 97);
+    goto cleanup;
+  }
+
+  /* Compute public key = k * G (constant-time ladder) */
+  fio___p384_fe_copy(g.x, FIO___P384_GX);
+  fio___p384_fe_copy(g.y, FIO___P384_GY);
+  fio___p384_point_mul(&pub_jac, k, &g);
+  fio___p384_point_to_affine(&pub_aff, &pub_jac);
+
+  /* Serialize: 0x04 || x || y */
+  public_key[0] = 0x04;
+  fio___p384_fe_to_bytes(public_key + 1, pub_aff.x);
+  fio___p384_fe_to_bytes(public_key + 49, pub_aff.y);
+  rc = 0;
+
+cleanup:
+  fio_secure_zero(k, sizeof(k));
+  fio_secure_zero(&pub_jac, sizeof(pub_jac));
+  fio_secure_zero(&pub_aff, sizeof(pub_aff));
+  return rc;
+}
+
+SFUNC int fio_p384_keypair(uint8_t secret_key[48], uint8_t public_key[97]) {
+  if (!secret_key || !public_key)
+    return -1;
+
+  /* Draw random scalars until 0 < k < n (bounded number of draws). */
+  for (int attempts = 0; attempts < 100; ++attempts) {
+    if (fio_rand_bytes_secure(secret_key, 48))
+      fio_rand_bytes(secret_key, 48);
+    if (!fio_p384_public_key(public_key, secret_key))
+      return 0;
+  }
+  fio_secure_zero(secret_key, 48);
+  return -1;
 }
 
 /* *****************************************************************************

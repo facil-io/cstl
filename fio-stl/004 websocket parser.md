@@ -200,6 +200,8 @@ The parser rejects:
 - nested text/binary messages while another data message is open;
 - control payloads larger than 125 bytes;
 - 64-bit lengths with the high bit set;
+- non-minimal length encodings (16-bit form for lengths below 126, 64-bit form
+  for lengths below 65,536);
 - frames larger than `FIO_WEBSOCKET_DEFAULT_MAX_FRAME`;
 - close frames with a 1-byte payload;
 - close frames carrying invalid on-wire close codes.
@@ -285,7 +287,7 @@ FIO_IFUNC uint64_t fio_websocket_write_close_client(void *target,
 
 Writes a close frame containing the 2-byte close code followed by the optional
 reason. The reason is truncated so the whole close payload fits in the 125-byte
-control-frame limit. Choose a close code that is valid to send on the wire.
+control-frame limit. A `NULL` reason buffer is treated as an empty reason. Choose a close code that is valid to send on the wire.
 
 ---
 
@@ -346,7 +348,7 @@ FIO_WEBSOCKET_PARSE_ERROR
 ```
 
 `FIO_WEBSOCKET_DEFAULT_MAX_FRAME` defaults to 1 GiB and may be overridden before
-including the header. `FIO_WEBSOCKET_PARSE_ERROR` is the parse error sentinel.
+including the header. Overrides must not exceed `UINT32_MAX` (build-time check). `FIO_WEBSOCKET_PARSE_ERROR` is the parse error sentinel.
 
 The header also exposes flag bit masks used by the accessor macros:
 `FIO_WEBSOCKET_FLAG_FIN`, `FIO_WEBSOCKET_FLAG_MASKED`,

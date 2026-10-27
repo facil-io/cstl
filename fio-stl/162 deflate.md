@@ -51,7 +51,7 @@ SFUNC size_t fio_deflate_compress(void *out,
                                   int level);
 ```
 
-Compresses raw DEFLATE data.
+Compresses raw DEFLATE data. Inputs larger than `0xFFFFFF00` bytes are rejected (the matcher uses 32-bit offsets). Levels 1–9 also reject token allocation sizes that cannot be represented by `size_t`; input is never silently shortened.
 
 Compression levels:
 
@@ -68,7 +68,7 @@ Returns compressed length on success, `0` on error.
 FIO_IFUNC size_t fio_deflate_compress_bound(size_t in_len);
 ```
 
-Returns an upper bound for raw DEFLATE output size.
+Returns an upper bound for raw DEFLATE output size, or `SIZE_MAX` if the bound cannot be represented.
 
 ## Gzip Wrappers
 
@@ -192,6 +192,8 @@ sync-flush trailer only on the message-final chunk.
 
 - `flush == 0`: normal streaming (buffered up to 32KB, then auto-compressed).
 - `flush == 1`: sync flush, useful at WebSocket frame boundaries.
+
+Compression rejects individual input chunks larger than `0xFFFF0000` bytes. On compression failure, buffered input and takeover history are preserved; output bytes written by a failed call must be discarded. A zero return while buffering (`flush == 0`) is not an error.
 
 For decompression, a return value greater than `out_len` means “retry with this much output space”; buffered input is preserved for that retry. Multi-block peer streams (e.g. zlib at any memLevel) inflate fully; the 9 completion bytes are appended internally.
 

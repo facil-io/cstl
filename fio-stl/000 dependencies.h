@@ -386,10 +386,10 @@ FIO_MAP Ordering & Naming Shortcut
 #if defined(FIO_STR) || defined(FIO_HTTP) || defined(FIO_STR_NAME) ||          \
     defined(FIO_STR_SMALL) || defined(FIO_ARRAY_TYPE_STR) ||                   \
     defined(FIO_DATA) || defined(FIO_MAP_KEY_KSTR) ||                          \
-    defined(FIO_MAP_KEY_BSTR) ||                                               \
+    defined(FIO_MAP_KEY_BSTR) || defined(FIO_MAP_VALUE_BSTR) ||                \
     (defined(FIO_MAP_NAME) && !defined(FIO_MAP_KEY)) ||                        \
-    defined(FIO_MUSTACHE) || defined(FIO_MAP2_NAME) || defined(FIO_OTP) ||     \
-    defined(FIO_PUBSUB) || defined(FIO_URL_ENCODED) || defined(FIO_JSON)
+    defined(FIO_MUSTACHE) || defined(FIO_OTP) || defined(FIO_PUBSUB) ||        \
+    defined(FIO_URL_ENCODED) || defined(FIO_JSON)
 #undef FIO_STR
 #undef FIO_ENTITY
 #define FIO_ENTITY
@@ -415,7 +415,7 @@ FIO_MAP Ordering & Naming Shortcut
 
 
 ***************************************************************************** */
-#if defined(IPC)
+#if defined(FIO_IPC)
 #undef FIO_CHACHA
 #undef FIO_SECRET
 #define FIO_CHACHA
@@ -447,7 +447,7 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_PUBSUB) || defined(FIO_SECRET) || defined(FIO_OTP) ||          \
-    defined(FIO_X509)
+    defined(FIO_X509) || defined(FIO_ED25519) || defined(FIO_RSA)
 #undef FIO_SHA2
 #define FIO_SHA2
 #endif
@@ -465,7 +465,7 @@ FIO_MAP Ordering & Naming Shortcut
 #endif
 
 #if defined(FIO_CHACHA) || defined(FIO_SHA1) || defined(FIO_SHA2) ||           \
-    defined(FIO_BLAKE2)
+    defined(FIO_BLAKE2) || defined(FIO_ED25519)
 #undef FIO_CRYPTO_CORE
 #define FIO_CRYPTO_CORE
 #endif
@@ -481,7 +481,7 @@ FIO_MAP Ordering & Naming Shortcut
 ***************************************************************************** */
 
 #if defined(FIO_HTTP) || defined(FIO_QUEUE) || defined(FIO_OTP) ||             \
-    defined(FIO_X509)
+    defined(FIO_X509) || defined(FIO_DER)
 #undef FIO_TIME
 #define FIO_TIME
 #endif
@@ -493,7 +493,8 @@ FIO_MAP Ordering & Naming Shortcut
 
 #if defined(FIO_CLI) || defined(FIO_HTTP) || defined(FIO_HTTP1_PARSER) ||      \
     defined(FIO_JSON) || defined(FIO_STR) || defined(FIO_TIME) ||              \
-    defined(FIO_FILES) || defined(FIO_SECRET) || defined(FIO_RESP3)
+    defined(FIO_FILES) || defined(FIO_SECRET) || defined(FIO_RESP3) ||         \
+    defined(FIO_DER)
 #undef FIO_ATOL
 #define FIO_ATOL
 #endif
@@ -509,7 +510,8 @@ FIO_MAP Ordering & Naming Shortcut
 #define FIO_IMAP_CORE
 #endif
 
-#if defined(FIO_CHACHA) || defined(FIO_SHA2)
+#if defined(FIO_CHACHA) || defined(FIO_SHA2) || defined(FIO_P256) ||           \
+    defined(FIO_P384)
 #undef FIO_MATH
 #define FIO_MATH
 #endif

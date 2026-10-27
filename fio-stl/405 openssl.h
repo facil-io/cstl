@@ -407,10 +407,29 @@ error:
 OpenSSL Context type wrappers
 ***************************************************************************** */
 
+/* A preloaded certificate (leaf, extra chain, private key) */
+typedef struct {
+  X509 *cert;
+  STACK_OF(X509) * chain;
+  EVP_PKEY *key;
+} fio___openssl_cred_s;
+
 /* Context for all future connections */
 typedef struct {
   SSL_CTX *ctx;
   fio_io_tls_s *tls;
+  /* Every configured certificate (in `fio_io_tls_each` order), loaded once.
+   * The default one is also installed in `ctx`; servers with 2+ certificates
+   * pick one per handshake from the ClientHello SNI (see `sni`). */
+  fio___openssl_cred_s *creds;
+  size_t creds_count;
+  fio___io_tls_sni_index_s sni;
+  /* References: one per `build_context` / `dup_context` result (released by
+   * free_context); an IO's reference moves to its connection in `start`
+   * (released by cleanup). The ALPN callback and SNI read `tls`,
+   * so the context must outlive connections whose handshake is still pending
+   * after a listener stops or a client's connecting state is released. */
+  size_t ref;
 } fio___openssl_context_s;
 
 FIO_LEAK_COUNTER_DEF(fio___openssl_context_s)
@@ -447,20 +466,18 @@ FIO_SFUNC int fio___openssl_alpn_selector_cb(SSL *ssl,
   char buf[256];
   while (in < end) {
     uint8_t len = in[0];
-    if (len == 0 || (size_t)in + 1 + len > (size_t)end)
+    if (len == 0 || (size_t)(end - in) < (size_t)len + 1)
       break;
-    if (len < sizeof(buf) - 1) {
-      FIO_MEMCPY(buf, in + 1, len);
-      buf[len] = 0;
-      if (!fio_io_tls_alpn_select(ctx->tls, buf, (size_t)len, io)) {
-        *out = in + 1;
-        *outlen = len;
-        FIO_LOG_DDEBUG2("(%d) TLS ALPN set to: %s for %p",
-                        (int)fio_thread_getpid(),
-                        buf,
-                        (void *)io);
-        return SSL_TLSEXT_ERR_OK;
-      }
+    FIO_MEMCPY(buf, in + 1, len); /* len <= 255 < sizeof(buf) */
+    buf[len] = 0;
+    if (!fio_io_tls_alpn_select(ctx->tls, buf, (size_t)len, io)) {
+      *out = in + 1;
+      *outlen = len;
+      FIO_LOG_DDEBUG2("(%d) TLS ALPN set to: %s for %p",
+                      (int)fio_thread_getpid(),
+                      buf,
+                      (void *)io);
+      return SSL_TLSEXT_ERR_OK;
     }
     in += len + 1;
   }
@@ -475,61 +492,132 @@ FIO_SFUNC int fio___openssl_alpn_selector_cb(SSL *ssl,
 Public Context Builder
 ***************************************************************************** */
 
+/** Frees a preloaded certificate. */
+FIO_SFUNC void fio___openssl_cred_destroy(fio___openssl_cred_s *c) {
+  if (c->cert)
+    X509_free(c->cert);
+  if (c->chain)
+    sk_X509_pop_free(c->chain, X509_free);
+  if (c->key)
+    EVP_PKEY_free(c->key);
+  *c = (fio___openssl_cred_s){0};
+}
+
+/** Loads a PEM certificate chain file (leaf first) and its private key. */
+FIO_SFUNC int fio___openssl_cred_load(fio___openssl_cred_s *c,
+                                      const char *public_cert_file,
+                                      const char *private_key_file,
+                                      const char *pk_password) {
+  BIO *bio = BIO_new_file(public_cert_file, "r");
+  if (!bio)
+    goto cert_error;
+  c->cert = PEM_read_bio_X509_AUX(bio, NULL, NULL, NULL);
+  c->chain = sk_X509_new_null();
+  if (!c->cert || !c->chain) {
+    BIO_free(bio);
+    goto cert_error;
+  }
+  for (X509 *ca; (ca = PEM_read_bio_X509(bio, NULL, NULL, NULL));) {
+    if (!sk_X509_push(c->chain, ca)) {
+      X509_free(ca);
+      BIO_free(bio);
+      goto cert_error;
+    }
+  }
+  BIO_free(bio);
+  { /* the chain ends at the end of the file, any other error is fatal */
+    unsigned long err = ERR_peek_last_error();
+    if (ERR_GET_LIB(err) != ERR_LIB_PEM ||
+        ERR_GET_REASON(err) != PEM_R_NO_START_LINE)
+      goto cert_error;
+    ERR_clear_error();
+  }
+  bio = BIO_new_file(private_key_file, "r");
+  if (bio) {
+    c->key = PEM_read_bio_PrivateKey(bio,
+                                     NULL,
+                                     fio___openssl_pem_password_cb,
+                                     (void *)pk_password);
+    BIO_free(bio);
+  }
+  if (!c->key) {
+    ERR_print_errors_fp(stderr);
+    FIO_LOG_ERROR("OpenSSL couldn't load private key file: %s",
+                  private_key_file);
+    return -1;
+  }
+  if (!X509_check_private_key(c->cert, c->key)) {
+    ERR_clear_error();
+    FIO_LOG_ERROR("OpenSSL: private key doesn't match certificate");
+    return -1;
+  }
+  return 0;
+cert_error:
+  ERR_print_errors_fp(stderr);
+  FIO_LOG_ERROR("OpenSSL couldn't load certificate file: %s", public_cert_file);
+  return -1;
+}
+
+/** Loads one configured certificate and indexes it by name (SNI). */
 FIO_SFUNC int fio___openssl_each_cert(struct fio_io_tls_each_s *e,
                                       const char *server_name,
                                       const char *public_cert_file,
                                       const char *private_key_file,
                                       const char *pk_password) {
   fio___openssl_context_s *s = (fio___openssl_context_s *)e->udata;
+  size_t *pos = (size_t *)e->udata2;
+  if (*pos >= s->creds_count)
+    return -1; /* certificates added while building? never overflow */
+  fio___openssl_cred_s *c = s->creds + *pos;
   if (public_cert_file && private_key_file) { /* load certificate from files */
-    SSL_CTX_set_default_passwd_cb(s->ctx, fio___openssl_pem_password_cb);
-    SSL_CTX_set_default_passwd_cb_userdata(s->ctx, (void *)pk_password);
     FIO_LOG_DDEBUG2("loading TLS certificates: %s & %s",
                     public_cert_file,
                     private_key_file);
-    /* Set the certificate */
-    if (SSL_CTX_use_certificate_chain_file(s->ctx, public_cert_file) <= 0) {
-      ERR_print_errors_fp(stderr);
-      FIO_LOG_ERROR("OpenSSL couldn't load certificate file: %s",
-                    public_cert_file);
+    if (fio___openssl_cred_load(c,
+                                public_cert_file,
+                                private_key_file,
+                                pk_password))
       return -1;
-    }
-    /* Set the private key */
-    if (SSL_CTX_use_PrivateKey_file(s->ctx,
-                                    private_key_file,
-                                    SSL_FILETYPE_PEM) <= 0) {
-      ERR_print_errors_fp(stderr);
-      FIO_LOG_ERROR("OpenSSL couldn't load private key file: %s",
-                    private_key_file);
-      return -1;
-    }
-    /* Verify key matches certificate */
-    if (!SSL_CTX_check_private_key(s->ctx)) {
-      FIO_LOG_ERROR("OpenSSL: private key doesn't match certificate");
-      return -1;
-    }
-    SSL_CTX_set_default_passwd_cb(s->ctx, NULL);
-    SSL_CTX_set_default_passwd_cb_userdata(s->ctx, NULL);
   } else { /* generate self-signed certificate */
-    if (!server_name || !server_name[0])
-      server_name = "localhost";
-    X509 *cert = fio_io_tls_create_self_signed(server_name);
-    if (!cert) {
+    c->cert = fio_io_tls_create_self_signed(
+        (server_name && server_name[0]) ? server_name : "localhost");
+    if (!c->cert) {
       FIO_LOG_ERROR("failed to create self-signed certificate");
       return -1;
     }
-    if (!SSL_CTX_use_certificate(s->ctx, cert)) {
-      X509_free(cert);
-      FIO_LOG_ERROR("OpenSSL: SSL_CTX_use_certificate failed");
+    if (!fio___openssl_pkey || !EVP_PKEY_up_ref(fio___openssl_pkey)) {
+      FIO_LOG_ERROR("OpenSSL: self-signed private key unavailable");
       return -1;
     }
-    X509_free(cert); /* SSL_CTX makes a copy */
-    if (!SSL_CTX_use_PrivateKey(s->ctx, fio___openssl_pkey)) {
-      FIO_LOG_ERROR("OpenSSL: SSL_CTX_use_PrivateKey failed");
-      return -1;
-    }
+    c->key = fio___openssl_pkey;
   }
+  if (fio___io_tls_sni_add(&s->sni, server_name, *pos))
+    return -1;
+  ++*pos;
   return 0;
+}
+
+/** Frees the preloaded certificates and the SNI index. */
+FIO_SFUNC void fio___openssl_context_creds_free(fio___openssl_context_s *ctx) {
+  for (size_t i = 0; i < ctx->creds_count; ++i)
+    fio___openssl_cred_destroy(ctx->creds + i);
+  if (ctx->creds)
+    FIO_MEM_FREE(ctx->creds, ctx->creds_count * sizeof(*ctx->creds));
+  ctx->creds = NULL;
+  ctx->creds_count = 0;
+  fio___io_tls_sni_destroy(&ctx->sni);
+}
+
+/** Server certificate callback: presents the certificate matching the SNI. */
+FIO_SFUNC int fio___openssl_sni_cert_cb(SSL *ssl, void *ctx_) {
+  fio___openssl_context_s *ctx = (fio___openssl_context_s *)ctx_;
+  const char *sni = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+  size_t pos = fio___io_tls_sni_find(&ctx->sni, sni, sni ? FIO_STRLEN(sni) : 0);
+  if (pos == ctx->sni.dflt || pos >= ctx->creds_count)
+    return 1; /* the default certificate is installed in the SSL_CTX */
+  fio___openssl_cred_s *c = ctx->creds + pos;
+  SSL_certs_clear(ssl); /* never mix in the default (other key type slots) */
+  return SSL_use_cert_and_key(ssl, c->cert, c->key, c->chain, 1) == 1;
 }
 
 FIO_SFUNC int fio___openssl_each_alpn(struct fio_io_tls_each_s *e,
@@ -586,6 +674,7 @@ FIO_SFUNC void *fio___openssl_build_context(fio_io_tls_s *tls,
   *ctx = (fio___openssl_context_s){
       .ctx = SSL_CTX_new((is_client ? TLS_client_method : TLS_server_method)()),
       .tls = fio_io_tls_dup(tls),
+      .ref = 1,
   };
 
   if (!ctx->ctx) {
@@ -659,14 +748,47 @@ FIO_SFUNC void *fio___openssl_build_context(fio_io_tls_s *tls,
     }
   }
 
-  /* Process each configured certificate */
+  /* Load the trust store */
   if (fio_io_tls_each(tls,
                       .udata = ctx,
                       .udata2 = store,
-                      .each_cert = fio___openssl_each_cert,
                       .each_trust = fio___openssl_each_trust)) {
-    FIO_LOG_ERROR("OpenSSL: failed to configure certificates or trust store");
+    FIO_LOG_ERROR("OpenSSL: failed to configure the trust store");
     goto error;
+  }
+
+  /* Load each configured certificate once; install the default one and, for
+   * servers with several certificates, select by SNI per handshake. */
+  if (fio_io_tls_cert_count(tls)) {
+    size_t pos = 0;
+    ctx->creds_count = fio_io_tls_cert_count(tls);
+    ctx->creds = (fio___openssl_cred_s *)
+        FIO_MEM_REALLOC(NULL, 0, ctx->creds_count * sizeof(*ctx->creds), 0);
+    if (!ctx->creds) {
+      ctx->creds_count = 0;
+      FIO_LOG_ERROR("OpenSSL: memory allocation failed for certificates");
+      goto error;
+    }
+    FIO_MEMSET(ctx->creds, 0, ctx->creds_count * sizeof(*ctx->creds));
+    if (fio_io_tls_each(tls,
+                        .udata = ctx,
+                        .udata2 = &pos,
+                        .each_cert = fio___openssl_each_cert) ||
+        pos != ctx->creds_count) {
+      FIO_LOG_ERROR("OpenSSL: failed to configure certificates");
+      goto error;
+    }
+    fio___openssl_cred_s *dflt = ctx->creds + ctx->sni.dflt;
+    if (SSL_CTX_use_cert_and_key(ctx->ctx,
+                                 dflt->cert,
+                                 dflt->key,
+                                 dflt->chain,
+                                 1) != 1) {
+      FIO_LOG_ERROR("OpenSSL: failed to install the default certificate");
+      goto error;
+    }
+    if (!is_client && ctx->creds_count > 1)
+      SSL_CTX_set_cert_cb(ctx->ctx, fio___openssl_sni_cert_cb, ctx);
   }
 
   /* Configure ALPN if protocols are registered */
@@ -686,18 +808,12 @@ FIO_SFUNC void *fio___openssl_build_context(fio_io_tls_s *tls,
         FIO_LOG_ERROR("SSL_CTX_set_alpn_protos failed.");
         /* ALPN is optional, continue without it */
       } else {
+        /* Servers select via callback; clients dispatch the negotiated
+         * protocol when the handshake completes (fio___openssl_read).
+         * NPN (deprecated) is intentionally not supported. */
         SSL_CTX_set_alpn_select_cb(ctx->ctx,
                                    fio___openssl_alpn_selector_cb,
                                    ctx);
-        SSL_CTX_set_next_proto_select_cb(
-            ctx->ctx,
-            (int (*)(SSL *,
-                     unsigned char **,
-                     unsigned char *,
-                     const unsigned char *,
-                     unsigned int,
-                     void *))fio___openssl_alpn_selector_cb,
-            (void *)ctx);
       }
     }
   }
@@ -705,6 +821,7 @@ FIO_SFUNC void *fio___openssl_build_context(fio_io_tls_s *tls,
 
 error:
   if (ctx) {
+    fio___openssl_context_creds_free(ctx);
     if (ctx->ctx)
       SSL_CTX_free(ctx->ctx);
     if (ctx->tls)
@@ -740,9 +857,18 @@ while retaining full control over batching and partial write buffering.
  *  buffers. Custom BIOs read/write directly from/to these buffers. */
 typedef struct {
   SSL *ssl;
+  /* Parent context reference (see fio___openssl_context_s.ref). */
+  fio___openssl_context_s *parent;
   /* Cached handshake state — avoids SSL_is_init_finished() vtable call
    * on every read() in the hot path (post-handshake). */
   uint8_t handshake_complete;
+  /* Socket reached EOF (or a hard error): drain buffered records, then close.
+   */
+  uint8_t eof;
+  /* Set by the rbio when OpenSSL asked for more input than is buffered: a
+   * failed SSL call with this flag set is a plain WANT_READ (fast path that
+   * avoids SSL_get_error's error-queue access). */
+  uint8_t rbio_starved;
   /* Receive buffer — raw socket data fed to OpenSSL for decryption.
    * We read the socket directly into this buffer, and OpenSSL's custom rbio
    * read callback pulls from it. Sized for one full IO read (64KB). */
@@ -805,6 +931,7 @@ FIO_SFUNC int fio___openssl_rbio_read_ex(BIO *bio,
   }
   size_t avail = conn->recv_buf_len - conn->recv_buf_pos;
   if (!avail) {
+    conn->rbio_starved = 1;
     BIO_set_retry_read(bio);
     *readbytes = 0;
     return 0;
@@ -859,17 +986,25 @@ static BIO_METHOD *fio___openssl_wbio_method = NULL;
 FIO_SFUNC void fio___openssl_init_bio_methods(void) {
   static fio_lock_i lock = FIO_LOCK_INIT;
   fio_lock(&lock);
-  if (!fio___openssl_rbio_method) {
-    fio___openssl_rbio_method =
+  if (!fio___openssl_rbio_method || !fio___openssl_wbio_method) {
+    /* Build locally; publish both only once fully initialized. */
+    BIO_METHOD *r =
         BIO_meth_new(BIO_TYPE_SOURCE_SINK | BIO_get_new_index(), "fio_rbio");
-    BIO_meth_set_read_ex(fio___openssl_rbio_method, fio___openssl_rbio_read_ex);
-    BIO_meth_set_ctrl(fio___openssl_rbio_method, fio___openssl_bio_ctrl);
-
-    fio___openssl_wbio_method =
+    BIO_METHOD *w =
         BIO_meth_new(BIO_TYPE_SOURCE_SINK | BIO_get_new_index(), "fio_wbio");
-    BIO_meth_set_write_ex(fio___openssl_wbio_method,
-                          fio___openssl_wbio_write_ex);
-    BIO_meth_set_ctrl(fio___openssl_wbio_method, fio___openssl_bio_ctrl);
+    if (r && w && BIO_meth_set_read_ex(r, fio___openssl_rbio_read_ex) == 1 &&
+        BIO_meth_set_ctrl(r, fio___openssl_bio_ctrl) == 1 &&
+        BIO_meth_set_write_ex(w, fio___openssl_wbio_write_ex) == 1 &&
+        BIO_meth_set_ctrl(w, fio___openssl_bio_ctrl) == 1) {
+      fio___openssl_rbio_method = r;
+      fio___openssl_wbio_method = w;
+    } else {
+      FIO_LOG_ERROR("OpenSSL: custom BIO method initialization failed");
+      if (r)
+        BIO_meth_free(r);
+      if (w)
+        BIO_meth_free(w);
+    }
   }
   fio_unlock(&lock);
 }
@@ -933,10 +1068,44 @@ FIO_SFUNC size_t fio___openssl_send_enc_buf(fio_socket_i fd,
 IO functions
 ***************************************************************************** */
 
+/**
+ * Classifies a failed handshake / SSL_read_ex call. Returns 0 when the call
+ * should be retried once more input arrives (WANT_READ / WANT_WRITE), or the
+ * fatal SSL_get_error code (SSL_ERROR_ZERO_RETURN for a clean close_notify).
+ */
+FIO_SFUNC int fio___openssl_failure(fio___openssl_connection_s *conn, int r) {
+  if (conn->rbio_starved) /* fast path: OpenSSL ran out of buffered input */
+    return 0;
+  int e = SSL_get_error(conn->ssl, r);
+  if (e == SSL_ERROR_WANT_READ || e == SSL_ERROR_WANT_WRITE)
+    return 0;
+  ERR_clear_error(); /* don't leak this connection's errors to the next */
+  return e ? e : SSL_ERROR_SSL;
+}
+
+/** Client: dispatches the server-selected ALPN protocol (if any). */
+FIO_SFUNC void fio___openssl_alpn_client_dispatch(
+    fio___openssl_connection_s *conn) {
+  const unsigned char *nm = NULL;
+  unsigned int len = 0;
+  if (!conn->parent || !conn->parent->tls ||
+      !fio_io_tls_alpn_count(conn->parent->tls))
+    return;
+  SSL_get0_alpn_selected(conn->ssl, &nm, &len);
+  if (!nm || !len)
+    return;
+  fio_io_tls_alpn_select(conn->parent->tls,
+                         (const char *)nm,
+                         (size_t)len,
+                         (fio_io_s *)SSL_get_ex_data(conn->ssl, 0));
+}
+
 /** Called to perform a non-blocking `read`, same as the system call.
  *
  * Custom BIO flow (one copy, same as BIO_new_socket):
- * 1. Read raw bytes from socket directly into conn->recv_buf (ONE copy)
+ * 1. Read raw bytes from socket directly into conn->recv_buf (ONE copy).
+ *    Socket EOF / hard errors are latched in conn->eof: buffered records are
+ *    still drained and EOF (0) is reported only once no progress remains.
  * 2. If handshake incomplete: call SSL_do_handshake() — OpenSSL pulls from
  *    recv_buf via custom rbio, writes handshake output to enc_buf via custom
  *    wbio. Send enc_buf immediately (IO layer won't call on_ready during
@@ -944,14 +1113,19 @@ IO functions
  * 3. If handshake complete: call SSL_read_ex() to decrypt application data.
  *    OpenSSL pulls from recv_buf via custom rbio.
  * 4. Send any post-read output from enc_buf (key updates, etc.)
+ *
+ * Fatal TLS errors return -1 (ECONNRESET); close_notify returns 0 (EOF).
  */
 FIO_SFUNC ssize_t fio___openssl_read(fio_socket_i fd,
                                      void *buf,
                                      size_t len,
                                      void *tls_ctx) {
   fio___openssl_connection_s *conn = (fio___openssl_connection_s *)tls_ctx;
-  if (!conn || !buf)
+  int err;
+  if (!conn || !buf) {
+    errno = ENOTCONN;
     return -1;
+  }
   SSL *ssl = conn->ssl;
 
   /* Step 1: Compact recv_buf when >50% consumed, to maximize socket read space.
@@ -970,16 +1144,15 @@ FIO_SFUNC ssize_t fio___openssl_read(fio_socket_i fd,
 
   /* Step 2: Read raw data from socket directly into recv_buf.
    * ONE copy: socket → recv_buf. Same as BIO_new_socket. */
-  if (conn->recv_buf_len < sizeof(conn->recv_buf)) {
+  if (!conn->eof && conn->recv_buf_len < sizeof(conn->recv_buf)) {
     ssize_t raw = fio_sock_read(fd,
                                 (char *)conn->recv_buf + conn->recv_buf_len,
                                 sizeof(conn->recv_buf) - conn->recv_buf_len);
     if (raw > 0)
       conn->recv_buf_len += (size_t)raw;
-    else if (raw == 0)
-      return 0; /* EOF */
-    /* raw == -1 with EWOULDBLOCK is OK — recv_buf may still have data
-     * from a previous read that SSL_read can process. */
+    else if (!raw ||
+             (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR))
+      conn->eof = 1; /* drain buffered records before reporting EOF */
   }
 
   /* Step 3: If handshake not complete, advance it.
@@ -989,49 +1162,57 @@ FIO_SFUNC ssize_t fio___openssl_read(fio_socket_i fd,
    * queues outgoing data — which won't happen until after the handshake
    * completes. This matches the native TLS 1.3 implementation. */
   if (!conn->handshake_complete) {
-    SSL_do_handshake(ssl);
-    /* Handshake output is already in enc_buf — send it immediately */
+    conn->rbio_starved = 0;
+    int hr = SSL_do_handshake(ssl);
+    /* Handshake output (or alert) is already in enc_buf — send it now */
     if (conn->enc_buf_len > conn->enc_buf_sent)
       fio___openssl_send_enc_buf(fd, conn);
-    /* If handshake still not finished, tell IO layer to wait for more data */
-    if (!SSL_is_init_finished(ssl)) {
-      errno = EWOULDBLOCK;
-      return -1;
+    if (hr != 1) {
+      if ((err = fio___openssl_failure(conn, hr)))
+        goto fatal;
+      goto would_block;
     }
-    /* Handshake just completed — cache the result to avoid vtable call */
     conn->handshake_complete = 1;
+    if (!SSL_is_server(ssl))
+      fio___openssl_alpn_client_dispatch(conn);
     /* Fall through to try SSL_read_ex */
   }
 
   /* Step 4: Decrypt application data.
-   * OpenSSL pulls raw data from recv_buf via custom rbio read callback. */
-  size_t readbytes = 0;
-  int r = SSL_read_ex(ssl, buf, len, &readbytes);
+   * OpenSSL pulls raw data from recv_buf via custom rbio read callback.
+   * Retry while buffered input is being consumed without producing data
+   * (e.g., post-handshake messages with SSL_MODE_AUTO_RETRY disabled). */
+  for (;;) {
+    size_t readbytes = 0;
+    size_t before = conn->recv_buf_len - conn->recv_buf_pos;
+    conn->rbio_starved = 0;
+    int r = SSL_read_ex(ssl, buf, len, &readbytes);
 
-  /* Step 5: Send any post-read output (key updates, renegotiation).
-   * These are already in enc_buf via the custom wbio write callback. */
-  if (conn->enc_buf_len > conn->enc_buf_sent)
-    fio___openssl_send_enc_buf(fd, conn);
+    /* Step 5: Send any post-read output (key updates, alerts).
+     * These are already in enc_buf via the custom wbio write callback. */
+    if (conn->enc_buf_len > conn->enc_buf_sent)
+      fio___openssl_send_enc_buf(fd, conn);
 
-  if (r == 1 && readbytes > 0)
-    return (ssize_t)readbytes;
-
-  /* Fast path: if recv_buf is empty, it's just WANT_READ (no more data).
-   * Avoids the expensive SSL_get_error() call which accesses OpenSSL's
-   * thread-local error queue. This is the most common "failure" case. */
-  if (conn->recv_buf_pos >= conn->recv_buf_len) {
-    errno = EWOULDBLOCK;
-    return -1;
+    if (r == 1)
+      return (ssize_t)readbytes;
+    if ((err = fio___openssl_failure(conn, r)))
+      goto fatal;
+    if (conn->rbio_starved ||
+        (conn->recv_buf_len - conn->recv_buf_pos) >= before)
+      break; /* no buffered input left / no progress */
   }
 
-  /* Slow path: actual SSL error */
-  int ssl_err = SSL_get_error(ssl, r);
-  switch (ssl_err) {
-  case SSL_ERROR_SSL:                   /* fall through */
-  case SSL_ERROR_SYSCALL:               /* fall through */
-  case SSL_ERROR_ZERO_RETURN: return 0; /* EOF */
-  default: errno = EWOULDBLOCK; return -1;
-  }
+would_block:
+  if (conn->eof)
+    return 0; /* socket EOF and nothing more to process */
+  errno = EWOULDBLOCK;
+  return -1;
+
+fatal:
+  if (err == SSL_ERROR_ZERO_RETURN)
+    return 0; /* close_notify */
+  errno = ECONNRESET;
+  return -1;
 }
 
 /**
@@ -1051,9 +1232,11 @@ FIO_SFUNC int fio___openssl_flush(fio_socket_i fd, void *tls_ctx) {
     conn->enc_buf_sent = 0;
     return 0;
   }
+  errno = 0;
   fio___openssl_send_enc_buf(fd, conn);
   if (conn->enc_buf_sent < conn->enc_buf_len) {
-    errno = EWOULDBLOCK;
+    if (!errno || errno == EAGAIN || errno == EINTR)
+      errno = EWOULDBLOCK; /* preserve hard socket errors (EPIPE, ...) */
     return -1;
   }
   return 0;
@@ -1097,7 +1280,8 @@ FIO_SFUNC ssize_t fio___openssl_write(fio_socket_i fd,
                                      (char *)conn->enc_buf + conn->enc_buf_sent,
                                      conn->enc_buf_len - conn->enc_buf_sent);
     if (written <= 0) {
-      errno = EWOULDBLOCK;
+      if (!written || errno == EAGAIN || errno == EINTR)
+        errno = EWOULDBLOCK; /* preserve hard socket errors (EPIPE, ...) */
       return -1;
     }
     conn->enc_buf_sent += (size_t)written;
@@ -1114,10 +1298,9 @@ FIO_SFUNC ssize_t fio___openssl_write(fio_socket_i fd,
   if (r != 1 || ssl_written == 0) {
     int ssl_err = SSL_get_error(conn->ssl, r);
     switch (ssl_err) {
-    case SSL_ERROR_SSL:                   /* fall through */
-    case SSL_ERROR_SYSCALL:               /* fall through */
-    case SSL_ERROR_ZERO_RETURN: return 0; /* connection error / EOF */
-    default: errno = EWOULDBLOCK; return -1;
+    case SSL_ERROR_WANT_READ: /* fall through */
+    case SSL_ERROR_WANT_WRITE: errno = EWOULDBLOCK; return -1;
+    default: ERR_clear_error(); return 0; /* connection error / EOF */
     }
   }
 
@@ -1237,28 +1420,62 @@ cleanup:
 Per-Connection Builder
 ***************************************************************************** */
 
+/** Verification callback that rejects every peer (fail closed). */
+FIO_SFUNC int fio___openssl_verify_reject(int ok, X509_STORE_CTX *store) {
+  (void)ok;
+  (void)store;
+  return 0;
+}
+
+/**
+ * Client: binds the expected server identity (`tls->sni`) to certificate
+ * verification (effective whenever SSL_VERIFY_PEER is set) and sends SNI
+ * (RFC 6066). IP literals are matched against iPAddress SANs and never sent
+ * as SNI. Fails closed (rejects any peer) if the identity can't be set.
+ */
+FIO_SFUNC void fio___openssl_client_identity(SSL *ssl, fio_io_tls_s *tls) {
+  fio_buf_info_s nm = fio_keystr_buf(&tls->sni);
+  if (!nm.buf || !nm.len || nm.len > 255)
+    return;
+  char buf[256];
+  FIO_MEMCPY(buf, nm.buf, nm.len);
+  buf[nm.len] = 0;
+  if (X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(ssl), buf))
+    return;
+  SSL_set_tlsext_host_name(ssl, buf);
+  SSL_set_hostflags(ssl, X509_CHECK_FLAG_NO_PARTIAL_WILDCARDS);
+  if (SSL_set1_host(ssl, buf))
+    return;
+  FIO_LOG_ERROR("OpenSSL: SSL_set1_host failed, rejecting peer");
+  SSL_set_verify(ssl, SSL_VERIFY_PEER, fio___openssl_verify_reject);
+}
+
+FIO_SFUNC void fio___openssl_context_release(fio___openssl_context_s *ctx);
+
 /** called once the IO was attached and the TLS object was set. */
 FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
   fio___openssl_context_s *ctx_parent =
       (fio___openssl_context_s *)fio_io_tls(io);
+  SSL *ssl = NULL;
+  fio___openssl_connection_s *conn = NULL;
+  BIO *rbio = NULL, *wbio = NULL;
   if (!ctx_parent || !ctx_parent->ctx) {
     FIO_LOG_ERROR("OpenSSL Context missing for connection!");
-    return;
+    goto failed;
   }
 
-  SSL *ssl = SSL_new(ctx_parent->ctx);
+  ssl = SSL_new(ctx_parent->ctx);
   if (!ssl) {
     FIO_LOG_ERROR("OpenSSL: SSL_new failed");
-    return;
+    goto failed;
   }
 
   /* Allocate per-connection wrapper */
-  fio___openssl_connection_s *conn =
+  conn =
       (fio___openssl_connection_s *)FIO_MEM_REALLOC(NULL, 0, sizeof(*conn), 0);
   if (!conn) {
     FIO_LOG_ERROR("OpenSSL: connection allocation failed");
-    SSL_free(ssl);
-    return;
+    goto failed;
   }
   FIO_LEAK_COUNTER_ON_ALLOC(fio___openssl_connection_s);
   FIO_MEMSET(conn, 0, sizeof(*conn));
@@ -1266,18 +1483,13 @@ FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
 
   /* Create custom BIOs that read/write directly from/to our buffers */
   fio___openssl_init_bio_methods();
-  BIO *rbio = BIO_new(fio___openssl_rbio_method);
-  BIO *wbio = BIO_new(fio___openssl_wbio_method);
+  if (fio___openssl_rbio_method && fio___openssl_wbio_method) {
+    rbio = BIO_new(fio___openssl_rbio_method);
+    wbio = BIO_new(fio___openssl_wbio_method);
+  }
   if (!rbio || !wbio) {
     FIO_LOG_ERROR("OpenSSL: BIO_new(custom) failed");
-    if (rbio)
-      BIO_free(rbio);
-    if (wbio)
-      BIO_free(wbio);
-    FIO_LEAK_COUNTER_ON_FREE(fio___openssl_connection_s);
-    FIO_MEM_FREE(conn, sizeof(*conn));
-    SSL_free(ssl);
-    return;
+    goto failed;
   }
   BIO_set_data(rbio, conn); /* point to our connection struct */
   BIO_set_data(wbio, conn);
@@ -1285,6 +1497,8 @@ FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
   BIO_set_init(wbio, 1);
   SSL_set_bio(ssl, rbio, wbio); /* SSL takes ownership of both BIOs */
 
+  /* the IO's context reference moves to `conn` (released by cleanup) */
+  conn->parent = ctx_parent;
   fio_io_tls_set(io, (void *)conn);
 
   FIO_LOG_DDEBUG2("(%d) allocated new TLS context (custom BIO) for %p.",
@@ -1293,22 +1507,16 @@ FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
 
   SSL_set_ex_data(ssl, 0, (void *)io);
 
-  /* Send the SNI host name for client connections (RFC 6066). */
-  if (!SSL_is_server(ssl) && ctx_parent->tls) {
-    fio_buf_info_s sni = fio_keystr_buf(&ctx_parent->tls->sni);
-    if (sni.buf && sni.len && sni.len < 256) {
-      char sni_buf[256];
-      FIO_MEMCPY(sni_buf, sni.buf, sni.len);
-      sni_buf[sni.len] = 0;
-      SSL_set_tlsext_host_name(ssl, sni_buf);
-    }
-  }
+  if (!SSL_is_server(ssl) && ctx_parent->tls)
+    fio___openssl_client_identity(ssl, ctx_parent->tls);
 
   /* Initiate handshake — OpenSSL writes handshake data into enc_buf via wbio */
-  if (SSL_is_server(ssl))
-    SSL_accept(ssl);
-  else
-    SSL_connect(ssl);
+  {
+    conn->rbio_starved = 0;
+    int r = SSL_is_server(ssl) ? SSL_accept(ssl) : SSL_connect(ssl);
+    if (r != 1) /* fatal errors resurface on read; clear the error queue */
+      (void)fio___openssl_failure(conn, r);
+  }
 
   /* Send any initial handshake output (ClientHello for client) directly.
    * For client connections, the ClientHello must be sent now because the
@@ -1318,6 +1526,25 @@ FIO_SFUNC void fio___openssl_start(fio_io_s *io) {
    * enc_buf is typically empty here. */
   if (conn->enc_buf_len > conn->enc_buf_sent)
     fio___openssl_send_enc_buf(fio_io_fd(io), conn);
+  return;
+
+failed:
+  /* Never leave the shared parent context in `io->tls`, where read / cleanup
+   * would treat it as per-connection state. Fail closed. */
+  if (rbio)
+    BIO_free(rbio);
+  if (wbio)
+    BIO_free(wbio);
+  if (conn) {
+    FIO_LEAK_COUNTER_ON_FREE(fio___openssl_connection_s);
+    FIO_MEM_FREE(conn, sizeof(*conn));
+  }
+  if (ssl)
+    SSL_free(ssl);
+  ERR_clear_error();
+  fio_io_tls_set(io, NULL);
+  fio___openssl_context_release(ctx_parent); /* the IO's reference */
+  fio_io_close_now(io);
 }
 
 /* *****************************************************************************
@@ -1342,6 +1569,19 @@ FIO_SFUNC void fio___openssl_finish(fio_socket_i fd, void *tls_ctx) {
 Per-Connection Cleanup
 ***************************************************************************** */
 
+/** Drops a context reference, destroying the context on the last one. */
+FIO_SFUNC void fio___openssl_context_release(fio___openssl_context_s *ctx) {
+  if (!ctx || fio_atomic_sub_fetch(&ctx->ref, 1))
+    return;
+  FIO_LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
+  if (ctx->ctx)
+    SSL_CTX_free(ctx->ctx);
+  fio___openssl_context_creds_free(ctx);
+  if (ctx->tls)
+    fio_io_tls_free(ctx->tls);
+  FIO_MEM_FREE(ctx, sizeof(*ctx));
+}
+
 /** Called after the IO object is closed, used to cleanup its `tls` object. */
 FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
   fio___openssl_connection_s *conn = (fio___openssl_connection_s *)tls_ctx;
@@ -1351,6 +1591,7 @@ FIO_SFUNC void fio___openssl_cleanup(void *tls_ctx) {
     SSL_shutdown(conn->ssl);
     SSL_free(conn->ssl); /* Also frees the attached BIOs */
   }
+  fio___openssl_context_release(conn->parent);
   FIO_LEAK_COUNTER_ON_FREE(fio___openssl_connection_s);
   FIO_MEM_FREE(conn, sizeof(*conn));
 }
@@ -1360,21 +1601,20 @@ Context Cleanup
 ***************************************************************************** */
 
 static void fio___openssl_free_context_task(void *tls_ctx, void *ignr_) {
-  fio___openssl_context_s *ctx = (fio___openssl_context_s *)tls_ctx;
-  if (!ctx)
-    return;
-  FIO_LEAK_COUNTER_ON_FREE(fio___openssl_context_s);
-  if (ctx->ctx)
-    SSL_CTX_free(ctx->ctx);
-  if (ctx->tls)
-    fio_io_tls_free(ctx->tls);
-  FIO_MEM_FREE(ctx, sizeof(*ctx));
+  fio___openssl_context_release((fio___openssl_context_s *)tls_ctx);
   (void)ignr_;
 }
 
-/** Builds a local TLS context out of the fio_io_tls_s object. */
+/** Releases a context reference; live connections keep the context. */
 static void fio___openssl_free_context(void *tls_ctx) {
   fio_io_defer(fio___openssl_free_context_task, tls_ctx, NULL);
+}
+
+/** Returns a new context reference (released by free_context). */
+static void *fio___openssl_dup_context(void *tls_ctx) {
+  if (tls_ctx)
+    fio_atomic_add(&((fio___openssl_context_s *)tls_ctx)->ref, 1);
+  return tls_ctx;
 }
 
 /* *****************************************************************************
@@ -1386,6 +1626,7 @@ SFUNC fio_io_functions_s fio_openssl_io_functions(void) {
   return (fio_io_functions_s){
       .build_context = fio___openssl_build_context,
       .free_context = fio___openssl_free_context,
+      .dup_context = fio___openssl_dup_context,
       .start = fio___openssl_start,
       .read = fio___openssl_read,
       .write = fio___openssl_write,
@@ -1406,7 +1647,9 @@ FIO_CONSTRUCTOR(fio___openssl_setup_default) {
                          fio___openssl_free_bio_methods,
                          NULL);
 #ifdef SIGPIPE
-  fio_signal_monitor(.sig = SIGPIPE); /* avoid OpenSSL issue... */
+  /* Process-lifetime suppression, also retained by the reactor on shutdown. */
+  FIO_ASSERT(!fio_signal_monitor(.sig = SIGPIPE),
+             "couldn't suppress SIGPIPE for OpenSSL");
 #endif
 }
 

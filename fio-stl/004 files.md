@@ -115,7 +115,7 @@ Opens `filename` with POSIX `open` semantics. If `filename` starts with `"~/"` (
 SFUNC int fio_filename_tmp(void);
 ```
 
-Creates an anonymous temporary file and returns its descriptor. Tries `TMPDIR`, `TMP`, `TEMP`, `P_tmpdir`, then the current directory. On Linux it attempts `O_TMPFILE` first; otherwise it builds a name prefixed with `facil_io_tmp_` and opens with `O_CREAT | O_EXCL`. On POSIX systems the name is unlinked right after the file is opened; on Windows the file is opened with delete-on-close (`O_TEMPORARY`). Either way, the file is removed once the descriptor is closed (or the process exits), so no temporary files are left behind.
+Creates a temporary file and returns its descriptor. Uses the first defined environment value among `TMPDIR`, `TMP`, and `TEMP`, otherwise `P_tmpdir` when available; an empty or overlong value falls back to the current directory. On Linux it attempts `O_TMPFILE` first; otherwise it builds a name prefixed with `facil_io_tmp_` and opens with `O_CREAT | O_EXCL`, owner-only permissions. On POSIX, success guarantees no name: if unlinking fails, the descriptor is closed and the function returns `-1` with the unlink error (an empty named file may remain). On Windows, delete-on-close (`O_TEMPORARY`) removes the file when its descriptor closes or the process exits; the name may remain until then.
 
 **Returns:** file descriptor on success, `-1` on error.
 
@@ -131,9 +131,11 @@ Overwrites `filename` with `len` bytes from `buf`, atomically replacing any exis
 
 The data is written to a new sibling file in the target's folder (`<filename>.fio-tmp-<random>`, opened with `O_CREAT | O_EXCL`, mode `0666` minus the `umask`), flushed to storage (`fsync`; `_commit` on Windows) and renamed over `filename` (`rename`; `MoveFileExA` with `MOVEFILE_REPLACE_EXISTING` on Windows). A leading `"~/"` (or `"~\\"` on Windows) is expanded exactly as by `fio_filename_open`. An empty buffer (`len == 0`) creates an empty file.
 
+**Metadata:** this replaces the inode rather than modifying it. Existing ownership, permissions, ACLs, and extended attributes are not preserved. The new file receives creation-time metadata (including inherited ACLs); for example, an existing POSIX `0600` file can become `0644` under `umask 022`. Use these save helpers only where new-file metadata is appropriate, not to update a file whose access restrictions must be retained.
+
 **Durability:** exactly one `fsync` per save, on the new file before the rename. This makes the replace atomic across crashes: after a crash, `filename` holds either the old or the complete new content, never a partial or empty file. The folder isn't `fsync`ed (it would cost a second blocking call; `syncfs` flushes the whole file system), so the rename itself may not survive a crash (or power loss) right after the save returns: `filename` then still holds the previous version (or doesn't exist, if it was new). Call `fsync` on the folder yourself if you need the rename to be durable.
 
-**Returns:** `0` on success, `-1` on error (`errno` is preserved from the failing call; `EINVAL` for a missing `filename`, or `buf == NULL` with `len > 0`). On error, any existing `filename` is untouched and the sibling file is removed. On Windows, a failed `MoveFileExA` maps `GetLastError()` to `errno`: `ENOENT` (file / path not found), `EACCES` (access denied), `EBUSY` (sharing / lock violation), `EEXIST`, `ENOSPC` (disk full), `EXDEV` (not the same device), otherwise `EIO`.
+**Returns:** `0` on success, `-1` on error (`errno` is preserved from the failing call; `EINVAL` for a missing `filename`, or `buf == NULL` with `len > 0`). On error, any existing `filename` is untouched. Sibling cleanup is attempted; if cleanup also fails, a warning is logged and the sibling may remain. `errno` still reports the primary save error. On Windows, a failed `MoveFileExA` maps `GetLastError()` to `errno`: `ENOENT` (file / path not found), `EACCES` (access denied), `EBUSY` (sharing / lock violation), `EEXIST`, `ENOSPC` (disk full), `EXDEV` (not the same device), otherwise `EIO`.
 
 **Note:** uses fixed size stack buffers (zero allocations); over-long paths fail with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`). `fio_fd_save` does the same with a file descriptor as the source.
 
@@ -160,9 +162,9 @@ Removes the file / link or folder at `path`, abstracting OS differences (`unlink
 - `folder` - set to allow removal of an empty folder (like `rmdir`)
 - `recursive` - set to remove a folder and all of its content (like `rm -r`); implies `folder`. If `path` isn't a folder, the flag is ignored and `path` is removed as a file / link
 
-**Returns:** `0` on success, `-1` on error. Recursive removal stops on the first error (some content may remain). Uses a fixed size stack buffer (zero allocations); over-long paths fail with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`).
+**Returns:** `0` on success, `-1` on error. Recursive removal stops on the first error (some content may remain). Uses a fixed size path buffer; over-long paths fail with `errno == ENAMETOOLONG` (see `FIO_FILENAME_PATH_CAPA`). Directory enumeration uses OS resources per depth, including libc directory-stream buffers on POSIX.
 
-**Note:** links (symlinks / reparse points) are removed, never followed into.
+**Note:** links at the final component and within the removed tree (symlinks / reparse points) are removed, never followed into, including paths with trailing separators. POSIX traversal holds directory descriptors and opens children with `O_NOFOLLOW`; Windows traversal holds non-delete-shared, reparse-safe directory handles. Concurrent substitution can fail the operation. Parent path components use normal OS resolution: this is not a path confinement API. Control the containing directory when the identity of the entry being removed must remain fixed.
 
 **Example:**
 
@@ -331,7 +333,7 @@ Splits a NUL-terminated path into folder, basename, and extension without copyin
 SFUNC fio_filename_s fio_filename_parse2(const char *filename, size_t len);
 ```
 
-Same as `fio_filename_parse`, but reads at most `len` bytes. Use when the input is not NUL-terminated.
+Same as `fio_filename_parse`, but reads at most `len` bytes and stops at an earlier NUL. Use when the input is not NUL-terminated. `len == 0` returns an empty result without reading `filename`; `filename == NULL` also returns an empty result.
 
 ### File Search
 

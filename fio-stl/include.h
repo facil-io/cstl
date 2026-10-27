@@ -223,10 +223,6 @@
 #include "210 map.h"
 #endif
 
-#if defined(FIO_MAP2_NAME)
-#include "210 map2.h"
-#endif
-
 #include "249 reference counter.h" /* required: pointer tagging cleanup is here */
 
 #if defined(FIO_FIOBJ) && !defined(FIO___RECURSIVE_INCLUDE)

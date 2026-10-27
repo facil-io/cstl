@@ -142,6 +142,42 @@ static void test_table(void) {
                "<td>d</td></tr></tbody></table>");
 }
 
+static void test_table_column_limit(void) {
+  fprintf(stderr, "test_table_column_limit\n");
+  const size_t counts[] = {
+      FIO_GFM_MAX_TABLE_COLUMNS, FIO_GFM_MAX_TABLE_COLUMNS + 1, 4096};
+  for (size_t t = 0; t < sizeof(counts) / sizeof(*counts); ++t) {
+    const size_t columns = counts[t];
+    const size_t len = columns * 4 + 2;
+    char *src = malloc(len);
+    TEST_ASSERT(src != NULL, "column-limit input allocation");
+    if (!src)
+      return;
+    size_t n = 0;
+    for (size_t i = 0; i < columns; ++i) {
+      src[n++] = 'x';
+      src[n++] = '|';
+    }
+    src[n++] = '\n';
+    for (size_t i = 0; i < columns; ++i) {
+      src[n++] = '-';
+      src[n++] = '|';
+    }
+    src[n++] = '\n';
+    char *html = fio_md2html(NULL, FIO_BUF_INFO2(src, len));
+    TEST_ASSERT(html != NULL, "%zu columns render successfully", columns);
+    if (html) {
+      const int is_table = strstr(html, "<table>") != NULL;
+      TEST_ASSERT(is_table == (columns <= FIO_GFM_MAX_TABLE_COLUMNS),
+                  "%zu columns table detection = %d",
+                  columns,
+                  is_table);
+      fio_bstr_free(html);
+    }
+    free(src);
+  }
+}
+
 static void test_hard_break(void) {
   fprintf(stderr, "test_hard_break\n");
   TEST_HTML_EQ("foo  \nbar\n", "<p>foo<br />\nbar</p>");
@@ -158,6 +194,42 @@ static void test_append_to_existing(void) {
                 "appended output correct, got: %s",
                 bstr);
     fio_bstr_free(bstr);
+  }
+}
+
+static void test_entity_exact_windows(void) {
+  fprintf(stderr, "test_entity_exact_windows\n");
+  static const struct {
+    const char *src;
+    const char *expected;
+  } cases[] = {{"&#1", "<p>&amp;#1</p>"},
+               {"&#x", "<p>&amp;#x</p>"},
+               {"&#x0", "<p>&amp;#x0</p>"},
+               {"&#x41", "<p>&amp;#x41</p>"},
+               {"&#1_", "<p>&amp;#1_</p>"},
+               {"&#65;", "<p>A</p>"},
+               {"&#x41;", "<p>A</p>"},
+               {"&#60;", "<p>&lt;</p>"},
+               {"&#x3c;", "<p>&lt;</p>"},
+               {"&#6_0;", "<p>&amp;#6_0;</p>"},
+               {"&#x0x3c;", "<p>&amp;#x0x3c;</p>"},
+               {"&#55296;", "<p>\xEF\xBF\xBD</p>"}};
+  for (size_t i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+    size_t len = strlen(cases[i].src);
+    char *exact = malloc(len);
+    FIO_ASSERT(exact, "exact entity input allocation failed");
+    FIO_MEMCPY(exact, cases[i].src, len);
+    char *html = fio_md2html(NULL, FIO_BUF_INFO2(exact, len));
+    TEST_ASSERT(html != NULL, "exact entity conversion returned NULL");
+    if (html) {
+      TEST_ASSERT(!strcmp(html, cases[i].expected),
+                  "exact entity %s: expected %s, got %s",
+                  cases[i].src,
+                  cases[i].expected,
+                  html);
+      fio_bstr_free(html);
+    }
+    free(exact);
   }
 }
 
@@ -179,8 +251,10 @@ int main(void) {
   test_autolink();
   test_html_escape();
   test_table();
+  test_table_column_limit();
   test_hard_break();
   test_append_to_existing();
+  test_entity_exact_windows();
   fprintf(stderr, "\n%d passed, %d failed\n", g_pass, g_fail);
   return g_fail ? 1 : 0;
 }

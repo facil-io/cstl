@@ -30,6 +30,9 @@ Sort Settings
 /** The default threshold below which quicksort delegates to insert sort. */
 #define FIO_SORT_THRESHOLD 96
 #endif
+#if FIO_SORT_THRESHOLD < 3
+#error FIO_SORT_THRESHOLD must be 3 or more (partitioning requires 3 items).
+#endif
 
 #ifndef FIO_SORT_SWAP
 /** Default swap operation assumes an array and swaps array members */
@@ -103,6 +106,36 @@ SFUNC void FIO_NAME(FIO_SORT_NAME, isort)(FIO_SORT_TYPE *array, size_t count) {
   }
 }
 
+/* Heap sort (internal), the O(n log n) fallback for degenerate quicksort. */
+FIO_SFUNC void FIO_NAME(FIO_SORT_NAME, __hsort)(FIO_SORT_TYPE *array,
+                                                size_t count) {
+  size_t start = count >> 1;
+  size_t end = count;
+  if (count < 2)
+    return;
+  for (;;) {
+    size_t root;
+    if (start) { /* build the max heap */
+      root = --start;
+    } else { /* move max to the end, then restore the shrunk heap */
+      if (--end == 0)
+        return;
+      FIO_SORT_SWAP((array[0]), (array[end]));
+      root = 0;
+    }
+    for (size_t child = (root << 1) + 1; child < end;
+         child = (root << 1) + 1) { /* sift down */
+      if (child + 1 < end &&
+          FIO_SORT_IS_BIGGER((array[child + 1]), (array[child])))
+        ++child;
+      if (!FIO_SORT_IS_BIGGER((array[child]), (array[root])))
+        break;
+      FIO_SORT_SWAP((array[root]), (array[child]));
+      root = child;
+    }
+  }
+}
+
 /* Sorts a `FIO_SORT_TYPE` array with `count` members. */
 SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count) {
   /* With thanks to Douglas C. Schmidt, as I used his code for reference:
@@ -118,13 +151,19 @@ SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count) {
   struct {
     FIO_SORT_TYPE *lo;
     FIO_SORT_TYPE *hi;
+    size_t depth; /* remaining partition depth before heap sort fallback */
   } queue[CHAR_BIT * sizeof(count) + 1], *top = queue;
-#define fio_sort___queue_push(l, h)                                            \
+#define fio_sort___queue_push(l, h, d)                                         \
   top->lo = l;                                                                 \
   top->hi = h;                                                                 \
+  top->depth = d;                                                              \
   ++top;
+  /* introsort: limit depth to 2*log2(count), preventing O(n^2) attacks */
+  size_t depth = 0;
+  for (size_t tmp = count; tmp > 1; tmp >>= 1)
+    depth += 2;
   /* push all the array as the first queued partition */
-  fio_sort___queue_push(array, array + (count - 1));
+  fio_sort___queue_push(array, array + (count - 1), depth);
   for (;;) {
     FIO_SORT_TYPE *lo;
     FIO_SORT_TYPE *hi;
@@ -132,15 +171,20 @@ SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count) {
     --top; /* pop stack */
     lo = top->lo;
     hi = top->hi;
+    depth = top->depth;
     const size_t slice_len = (hi - lo) + 1;
 
-    /* sort small ranges using insert sort */
-    if (slice_len < FIO_SORT_THRESHOLD) {
-      FIO_NAME(FIO_SORT_NAME, isort)(lo, slice_len);
+    /* sort small ranges using insert sort, degenerate ranges using heap sort */
+    if (slice_len < FIO_SORT_THRESHOLD || !depth) {
+      if (slice_len < FIO_SORT_THRESHOLD)
+        FIO_NAME(FIO_SORT_NAME, isort)(lo, slice_len);
+      else
+        FIO_NAME(FIO_SORT_NAME, __hsort)(lo, slice_len);
       if (queue == top)
         return;
       continue;
     }
+    --depth;
 
     /* select a median element (1 of 3, fist, middle, last). */
     /* this also promises ordering between these 3 elements. */
@@ -182,11 +226,11 @@ SFUNC void FIO_NAME(FIO_SORT_NAME, qsort)(FIO_SORT_TYPE *array, size_t count) {
     }
     /* push partitions in order of size to the stack (clears smaller first) */
     if ((right - lo) > (hi - left)) {
-      fio_sort___queue_push(lo, right);
-      fio_sort___queue_push(left, hi);
+      fio_sort___queue_push(lo, right, depth);
+      fio_sort___queue_push(left, hi, depth);
     } else {
-      fio_sort___queue_push(left, hi);
-      fio_sort___queue_push(lo, right);
+      fio_sort___queue_push(left, hi, depth);
+      fio_sort___queue_push(lo, right, depth);
     }
   }
 }

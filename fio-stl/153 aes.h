@@ -43,14 +43,20 @@ API matches fio_chacha20_poly1305 for easy function pointer substitution.
  * * `nonce`  MUST point to a 96 bit nonce (12 Bytes).
  * * `ad`     MAY be omitted, will NOT be encrypted.
  * * `data`   MAY be omitted, WILL be encrypted.
+ *
+ * A key/nonce pair MUST NEVER be reused. `len` MUST NOT exceed 2^36 - 32 bytes
+ * and `adlen` MUST be below 2^61 bytes. `mac`, `key` and `nonce` MUST NOT be
+ * NULL; `data` / `ad` MAY be NULL only when their length is 0. Otherwise
+ * encryption fails safely: returns `-1` and zeroes the (non-NULL) `mac` and
+ * `data` (no plaintext or valid tag is produced). Returns `0` on success.
  */
-SFUNC void fio_aes128_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce);
+SFUNC int fio_aes128_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce);
 
 /**
  * Performs in-place AES-128-GCM decryption with authentication verification.
@@ -61,7 +67,10 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
  * * `ad`     MAY be omitted ONLY IF originally omitted.
  * * `data`   MAY be omitted, WILL be decrypted.
  *
- * Returns `-1` on error (authentication failed).
+ * Returns `-1` on error (authentication failed, `len` / `adlen` exceed the
+ * GCM limits of 2^36 - 32 / 2^61 - 1 bytes, `mac` / `key` / `nonce` is NULL,
+ * or `data` / `ad` is NULL with a non-zero length). `data` is untouched on
+ * error.
  */
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
                              void *restrict data,
@@ -79,14 +88,20 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
  * * `nonce`  MUST point to a 96 bit nonce (12 Bytes).
  * * `ad`     MAY be omitted, will NOT be encrypted.
  * * `data`   MAY be omitted, WILL be encrypted.
+ *
+ * A key/nonce pair MUST NEVER be reused. `len` MUST NOT exceed 2^36 - 32 bytes
+ * and `adlen` MUST be below 2^61 bytes. `mac`, `key` and `nonce` MUST NOT be
+ * NULL; `data` / `ad` MAY be NULL only when their length is 0. Otherwise
+ * encryption fails safely: returns `-1` and zeroes the (non-NULL) `mac` and
+ * `data` (no plaintext or valid tag is produced). Returns `0` on success.
  */
-SFUNC void fio_aes256_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce);
+SFUNC int fio_aes256_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce);
 
 /**
  * Performs in-place AES-256-GCM decryption with authentication verification.
@@ -97,7 +112,10 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
  * * `ad`     MAY be omitted ONLY IF originally omitted.
  * * `data`   MAY be omitted, WILL be decrypted.
  *
- * Returns `-1` on error (authentication failed).
+ * Returns `-1` on error (authentication failed, `len` / `adlen` exceed the
+ * GCM limits of 2^36 - 32 / 2^61 - 1 bytes, `mac` / `key` / `nonce` is NULL,
+ * or `data` / `ad` is NULL with a non-zero length). `data` is untouched on
+ * error.
  */
 SFUNC int fio_aes256_gcm_dec(void *restrict mac,
                              void *restrict data,
@@ -113,11 +131,51 @@ AES-GCM Implementation
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
 /* *****************************************************************************
+GCM Input Limits (NIST SP 800-38D)
+
+The 32 bit block counter starts at 2 (J0 + 1), so at most 2^32 - 2 blocks
+(2^36 - 32 bytes) can be encrypted before keystream repeats. AAD is limited to
+2^61 - 1 bytes so its bit length fits the 64 bit length field.
+***************************************************************************** */
+
+/* Tests that `len` and `adlen` are within GCM limits (always true on 32 bit).
+ */
+FIO_IFUNC int fio___aes_gcm_len_ok(size_t len, size_t adlen) {
+  return ((uint64_t)len <= (((uint64_t)1 << 36) - 32)) &
+         (((uint64_t)adlen >> 61) == 0);
+}
+
+/* Validates all arguments: required pointers, (NULL, 0) optional buffers and
+ * GCM limits. Branch-free so it adds no measurable cost to the hot path. */
+FIO_IFUNC int fio___aes_gcm_args_ok(const void *mac,
+                                    const void *data,
+                                    size_t len,
+                                    const void *ad,
+                                    size_t adlen,
+                                    const void *key,
+                                    const void *nonce) {
+  return fio___aes_gcm_len_ok(len, adlen) & (mac != NULL) & (key != NULL) &
+         (nonce != NULL) & ((data != NULL) | (len == 0)) &
+         ((ad != NULL) | (adlen == 0));
+}
+
+/* Fails encryption safely: no plaintext and no valid tag are left behind. */
+FIO_SFUNC int fio___aes_gcm_enc_fail(void *mac, void *data, size_t len) {
+  if (mac)
+    FIO_MEMSET(mac, 0, 16);
+  if (data && len)
+    FIO_MEMSET(data, 0, len);
+  return -1;
+}
+
+/* *****************************************************************************
 Hardware Intrinsics Detection
 ***************************************************************************** */
 
 /* x86/x64 AES-NI + PCLMULQDQ detection */
-#if defined(FIO___HAS_X86_INTRIN) && defined(__AES__) && defined(__PCLMUL__)
+/* requires every ISA extension the AES-NI path uses (pshufb is SSSE3) */
+#if defined(FIO___HAS_X86_INTRIN) && defined(__AES__) &&                       \
+    defined(__PCLMUL__) && defined(__SSSE3__)
 #define FIO___HAS_X86_AES_INTRIN 1
 #elif defined(FIO___HAS_ARM_INTRIN)
 /* ARM Crypto Extensions detection */
@@ -576,13 +634,17 @@ FIO_IFUNC __m128i fio___gcm_inc_ctr(__m128i ctr) {
   return fio___bswap128(ctr);
 }
 
-SFUNC void fio_aes128_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce) {
+SFUNC int fio_aes128_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce))) {
+    return fio___aes_gcm_enc_fail(mac, data, len);
+  }
   __m128i rk[11];
   __m128i h, htbl[8], tag, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -963,6 +1025,7 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
     _mm_storeu_si128((__m128i *)ks_bytes, keystream);
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
     tag = _mm_xor_si128(
@@ -989,15 +1052,21 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
+  return 0;
 }
 
-SFUNC void fio_aes256_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce) {
+SFUNC int fio_aes256_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce))) {
+    return fio___aes_gcm_enc_fail(mac, data, len);
+  }
   __m128i rk[15];
   __m128i h, htbl[8], tag, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -1400,6 +1469,7 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
     _mm_storeu_si128((__m128i *)ks_bytes, keystream);
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
     tag = _mm_xor_si128(
@@ -1426,6 +1496,8 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
+  return 0;
 }
 
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
@@ -1435,6 +1507,9 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce)))
+    return -1; /* invalid arguments or GCM limits, data left untouched */
   __m128i rk[11];
   __m128i h, htbl[8], tag, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -1589,6 +1664,7 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     fio_secure_zero(rk, sizeof(rk));
     fio_secure_zero(htbl, sizeof(htbl));
     fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+    fio_secure_zero(&h, sizeof(h));
     return -1;
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
@@ -1684,11 +1760,13 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     _mm_storeu_si128((__m128i *)ks_bytes, keystream);
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
   }
   /* Clear sensitive data */
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
   return 0;
 }
 
@@ -1699,6 +1777,9 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce)))
+    return -1; /* invalid arguments or GCM limits, data left untouched */
   __m128i rk[15];
   __m128i h, htbl[8], tag, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -1853,6 +1934,7 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     fio_secure_zero(rk, sizeof(rk));
     fio_secure_zero(htbl, sizeof(htbl));
     fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+    fio_secure_zero(&h, sizeof(h));
     return -1;
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
@@ -1948,11 +2030,13 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     _mm_storeu_si128((__m128i *)ks_bytes, keystream);
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
   }
   /* Clear sensitive data */
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
   return 0;
 }
 
@@ -2028,14 +2112,16 @@ FIO_IFUNC void fio___arm_aes128_key_expand(uint8x16_t *rk,
   }
 
   /* Store as 11 round keys - convert to byte array for ARM */
+  uint8_t tmp[16];
   for (int i = 0; i < 11; ++i) {
-    uint8_t tmp[16];
     fio_u2buf32_be(tmp + 0, w[i * 4 + 0]);
     fio_u2buf32_be(tmp + 4, w[i * 4 + 1]);
     fio_u2buf32_be(tmp + 8, w[i * 4 + 2]);
     fio_u2buf32_be(tmp + 12, w[i * 4 + 3]);
     rk[i] = vld1q_u8(tmp);
   }
+  fio_secure_zero(w, sizeof(w));
+  fio_secure_zero(tmp, sizeof(tmp));
 }
 
 FIO_IFUNC void fio___arm_aes256_key_expand(uint8x16_t *rk,
@@ -2062,14 +2148,16 @@ FIO_IFUNC void fio___arm_aes256_key_expand(uint8x16_t *rk,
   }
 
   /* Store as 15 round keys - convert to byte array for ARM */
+  uint8_t tmp[16];
   for (int i = 0; i < 15; ++i) {
-    uint8_t tmp[16];
     fio_u2buf32_be(tmp + 0, w[i * 4 + 0]);
     fio_u2buf32_be(tmp + 4, w[i * 4 + 1]);
     fio_u2buf32_be(tmp + 8, w[i * 4 + 2]);
     fio_u2buf32_be(tmp + 12, w[i * 4 + 3]);
     rk[i] = vld1q_u8(tmp);
   }
+  fio_secure_zero(w, sizeof(w));
+  fio_secure_zero(tmp, sizeof(tmp));
 }
 
 /* ARM AES block encryption
@@ -2635,13 +2723,17 @@ FIO_IFUNC uint8x16_t fio___arm_gcm_inc_ctr(uint8x16_t ctr) {
   return vreinterpretq_u8_u32(vsetq_lane_u32(c, ctr32, 3));
 }
 
-SFUNC void fio_aes128_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce) {
+SFUNC int fio_aes128_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce))) {
+    return fio___aes_gcm_enc_fail(mac, data, len);
+  }
   uint8x16_t rk[11];
   uint8x16_t htbl[8], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -2991,6 +3083,7 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
     vst1q_u8(ks_bytes, keystream);
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
     tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
@@ -3014,15 +3107,21 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
+  return 0;
 }
 
-SFUNC void fio_aes256_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce) {
+SFUNC int fio_aes256_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce))) {
+    return fio___aes_gcm_enc_fail(mac, data, len);
+  }
   uint8x16_t rk[15];
   uint8x16_t htbl[8], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -3392,6 +3491,7 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
     vst1q_u8(ks_bytes, keystream);
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
     uint8_t tmp[16] = {0};
     FIO_MEMCPY(tmp, p, len);
     tag_br = veorq_u8(tag_br, vrbitq_u8(vld1q_u8(tmp)));
@@ -3414,6 +3514,8 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
+  return 0;
 }
 
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
@@ -3423,6 +3525,9 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce)))
+    return -1; /* invalid arguments or GCM limits, data left untouched */
   uint8x16_t rk[11];
   uint8x16_t htbl[8], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -3543,6 +3648,7 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     fio_secure_zero(rk, sizeof(rk));
     fio_secure_zero(htbl, sizeof(htbl));
     fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+    fio_secure_zero(&h, sizeof(h));
     return -1;
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
@@ -3608,11 +3714,13 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
     vst1q_u8(ks_bytes, fio___arm_aes128_encrypt(ctr, rk));
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
   }
 
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
   return 0;
 }
 
@@ -3623,6 +3731,9 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce)))
+    return -1; /* invalid arguments or GCM limits, data left untouched */
   uint8x16_t rk[15];
   uint8x16_t htbl[8], tag_br, ctr, j0;
   uint8_t *p = (uint8_t *)data;
@@ -3741,6 +3852,7 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     fio_secure_zero(rk, sizeof(rk));
     fio_secure_zero(htbl, sizeof(htbl));
     fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+    fio_secure_zero(&h, sizeof(h));
     return -1;
   }
   fio_secure_zero(computed_mac, sizeof(computed_mac));
@@ -3806,11 +3918,13 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
     vst1q_u8(ks_bytes, fio___arm_aes256_encrypt(ctr, rk));
     for (size_t i = 0; i < len; ++i)
       p[i] ^= ks_bytes[i];
+    fio_secure_zero(ks_bytes, sizeof(ks_bytes));
   }
 
   fio_secure_zero(rk, sizeof(rk));
   fio_secure_zero(htbl, sizeof(htbl));
   fio_secure_zero(j0_bytes, sizeof(j0_bytes));
+  fio_secure_zero(&h, sizeof(h));
   return 0;
 }
 
@@ -4427,7 +4541,9 @@ FIO_SFUNC uint32_t fio___aes_bs_sub_word(uint32_t x) {
   fio___aes_bs_ortho(q);
   fio___aes_bs_sbox_scalar(q);
   fio___aes_bs_ortho(q);
-  return (uint32_t)q[0];
+  x = (uint32_t)q[0];
+  fio_secure_zero(q, sizeof(q));
+  return x;
 }
 
 /**
@@ -4751,6 +4867,7 @@ static const uint32_t FIO___AES_BS_RCON[] =
 FIO_SFUNC void fio___aes_bs_key_expand128(uint64_t comp_skey[22],
                                           const uint8_t key[16]) {
   uint32_t skey[44];
+  uint64_t q[8];
   int i;
 
   /* Phase 1: standard AES-128 key schedule (little-endian words) */
@@ -4774,7 +4891,6 @@ FIO_SFUNC void fio___aes_bs_key_expand128(uint64_t comp_skey[22],
 
   /* Phase 2: compress into bitsliced format */
   for (i = 0; i < 44; i += 4) {
-    uint64_t q[8];
     int j = (i >> 1); /* i/4 * 2 = i/2 */
     fio___aes_bs_interleave_in(&q[0], &q[4], skey + i);
     q[1] = q[0];
@@ -4793,6 +4909,8 @@ FIO_SFUNC void fio___aes_bs_key_expand128(uint64_t comp_skey[22],
                        (q[6] & (uint64_t)0x4444444444444444ULL) |
                        (q[7] & (uint64_t)0x8888888888888888ULL);
   }
+  fio_secure_zero(skey, sizeof(skey));
+  fio_secure_zero(q, sizeof(q));
 }
 
 /**
@@ -4802,6 +4920,7 @@ FIO_SFUNC void fio___aes_bs_key_expand128(uint64_t comp_skey[22],
 FIO_SFUNC void fio___aes_bs_key_expand256(uint64_t comp_skey[30],
                                           const uint8_t key[32]) {
   uint32_t skey[60];
+  uint64_t q[8];
   int i;
 
   /* Phase 1: standard AES-256 key schedule (little-endian words) */
@@ -4824,7 +4943,6 @@ FIO_SFUNC void fio___aes_bs_key_expand256(uint64_t comp_skey[30],
 
   /* Phase 2: compress into bitsliced format */
   for (i = 0; i < 60; i += 4) {
-    uint64_t q[8];
     int j = (i >> 1);
     fio___aes_bs_interleave_in(&q[0], &q[4], skey + i);
     q[1] = q[0];
@@ -4843,6 +4961,8 @@ FIO_SFUNC void fio___aes_bs_key_expand256(uint64_t comp_skey[30],
                        (q[6] & (uint64_t)0x4444444444444444ULL) |
                        (q[7] & (uint64_t)0x8888888888888888ULL);
   }
+  fio_secure_zero(skey, sizeof(skey));
+  fio_secure_zero(q, sizeof(q));
 }
 
 /* ============================================================================
@@ -5345,11 +5465,14 @@ FIO_SFUNC void fio___aes_bs_gcm_ctr_process(uint8_t *p,
                                             uint64_t ghash_y[2],
                                             const fio___ghash_ctmul_key_s *hk,
                                             int ghash_output) {
+  /* keystream buffer (shared by all paths), wiped before returning */
+  uint8_t ks[FIO___AES_BS_WIDE ? 256 : 64];
+  if (!len)
+    return;
 #if FIO___AES_BS_WIDE
   /* Process 16 blocks (256 bytes) at a time using wide engine */
   while (len >= 256) {
     uint32_t w[64];
-    uint8_t ks[256];
     fio___aes_bs_ctr_prepare16(w, nonce_w, *ctr);
     fio___aes_bs_ctr_encrypt16(ks, w, num_rounds, sk_exp4);
     for (size_t i = 0; i < 256; i += 8) {
@@ -5372,13 +5495,12 @@ FIO_SFUNC void fio___aes_bs_gcm_ctr_process(uint8_t *p,
   /* Process 4 blocks (64 bytes) at a time using 4-block engine */
   while (len >= 64) {
     uint32_t w4[16];
-    uint8_t ks4[64];
     fio___aes_bs_ctr_prepare4(w4, nonce_w, *ctr);
-    fio___aes_bs_ctr_encrypt4_ks(ks4, w4, num_rounds, sk_exp4);
+    fio___aes_bs_ctr_encrypt4_ks(ks, w4, num_rounds, sk_exp4);
     for (size_t i = 0; i < 64; i += 8) {
       uint64_t d, k;
       FIO_MEMCPY(&d, p + i, 8);
-      FIO_MEMCPY(&k, ks4 + i, 8);
+      FIO_MEMCPY(&k, ks + i, 8);
       d ^= k;
       FIO_MEMCPY(p + i, &d, 8);
     }
@@ -5393,15 +5515,14 @@ FIO_SFUNC void fio___aes_bs_gcm_ctr_process(uint8_t *p,
   /* Handle remaining data (< 64 bytes) using 4-block engine */
   if (len > 0) {
     uint32_t w4[16];
-    uint8_t ks4[64];
     fio___aes_bs_ctr_prepare4(w4, nonce_w, *ctr);
-    fio___aes_bs_ctr_encrypt4_ks(ks4, w4, num_rounds, sk_exp4);
+    fio___aes_bs_ctr_encrypt4_ks(ks, w4, num_rounds, sk_exp4);
 
     size_t full_blocks = len & ~(size_t)15;
     for (size_t i = 0; i < full_blocks; i += 8) {
       uint64_t d, k;
       FIO_MEMCPY(&d, p + i, 8);
-      FIO_MEMCPY(&k, ks4 + i, 8);
+      FIO_MEMCPY(&k, ks + i, 8);
       d ^= k;
       FIO_MEMCPY(p + i, &d, 8);
     }
@@ -5413,7 +5534,7 @@ FIO_SFUNC void fio___aes_bs_gcm_ctr_process(uint8_t *p,
     size_t tail = len - full_blocks;
     if (tail > 0) {
       for (size_t i = 0; i < tail; ++i)
-        p[full_blocks + i] ^= ks4[full_blocks + i];
+        p[full_blocks + i] ^= ks[full_blocks + i];
       if (ghash_output) {
         uint8_t block[16] = {0};
         FIO_MEMCPY(block, p + full_blocks, tail);
@@ -5422,6 +5543,7 @@ FIO_SFUNC void fio___aes_bs_gcm_ctr_process(uint8_t *p,
     }
     *ctr += (uint32_t)((len + 15) >> 4);
   }
+  fio_secure_zero(ks, sizeof(ks));
 }
 
 /* ============================================================================
@@ -5778,13 +5900,17 @@ cleanup:
   return result;
 }
 
-SFUNC void fio_aes128_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce) {
+SFUNC int fio_aes128_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce))) {
+    return fio___aes_gcm_enc_fail(mac, data, len);
+  }
   uint64_t comp_skey[22];
   fio___aes_bs_key_expand128(comp_skey, (const uint8_t *)key);
 
@@ -5798,7 +5924,7 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
                                comp_skey,
                                nonce);
     fio_secure_zero(comp_skey, sizeof(comp_skey));
-    return;
+    return 0;
   }
 
   {
@@ -5837,15 +5963,20 @@ SFUNC void fio_aes128_gcm_enc(void *restrict mac,
   }
 
   fio_secure_zero(comp_skey, sizeof(comp_skey));
+  return 0;
 }
 
-SFUNC void fio_aes256_gcm_enc(void *restrict mac,
-                              void *restrict data,
-                              size_t len,
-                              const void *ad,
-                              size_t adlen,
-                              const void *key,
-                              const void *nonce) {
+SFUNC int fio_aes256_gcm_enc(void *restrict mac,
+                             void *restrict data,
+                             size_t len,
+                             const void *ad,
+                             size_t adlen,
+                             const void *key,
+                             const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce))) {
+    return fio___aes_gcm_enc_fail(mac, data, len);
+  }
   uint64_t comp_skey[30];
   fio___aes_bs_key_expand256(comp_skey, (const uint8_t *)key);
 
@@ -5859,7 +5990,7 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
                                comp_skey,
                                nonce);
     fio_secure_zero(comp_skey, sizeof(comp_skey));
-    return;
+    return 0;
   }
 
   {
@@ -5898,6 +6029,7 @@ SFUNC void fio_aes256_gcm_enc(void *restrict mac,
   }
 
   fio_secure_zero(comp_skey, sizeof(comp_skey));
+  return 0;
 }
 
 SFUNC int fio_aes128_gcm_dec(void *restrict mac,
@@ -5907,6 +6039,9 @@ SFUNC int fio_aes128_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce)))
+    return -1; /* invalid arguments or GCM limits, data left untouched */
   uint64_t comp_skey[22];
   fio___aes_bs_key_expand128(comp_skey, (const uint8_t *)key);
 
@@ -5981,6 +6116,9 @@ SFUNC int fio_aes256_gcm_dec(void *restrict mac,
                              size_t adlen,
                              const void *key,
                              const void *nonce) {
+  if (FIO_UNLIKELY(
+          !fio___aes_gcm_args_ok(mac, data, len, ad, adlen, key, nonce)))
+    return -1; /* invalid arguments or GCM limits, data left untouched */
   uint64_t comp_skey[30];
   fio___aes_bs_key_expand256(comp_skey, (const uint8_t *)key);
 

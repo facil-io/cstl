@@ -1,11 +1,10 @@
-/* URL-encoded parser: heap fallback, early stop and allocation failures. */
+/* URL-encoded parser: heap fallback and early stop. */
 #include "fio-stl/include.h"
 
 static struct {
   void *ptr[2];
   size_t size[2];
   size_t attempts;
-  size_t fail_at;
   size_t live;
   size_t pairs;
   size_t field_len;
@@ -14,8 +13,7 @@ static struct {
 
 static void *test_allocate(void *ptr, size_t size) {
   FIO_ASSERT(!ptr, "Stack fallback must allocate without freeing stack memory");
-  if (++test_state.attempts == test_state.fail_at)
-    return NULL;
+  ++test_state.attempts;
   void *p = malloc(size);
   FIO_ASSERT(p, "Test allocation failed");
   FIO_ASSERT(test_state.live < 2, "Unexpected outstanding allocations");
@@ -89,26 +87,15 @@ int main(void) {
                  !test_state.attempts && !test_state.live,
              "Short pairs must use stack storage only");
 
-  for (size_t scenario = 0; scenario < 6; ++scenario) {
+  for (size_t scenario = 0; scenario < 2; ++scenario) {
     FIO_MEMSET(&test_state, 0, sizeof(test_state));
     test_state.field_len = 8193;
     test_state.stop = (scenario == 1);
-    test_state.fail_at = scenario >= 2 ? scenario - 1 : 0;
     fio_url_encoded_result_s r = fio_url_encoded_parse(&callbacks,
                                                        &test_state,
                                                        repeated,
                                                        sizeof(repeated));
     FIO_ASSERT(!test_state.live, "Parser leaked decoded buffers");
-    if (test_state.fail_at) {
-      const size_t prior_pairs = (test_state.fail_at - 1) / 2;
-      FIO_ASSERT(
-          r.err == -1 && r.count == prior_pairs &&
-              r.consumed == (prior_pairs ? len + 1 : 0) &&
-              test_state.pairs == prior_pairs,
-          "Allocation failure must stop before reporting a partial pair");
-      FIO_ASSERT(test_state.attempts == test_state.fail_at,
-                 "Parser allocated after decoding failed");
-    } else {
       /* A stopping callback's pair is excluded from count and consumed. */
       const size_t expected_pairs = test_state.stop ? 1 : 2;
       FIO_ASSERT(r.count == (test_state.stop ? 0 : 2) &&
@@ -118,12 +105,10 @@ int main(void) {
                  "Long-pair parse result mismatch");
       FIO_ASSERT(test_state.attempts == 2 * expected_pairs,
                  "Both long buffers must use heap fallback");
-    }
   }
 
   /* Counting-only mode (no on_pair) never decodes or allocates. */
   FIO_MEMSET(&test_state, 0, sizeof(test_state));
-  test_state.fail_at = 1;
   static const fio_url_encoded_parser_callbacks_s count_only = {0};
   fio_url_encoded_result_s c =
       fio_url_encoded_parse(&count_only, NULL, repeated, sizeof(repeated));

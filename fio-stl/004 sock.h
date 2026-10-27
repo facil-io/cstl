@@ -106,10 +106,7 @@ IFUNC fio_socket_i fio_sock_accept(fio_socket_i s,
  * implementations (notably MinGW) when the flags conflict.
  */
 IFUNC fio_socket_i fio_sock_dup(fio_socket_i original);
-/* Winsock -> POSIX errno normalization helpers (Windows only). */
-IFUNC int fio___sock_wsa2errno(int wsa_err);
-IFUNC int fio___sock_wsa_set_errno_from(int wsa_err);
-IFUNC int fio___sock_wsa_set_errno_last(void);
+
 /* *****************************************************************************
 Portable wrappers for bind / connect / listen / setsockopt.
 
@@ -323,16 +320,22 @@ FIO_IFUNC struct addrinfo *fio_sock_address_new(const char *restrict address,
 FIO_IFUNC void fio_sock_address_free(struct addrinfo *a);
 
 /**
- * Returns a human readable address representation of the socket's peer address.
- *
- * On error, returns a NULL buffer with zero length.
- *
- * Buffer lengths are limited to 63 bytes.
- *
- * Results use a ring of 128 static 64-byte slots: the 129th call reuses the
- * first slot. Copy the result if you need to keep it.
+ * Returns the socket's local numeric host, or host:port when with_port is true
+ * (IPv6 endpoints use [host]:port). Unix sockets return their pathname without
+ * a port, regardless of with_port. On error, returns a NULL buffer with zero
+ * length. Results share the 128-slot static ring with fio_sock_peer_addr;
+ * copy the result to retain it.
  */
-SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s);
+SFUNC fio_buf_info_s fio_sock_addr(fio_socket_i s, bool with_port);
+
+/**
+ * Returns the socket's peer numeric host, or host:port when with_port is true
+ * (IPv6 endpoints use [host]:port). Unix sockets return their pathname without
+ * a port, regardless of with_port. On error, returns a NULL buffer with zero
+ * length. Results share a ring of 128 static 128-byte slots with fio_sock_addr;
+ * the 129th call reuses the first slot. Copy the result to retain it.
+ */
+SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s, bool with_port);
 
 /** Creates a new network socket and binds it to a local address. */
 SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock);
@@ -345,6 +348,9 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags);
 
 /** Sets a file descriptor / socket to non blocking state. */
 SFUNC int fio_sock_set_non_block(fio_socket_i fd);
+
+/** Returns the pending socket error (`SO_ERROR`), 0 if none, -1 on failure. */
+SFUNC int fio_sock_error(fio_socket_i fd);
 
 /** Attempts to maximize the allowed open file limits. returns known limit */
 SFUNC size_t fio_sock_maximize_limits(size_t maximum_limit);
@@ -373,11 +379,13 @@ SFUNC short fio_sock_wait_io(fio_socket_i fd, short events, int timeout);
 #ifdef POLLRDHUP
 /** A helper macro that tests if a socket was closed.  */
 #define FIO_SOCK_IS_OPEN(fd)                                                   \
-  (!(fio_sock_wait_io(fd, (POLLOUT | POLLRDHUP), 0) &                          \
+  (FIO_SOCK_FD_ISVALID(fd) &&                                                  \
+   !(fio_sock_wait_io(fd, (POLLOUT | POLLRDHUP), 0) &                          \
      (POLLRDHUP | POLLHUP | POLLNVAL)))
 #else
 #define FIO_SOCK_IS_OPEN(fd)                                                   \
-  (!(fio_sock_wait_io(fd, POLLOUT, 0) & (POLLHUP | POLLNVAL)))
+  (FIO_SOCK_FD_ISVALID(fd) &&                                                  \
+   !(fio_sock_wait_io(fd, POLLOUT, 0) & (POLLHUP | POLLNVAL)))
 #endif
 
 /* *****************************************************************************
@@ -509,6 +517,13 @@ FIO_SOCK - Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
 
+#if FIO_OS_WIN
+/* WinSock errno bridge */
+FIO_IFUNC int fio___sock_wsa_set_errno_from(int wsa_err);
+/* WinSock errno bridge */
+FIO_IFUNC int fio___sock_wsa_set_errno_last(void);
+#endif
+
 /** Creates a new socket, according to the provided flags. */
 SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags) {
   char buf[2048];
@@ -528,10 +543,8 @@ SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags) {
                  : FIO_SOCK_UNIX;
     if (u.path.len > 2047) {
       errno = EINVAL;
-      FIO_LOG_ERROR(
-          "Couldn't open unix socket to %s - host name too long (%zu).",
-          url,
-          u.path.len);
+      FIO_LOG_ERROR("Couldn't open unix socket - path too long (%zu).",
+                    u.path.len);
       return FIO_SOCKET_INVALID;
     }
     FIO_MEMCPY(buf, u.path.buf, u.path.len);
@@ -547,8 +560,8 @@ SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags) {
   } else {
     if (u.port.len > 63) {
       errno = EINVAL;
-      FIO_LOG_ERROR("Couldn't open socket to %s - port / scheme too long.",
-                    url);
+      FIO_LOG_ERROR("Couldn't open socket - port / scheme too long (%zu).",
+                    u.port.len);
       return FIO_SOCKET_INVALID;
     }
     FIO_MEMCPY(port, u.port.buf, u.port.len);
@@ -571,7 +584,8 @@ SFUNC fio_socket_i fio_sock_open2(const char *url, uint16_t flags) {
   if (u.host.len) {
     if (u.host.len > 2047) {
       errno = EINVAL;
-      FIO_LOG_ERROR("Couldn't open socket to %s - host name too long.", url);
+      FIO_LOG_ERROR("Couldn't open socket - host name too long (%zu).",
+                    u.host.len);
       return FIO_SOCKET_INVALID;
     }
     FIO_MEMCPY(buf, u.host.buf, u.host.len);
@@ -675,11 +689,24 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
     }
     { // avoid the "address taken"
       int optval = 1;
+#if FIO_OS_WIN
+      /* SO_REUSEADDR allows another Windows process to bind this port. */
+      if (fio_sock_setsockopt(fd,
+                              SOL_SOCKET,
+                              SO_EXCLUSIVEADDRUSE,
+                              &optval,
+                              sizeof(optval)) == -1) {
+        fio_sock_close(fd);
+        fd = FIO_SOCKET_INVALID;
+        continue;
+      }
+#else
       fio_sock_setsockopt(fd,
                           SOL_SOCKET,
                           SO_REUSEADDR,
                           &optval,
                           sizeof(optval));
+#endif
     }
     if (nonblock && fio_sock_set_non_block(fd) == -1) {
       FIO_LOG_DEBUG("Couldn't set socket to non-blocking mode %s",
@@ -692,15 +719,20 @@ SFUNC fio_socket_i fio_sock_open_local(struct addrinfo *addr, int nonblock) {
 #if FIO_OS_WIN
       { /* capture error before any other call clears it */
         DWORD wsa_err = WSAGetLastError();
-        char wsa_msg[256];
-        FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM |
-                           FORMAT_MESSAGE_IGNORE_INSERTS,
-                       NULL,
-                       wsa_err,
-                       0,
-                       wsa_msg,
-                       sizeof(wsa_msg),
-                       NULL);
+        char wsa_msg[256] = {0};
+        DWORD msg_len = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM |
+                                           FORMAT_MESSAGE_IGNORE_INSERTS,
+                                       NULL,
+                                       wsa_err,
+                                       0,
+                                       wsa_msg,
+                                       sizeof(wsa_msg),
+                                       NULL);
+        if (!msg_len)
+          FIO_MEMCPY(wsa_msg,
+                     "message unavailable",
+                     sizeof("message unavailable"));
+        wsa_msg[sizeof(wsa_msg) - 1] = 0;
         FIO_LOG_ERROR("(fio_sock_open_local) bind failed (WSA %lu: %s)",
                       (unsigned long)wsa_err,
                       wsa_msg);
@@ -792,8 +824,9 @@ SFUNC short fio_sock_wait_io(fio_socket_i fd, short events, int timeout) {
   short r = 0;
 #if FIO_OS_WIN
   if (fd == FIO_SOCKET_INVALID) {
-    FIO_THREAD_WAIT((timeout * 1000000));
-    return r;
+    if (timeout > 0)
+      Sleep((DWORD)timeout);
+    return POLLNVAL;
   }
 #endif
   struct pollfd pfd = {.fd = fd, .events = events};
@@ -918,7 +951,6 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
   if ((flags & FIO_SOCK_NONBLOCK) && fio_sock_set_non_block(fd) == -1) {
     FIO_LOG_ERROR("couldn't set socket to non-blocking mode");
     fio_sock_close(fd);
-    unlink(addr.sun_path);
     return FIO_SOCKET_INVALID;
   }
   if ((flags & FIO_SOCK_CLIENT)) {
@@ -951,14 +983,50 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
     }
 #if !FIO_OS_WIN /* FIO_OS_WIN is always defined (0 / 1) */
     if ((flags & FIO_SOCK_UNIX_PRIVATE) == FIO_SOCK_UNIX) {
-      chmod(address, S_IRWXO | S_IRWXG | S_IRWXU);
-      fchmod(fd, S_IRWXO | S_IRWXG | S_IRWXU);
+      /* Never chmod a pathname that may have become a symlink after bind.
+       * On Linux, O_PATH pins the socket inode even when the path is renamed;
+       * /proc/self/fd then gives chmod an inode-bound path. A process able to
+       * replace the socket path can still disrupt availability. */
+#if defined(__linux__) && defined(O_PATH) && defined(O_NOFOLLOW) &&            \
+    defined(O_CLOEXEC)
+      int pathfd = open(address, O_PATH | O_NOFOLLOW | O_CLOEXEC);
+      struct stat st;
+      if (pathfd == -1 || fstat(pathfd, &st) || !S_ISSOCK(st.st_mode)) {
+        if (pathfd != -1)
+          close(pathfd);
+        fio_sock_close(fd);
+        errno = EACCES;
+        return FIO_SOCKET_INVALID;
+      }
+      char pinned[64];
+      int n = snprintf(pinned, sizeof(pinned), "/proc/self/fd/%d", pathfd);
+      int chmod_result = (n > 0 && (size_t)n < sizeof(pinned))
+                             ? chmod(pinned, S_IRWXO | S_IRWXG | S_IRWXU)
+                             : -1;
+      close(pathfd);
+#else
+      /* AT_SYMLINK_NOFOLLOW must fail closed if the platform cannot enforce
+       * it; falling back to chmod(address) would reintroduce the race. */
+#if defined(AT_SYMLINK_NOFOLLOW) && defined(AT_FDCWD)
+      int chmod_result = fchmodat(AT_FDCWD,
+                                  address,
+                                  S_IRWXO | S_IRWXG | S_IRWXU,
+                                  AT_SYMLINK_NOFOLLOW);
+#else
+      int chmod_result = -1;
+      errno = ENOTSUP;
+#endif
+#endif
+      if (chmod_result == -1) {
+        fio_sock_close(fd);
+        return FIO_SOCKET_INVALID;
+      }
     }
 #endif
     if (!(flags & FIO_SOCK_UDP) && fio_sock_listen(fd, SOMAXCONN) < 0) {
       FIO_LOG_ERROR("couldn't start listening to unix socket at %s", address);
       fio_sock_close(fd);
-      unlink(addr.sun_path);
+      /* The path may have been replaced since bind; never unlink it here. */
       return FIO_SOCKET_INVALID;
     }
   }
@@ -973,41 +1041,121 @@ SFUNC fio_socket_i fio_sock_open_unix(const char *address, uint16_t flags) {
 #endif /* AF_UNIX */
 
 /* *****************************************************************************
-Peer Address
+Socket Addresses
 ***************************************************************************** */
-
-FIO_STATIC_ALLOC_DEF(fio___sock_peer_addr_buffer, char, 64, 128)
-
-/**
- * Returns a human readable address representation of the socket's peer address.
- *
- * On error, returns a NULL buffer with zero length.
- *
- * Buffer lengths are limited to 63 bytes.
- *
- * Results use a ring of 128 static 64-byte slots: the 129th call reuses the
- * first slot. Copy the result if you need to keep it.
- */
-SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s) {
-  fio_buf_info_s r = FIO_BUF_INFO2(fio___sock_peer_addr_buffer(1), 0);
-  struct sockaddr addr[8] = {0};
-  socklen_t len = sizeof(addr);
-  if (!FIO_SOCK_FD_ISVALID(s))
-    goto finish;
-#if FIO_OS_WIN
-  if (fio___winsock_fn.getpeername(s, addr, (int *)&len))
-    goto finish;
-#else
-  if (getpeername(s, addr, &len))
-    goto finish;
+#ifndef FIO___SOCK_ADDR_CAP
+#define FIO___SOCK_ADDR_CAP 128
 #endif
-  if (getnameinfo(addr, len, r.buf, 64, NULL, 0, NI_NUMERICHOST))
+FIO_ASSERT_STATIC(FIO___SOCK_ADDR_CAP >= 96,
+                  "FIO___SOCK_ADDR_CAP can't be less than 96 bytes");
+FIO_STATIC_ALLOC_DEF(fio___sock_addr_buffer_alloc,
+                     char,
+                     FIO___SOCK_ADDR_CAP,
+                     128)
+
+FIO_SFUNC fio_buf_info_s fio___sock_addr2txt(struct sockaddr *addr,
+                                             socklen_t len,
+                                             bool with_port) {
+  fio_buf_info_s r = FIO_BUF_INFO2(fio___sock_addr_buffer_alloc(1), 0);
+  /* IP endpoints only; Unix sockets have no TCP/UDP port. */
+  if (addr[0].sa_family != AF_INET && addr[0].sa_family != AF_INET6)
+    goto unix_socket;
+  r.buf += 8;
+  char *port = r.buf + 72;
+  if (getnameinfo(addr,
+                  len,
+                  r.buf,
+                  64,
+                  port,
+                  16,
+                  (NI_NUMERICHOST | (with_port ? NI_NUMERICSERV : 0))))
     goto finish;
   r.len = FIO_STRLEN(r.buf);
+  if (with_port) {
+    with_port = (addr[0].sa_family == AF_INET6);
+    r.buf -= with_port;
+    r.len += with_port;
+    *(r.buf - (!with_port)) = '[';
+    r.buf[r.len] = ']';
+    r.len += with_port;
+    r.buf[r.len++] = ':';
+    fio_memcpy8(r.buf + r.len, port);
+    while (r.buf[r.len] && r.len < FIO___SOCK_ADDR_CAP)
+      ++r.len;
+    r.buf[r.len] = 0; /* just in case the loop reached the end of the buffer */
+  }
 finish:
   if (!r.len)
     r.buf = NULL;
   return r;
+
+unix_socket:
+#ifdef AF_UNIX
+  if (addr->sa_family == AF_UNIX) {
+    const struct sockaddr_un *un = (const struct sockaddr_un *)addr;
+    const size_t offset = offsetof(struct sockaddr_un, sun_path);
+
+    /* No pathname was returned. */
+    if ((size_t)len <= offset)
+      return FIO_BUF_INFO0;
+
+    size_t available = (size_t)len - offset;
+    if (available > sizeof(un->sun_path))
+      available = sizeof(un->sun_path);
+
+    /* Reject Linux abstract addresses and empty names. */
+    if (un->sun_path[0] == '\0')
+      return FIO_BUF_INFO0;
+
+    /* Do not assume the returned pathname is NUL-terminated. */
+    size_t path_len = 0;
+    while (path_len < available && un->sun_path[path_len])
+      ++path_len;
+
+    if (path_len && path_len >= FIO___SOCK_ADDR_CAP)
+      return FIO_BUF_INFO0;
+
+    FIO_MEMCPY(r.buf, un->sun_path, path_len);
+    r.buf[path_len] = '\0';
+    r.len = path_len;
+    return r;
+  }
+#endif
+  return FIO_BUF_INFO0;
+}
+
+SFUNC fio_buf_info_s fio_sock_addr(fio_socket_i s, bool with_port) {
+  struct sockaddr addr[8] = {0};
+  socklen_t len = sizeof(addr);
+  if (!FIO_SOCK_FD_ISVALID(s))
+    return FIO_BUF_INFO0;
+#if FIO_OS_WIN
+  if (fio___winsock_fn.getsockname(s, addr, (int *)&len))
+    return FIO_BUF_INFO0;
+#else
+  if (getsockname(s, addr, &len))
+    return FIO_BUF_INFO0;
+#endif
+  if ((size_t)len > sizeof(addr))
+    return FIO_BUF_INFO0;
+  return fio___sock_addr2txt(addr, len, with_port);
+}
+
+SFUNC fio_buf_info_s fio_sock_peer_addr(fio_socket_i s, bool with_port) {
+  struct sockaddr addr[8] = {0};
+  socklen_t len = sizeof(addr);
+  if (!FIO_SOCK_FD_ISVALID(s))
+    return FIO_BUF_INFO0;
+#if FIO_OS_WIN
+  if (fio___winsock_fn.getpeername(s, addr, (int *)&len))
+    return FIO_BUF_INFO0;
+#else
+  if (getpeername(s, addr, &len))
+    return FIO_BUF_INFO0;
+#endif
+  if ((size_t)len > sizeof(addr))
+    return FIO_BUF_INFO0;
+  return fio___sock_addr2txt(addr, len, with_port);
 }
 
 /* *****************************************************************************
@@ -1071,6 +1219,10 @@ FIO_IFUNC void fio___sock_wsa_set_errno(void) {
  * WSASend/WSARecv are for IOCP/overlapped I/O which this library does not use.
  */
 IFUNC ssize_t fio_sock_write(fio_socket_i fd, const void *buf, size_t len) {
+  if (len > INT_MAX) {
+    errno = EINVAL;
+    return -1;
+  }
   const int r = fio___winsock_fn.send(fd, (const char *)buf, (int)len, 0);
   if (r == SOCKET_ERROR) {
     fio___sock_wsa_set_errno();
@@ -1080,6 +1232,10 @@ IFUNC ssize_t fio_sock_write(fio_socket_i fd, const void *buf, size_t len) {
 }
 /** Acts as POSIX read. Use this function for portability with WinSock2. */
 IFUNC ssize_t fio_sock_read(fio_socket_i fd, void *buf, size_t len) {
+  if (len > INT_MAX) {
+    errno = EINVAL;
+    return -1;
+  }
   const int r = fio___winsock_fn.recv(fd, (char *)buf, (int)len, 0);
   if (r == SOCKET_ERROR) {
     fio___sock_wsa_set_errno();
@@ -1103,6 +1259,10 @@ IFUNC ssize_t fio_sock_sendto(fio_socket_i fd,
                               int flags,
                               const struct sockaddr *addr,
                               socklen_t addrlen) {
+  if (len > INT_MAX || (uint64_t)addrlen > INT_MAX) {
+    errno = EINVAL;
+    return -1;
+  }
   const int r = fio___winsock_fn.sendto(fd,
                                         (const char *)buf,
                                         (int)len,
@@ -1122,6 +1282,10 @@ IFUNC ssize_t fio_sock_recvfrom(fio_socket_i fd,
                                 int flags,
                                 struct sockaddr *addr,
                                 socklen_t *addrlen) {
+  if (len > INT_MAX || (addrlen && (uint64_t)*addrlen > INT_MAX)) {
+    errno = EINVAL;
+    return -1;
+  }
   const int r = fio___winsock_fn.recvfrom(fd,
                                           (char *)buf,
                                           (int)len,
@@ -1171,6 +1335,10 @@ IFUNC fio_socket_i fio_sock_dup(fio_socket_i original) {
 IFUNC int fio_sock_bind(fio_socket_i fd,
                         const struct sockaddr *addr,
                         socklen_t addrlen) {
+  if ((uint64_t)addrlen > INT_MAX) {
+    errno = EINVAL;
+    return -1;
+  }
   const int r = fio___winsock_fn.bind(fd, addr, (int)addrlen);
   if (r == SOCKET_ERROR) {
     fio___sock_wsa_set_errno_last();
@@ -1183,6 +1351,10 @@ IFUNC int fio_sock_bind(fio_socket_i fd,
 IFUNC int fio_sock_connect(fio_socket_i fd,
                            const struct sockaddr *addr,
                            socklen_t addrlen) {
+  if ((uint64_t)addrlen > INT_MAX) {
+    errno = EINVAL;
+    return -1;
+  }
   const int r = fio___winsock_fn.connect(fd, addr, (int)addrlen);
   if (r == SOCKET_ERROR) {
     fio___sock_wsa_set_errno_last();
@@ -1208,6 +1380,10 @@ IFUNC int fio_sock_setsockopt(fio_socket_i fd,
                               int optname,
                               const void *optval,
                               socklen_t optlen) {
+  if ((uint64_t)optlen > INT_MAX) {
+    errno = EINVAL;
+    return -1;
+  }
   const int r = fio___winsock_fn.setsockopt(fd,
                                             level,
                                             optname,
@@ -1240,6 +1416,15 @@ IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
     fio___sock_wsa_set_errno_last();
     goto fail;
   }
+  { /* Protect the temporary listener from same-port Windows binds. */
+    int exclusive = 1;
+    if (fio_sock_setsockopt(listener,
+                            SOL_SOCKET,
+                            SO_EXCLUSIVEADDRUSE,
+                            &exclusive,
+                            sizeof(exclusive)) == -1)
+      goto fail;
+  }
   FIO_MEMSET(&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1268,10 +1453,52 @@ IFUNC int fio_sock_socketpair(fio_socket_i fds[2]) {
   if (fio_sock_connect(writer, (struct sockaddr *)&addr, addrlen) ==
       SOCKET_ERROR)
     goto fail;
-  reader = fio___winsock_fn.accept(listener, NULL, NULL);
-  if (reader == INVALID_SOCKET) {
+  /* A different loopback process can race the writer. Accept only the peer
+   * whose ephemeral endpoint belongs to our connected writer, and bound the
+   * total wait so a substituted peer cannot hold setup indefinitely. */
+  struct sockaddr_in writer_addr;
+  int writer_addrlen = (int)sizeof(writer_addr);
+  if (fio___winsock_fn.getsockname(writer,
+                                   (struct sockaddr *)&writer_addr,
+                                   &writer_addrlen) == SOCKET_ERROR) {
     fio___sock_wsa_set_errno_last();
     goto fail;
+  }
+  DWORD started = GetTickCount();
+  for (;;) {
+    DWORD elapsed = GetTickCount() - started;
+    if (elapsed >= 1000) {
+      errno = ETIMEDOUT;
+      goto fail;
+    }
+    fd_set pending;
+    FD_ZERO(&pending);
+    FD_SET(listener, &pending);
+    struct timeval wait = {.tv_sec = 0,
+                           .tv_usec = (long)(1000 - elapsed) * 1000};
+    int ready = fio___winsock_fn.select(0, &pending, NULL, NULL, &wait);
+    if (ready <= 0) {
+      if (ready == SOCKET_ERROR)
+        fio___sock_wsa_set_errno_last();
+      else
+        errno = ETIMEDOUT;
+      goto fail;
+    }
+    struct sockaddr_in peer_addr;
+    int peer_addrlen = (int)sizeof(peer_addr);
+    reader = fio___winsock_fn.accept(listener,
+                                     (struct sockaddr *)&peer_addr,
+                                     &peer_addrlen);
+    if (reader == INVALID_SOCKET) {
+      fio___sock_wsa_set_errno_last();
+      goto fail;
+    }
+    if (peer_addrlen == writer_addrlen && peer_addr.sin_family == AF_INET &&
+        peer_addr.sin_addr.s_addr == writer_addr.sin_addr.s_addr &&
+        peer_addr.sin_port == writer_addr.sin_port)
+      break;
+    fio___winsock_fn.closesocket(reader);
+    reader = INVALID_SOCKET;
   }
   fio___winsock_fn.closesocket(listener);
   fds[0] = reader; /* read end */

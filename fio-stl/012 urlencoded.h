@@ -101,6 +101,7 @@ URL-Encoded Parser API
  * `callbacks` is borrowed for the call. If `callbacks` or `on_pair` is NULL,
  * pairs are only counted: nothing is decoded and nothing is allocated.
  * `udata` is passed to `on_pair` unchanged. `data[0..len)` is not modified.
+ * `data` may be NULL only when `len` is zero; empty input returns all zeros.
  *
  * Parsing rules:
  * - Pairs are separated by `&`; empty pairs (`&&`) are skipped
@@ -108,8 +109,8 @@ URL-Encoded Parser API
  * - `name=` and `name` both have an empty value; `=value` has an empty name
  *
  * Names and values are decoded once using `fio_string_write_url_dec`, including
- * '+' to spaces. Invalid percent escapes remain literal. Long fields may
- * allocate temporary memory, freed after the callback.
+ * legacy %uXXXX escapes and '+' to spaces. Invalid percent escapes remain
+ * literal. Long fields may allocate temporary memory, freed after the callback.
  *
  * On error, parsing stops before the failed pair: `consumed` and `count` cover
  * only the pairs processed without error. `err` is -1 if a temporary buffer
@@ -132,6 +133,8 @@ fio_url_encoded_parse(const fio_url_encoded_parser_callbacks_s *callbacks,
                       const char *data,
                       size_t len) {
   fio_url_encoded_result_s result = {.consumed = 0, .count = 0, .err = 0};
+  if (!len)
+    return result;
   int (*on_pair)(void *, fio_buf_info_s, fio_buf_info_s) =
       callbacks ? callbacks->on_pair : NULL;
   const char *pos = data;

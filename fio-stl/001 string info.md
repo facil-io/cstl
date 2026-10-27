@@ -153,7 +153,7 @@ Creates a stack-allocated `fio_str_info_s` named `name` with `capacity` writable
   }
 ```
 
-Use this when a function needs a writable working buffer that normally fits on the stack but may be reallocated by downstream helpers.
+Use this when a function needs a writable working buffer that normally fits on the stack but may be reallocated by downstream helpers. `capacity` should be a compile-time constant: a runtime value creates an unchecked variable-length array, so never derive it from untrusted input.
 
 ### `FIO_STR_INFO_TMP_IS_REALLOCATED(name)`
 

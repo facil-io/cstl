@@ -27,6 +27,16 @@ These are re-defined for ever `include` cycle
 Memory allocation macros
 ***************************************************************************** */
 
+/* System alignment must be a power of two and hold the generic metadata. */
+#ifndef FIO___MEM_ALIGNMENT_SIZE_SYS
+#define FIO___MEM_ALIGNMENT_SIZE_SYS                                           \
+  ((_Alignof(long double) > sizeof(void *)) ? _Alignof(long double)            \
+                                            : sizeof(void *))
+FIO_ASSERT_STATIC(!(FIO___MEM_ALIGNMENT_SIZE_SYS &
+                    (FIO___MEM_ALIGNMENT_SIZE_SYS - 1)),
+                  "system allocation alignment must be a power of two");
+#endif
+
 /** FIO_MEMORY_DISABLE disables all custom memory allocators. */
 #if defined(FIO_MEMORY_DISABLE)
 #ifndef FIO_MALLOC_TMP_USE_SYSTEM
@@ -80,15 +90,17 @@ Memory allocation macros
 /** Set to true of internall allocator is used (memory returned set to zero). */
 #define FIO_MEM_REALLOC_IS_SAFE 0
 /** Assume allocator allignment. */
-#define FIO_MEM_ALIGNMENT_SIZE  sizeof(long double)
+#define FIO_MEM_ALIGNMENT_SIZE  FIO___MEM_ALIGNMENT_SIZE_SYS
 /** Reallocates memory with an alignment requirement, assigning `ptr`. */
 #define FIO_MEM_REALLOC_ALIGNED(ptr, old_size, new_size, copy_len, alignment)  \
-  ((ptr) = fio___aligned_realloc_fallback((ptr), (new_size), (copy_len),       \
+  ((ptr) = fio___aligned_realloc_fallback((ptr),                               \
+                                          (new_size),                          \
+                                          (copy_len),                          \
                                           (alignment)))
 /** Frees memory allocated using FIO_MEM_REALLOC_ALIGNED. */
 #define FIO_MEM_FREE_ALIGNED(ptr, size) fio___aligned_free_fallback((ptr))
 /** Returns the usable size the allocator reserves for a `size` request. */
-#define FIO_MEM_ALLOC_SIZE(size) ((size_t)(size))
+#define FIO_MEM_ALLOC_SIZE(size)        ((size_t)(size))
 #endif /* H___FIO_MALLOC___H */
 
 #endif /* defined(FIO_MEM_REALLOC) */
@@ -107,9 +119,11 @@ Memory allocation macros
   realloc((ptr), (new_size))
 #define FIO_MEM_FREE_(ptr, size) free((ptr))
 #define FIO_MEM_REALLOC_IS_SAFE_ 0
-#define FIO_MEM_ALIGNMENT_SIZE_  sizeof(long double)
+#define FIO_MEM_ALIGNMENT_SIZE_  FIO___MEM_ALIGNMENT_SIZE_SYS
 #define FIO_MEM_REALLOC_ALIGNED_(ptr, old_size, new_size, copy_len, alignment) \
-  ((ptr) = fio___aligned_realloc_fallback((ptr), (new_size), (copy_len),       \
+  ((ptr) = fio___aligned_realloc_fallback((ptr),                               \
+                                          (new_size),                          \
+                                          (copy_len),                          \
                                           (alignment)))
 #define FIO_MEM_FREE_ALIGNED_(ptr, size) fio___aligned_free_fallback((ptr))
 
@@ -135,7 +149,9 @@ Aligned allocation fallback (system allocator backends)
 #endif
 
 #ifndef FIO_MEM_SYS_ALIGN_MAX_LOG
-/** Mirrors the custom allocator's default FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG. */
+/**
+ * Mirrors the custom allocator's default FIO_MEMORY_SYS_ALLOCATION_SIZE_LOG.
+ */
 #define FIO_MEM_SYS_ALIGN_MAX_LOG 21
 #endif
 
@@ -163,10 +179,15 @@ FIO_IFUNC void fio___aligned_free_fallback(void *ptr) {
 /* SublimeText marker */
 void fio___aligned_alloc_fallback__(void);
 /**
- * Aligned allocation fallback. `alignment` MUST be a normalized power of 2
- * (see fio___aligned_realloc_fallback).
+ * Aligned allocation fallback. `alignment` must be a power of 2 and at least
+ * sizeof(void *) (see fio___aligned_realloc_fallback).
  */
 FIO_IFUNC void *fio___aligned_alloc_fallback(size_t size, size_t alignment) {
+  if (!alignment || (alignment & (alignment - 1)) ||
+      alignment < sizeof(void *)) {
+    errno = EINVAL;
+    return NULL;
+  }
 #if FIO_OS_WIN
   return _aligned_malloc(size, alignment);
 #elif FIO_OS_POSIX
@@ -175,12 +196,20 @@ FIO_IFUNC void *fio___aligned_alloc_fallback(size_t size, size_t alignment) {
     return NULL;
   return r;
 #else /* over-allocation with the raw pointer stashed before the result */
-  void *raw = malloc(size + alignment + sizeof(void *));
+  const size_t padding = alignment - 1;
+  if (padding > SIZE_MAX - sizeof(void *) ||
+      size > SIZE_MAX - sizeof(void *) - padding) {
+    errno = ENOMEM;
+    return NULL;
+  }
+  void *raw = malloc(size + sizeof(void *) + padding);
   void *r;
   if (!raw)
     return NULL;
-  r = (void *)(((uintptr_t)raw + sizeof(void *) + (alignment - 1)) &
-               ~(uintptr_t)(alignment - 1));
+  /* Compute a bounded offset, avoiding an absolute-address round-up. */
+  const size_t offset =
+      (size_t)((-(uintptr_t)raw - sizeof(void *)) & (alignment - 1));
+  r = (void *)((unsigned char *)raw + sizeof(void *) + offset);
   ((void **)r)[-1] = raw;
   return r;
 #endif
@@ -193,8 +222,8 @@ void fio___aligned_realloc_fallback__(void);
  * `FIO_MALLOC_TMP_USE_SYSTEM` is enforced).
  *
  * The `alignment` argument is normalized: `0` selects the default
- * (`sizeof(long double)`), non power-of-2 values are rounded DOWN to the
- * nearest power of 2, and the result is never smaller than the current
+ * (`FIO___MEM_ALIGNMENT_SIZE_SYS`), non power-of-2 values are rounded DOWN to
+ * the nearest power of 2, and the result is never smaller than the current
  * alignment of `ptr`.
  */
 FIO_IFUNC void *fio___aligned_realloc_fallback(void *ptr,
@@ -211,8 +240,8 @@ FIO_IFUNC void *fio___aligned_realloc_fallback(void *ptr,
     if (ptr_alignment > alignment)
       alignment = ptr_alignment;
   }
-  if (alignment < sizeof(long double))
-    alignment = sizeof(long double);
+  if (alignment < FIO___MEM_ALIGNMENT_SIZE_SYS)
+    alignment = FIO___MEM_ALIGNMENT_SIZE_SYS;
 #if FIO_OS_WIN
   if (!ptr)
     return _aligned_malloc(new_size ? new_size : alignment, alignment);
@@ -242,7 +271,9 @@ FIO_IFUNC void *fio___aligned_realloc_fallback(void *ptr,
       return NULL;
     if (ptr) {
       /* core primitive copy (FIO_MEMCPY may resolve to a later SFUNC) */
-      fio___memcpy_unsafe_x(r, ptr, (copy_len < new_size) ? copy_len : new_size);
+      fio___memcpy_unsafe_x(r,
+                            ptr,
+                            (copy_len < new_size) ? copy_len : new_size);
       fio___aligned_free_fallback(ptr);
     }
     return r;
@@ -335,6 +366,7 @@ Leak Counter Helpers
 
 #if ((FIO_LEAK_COUNTER + 1) == 1)
 /* No leak counting defined */
+#define FIO_LEAK_COUNTER_DEC(name)
 #define FIO_LEAK_COUNTER_DEF(name)
 #define FIO_LEAK_COUNTER_ON_ALLOC(name) ((void)0)
 #define FIO_LEAK_COUNTER_ON_FREE(name)  ((void)0)
@@ -343,10 +375,11 @@ Leak Counter Helpers
 #ifndef FIO_LEAK_COUNTER_SKIP_EXIT
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
+#define FIO_LEAK_COUNTER_DEC      FIO___LEAK_COUNTER_DEC
 #define FIO_LEAK_COUNTER_DEF      FIO___LEAK_COUNTER_DEF
-#define FIO_LEAK_COUNTER_COUNT    FIO___LEAK_COUNTER_COUNT
 #define FIO_LEAK_COUNTER_ON_ALLOC FIO___LEAK_COUNTER_ON_ALLOC
 #define FIO_LEAK_COUNTER_ON_FREE  FIO___LEAK_COUNTER_ON_FREE
+#define FIO_LEAK_COUNTER_COUNT    FIO___LEAK_COUNTER_COUNT
 #endif
 
 /* *****************************************************************************
@@ -365,7 +398,9 @@ Pointer Tagging
 /**
  * Supports embedded pointer tagging / untagging for the included types.
  *
- * Should resolve to an untagged pointer value. i.e.: ((uintptr_t)(p) | ~1UL)
+ * Should resolve to an untagged pointer value. i.e.:
+ * ((uintptr_t)(p) & ~(uintptr_t)1)
+ * Only clear reserved tag bits; preserve all original pointer bits.
  */
 #define FIO_PTR_UNTAG(p) (p)
 #endif

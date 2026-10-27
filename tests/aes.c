@@ -462,6 +462,179 @@ FIO_SFUNC void FIO_NAME_TEST(stl, aes_gcm_edges)(void) {
 }
 
 /* *****************************************************************************
+GCM length limits (keystream reuse guard)
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, aes_gcm_limits)(void) {
+#if SIZE_MAX > 0xFFFFFFFFUL
+  const size_t max_len = ((size_t)1 << 36) - 32; /* (2^32 - 2) blocks */
+  const size_t max_ad = ((size_t)1 << 61) - 1;
+  FIO_ASSERT(fio___aes_gcm_len_ok(max_len, max_ad),
+             "GCM maximum lengths should be accepted");
+  FIO_ASSERT(!fio___aes_gcm_len_ok(max_len + 1, 0),
+             "GCM data beyond 2^36-32 bytes should be rejected");
+  FIO_ASSERT(!fio___aes_gcm_len_ok(((size_t)1 << 36) + 1, 0),
+             "GCM counter-repeat length should be rejected");
+  FIO_ASSERT(!fio___aes_gcm_len_ok(0, max_ad + 1),
+             "GCM AAD of 2^61 bytes should be rejected");
+  FIO_ASSERT(!fio___aes_gcm_len_ok(SIZE_MAX, SIZE_MAX),
+             "GCM SIZE_MAX lengths should be rejected");
+  /* decryption rejects oversized input before touching data or tag */
+  {
+    uint8_t key[32] = {0}, nonce[12] = {0};
+    uint8_t mac[16], buf[16], ad[16] = {0}; /* `ad` mustn't alias `data` */
+    FIO_MEMSET(mac, 9, sizeof(mac));
+    FIO_MEMSET(buf, 7, sizeof(buf));
+    FIO_ASSERT(fio_aes128_gcm_dec(mac, buf, max_len + 1, NULL, 0, key, nonce) ==
+                   -1,
+               "oversized AES-128-GCM decryption should fail");
+    FIO_ASSERT(fio_aes256_gcm_dec(mac, buf, max_len + 1, NULL, 0, key, nonce) ==
+                   -1,
+               "oversized AES-256-GCM decryption should fail");
+    FIO_ASSERT(fio_aes128_gcm_dec(mac, buf, 16, ad, max_ad + 1, key, nonce) ==
+                   -1,
+               "oversized AES-128-GCM AAD should fail");
+    FIO_ASSERT(fio_aes256_gcm_dec(mac, buf, 16, ad, max_ad + 1, key, nonce) ==
+                   -1,
+               "oversized AES-256-GCM AAD should fail");
+    for (size_t i = 0; i < 16; ++i)
+      FIO_ASSERT(buf[i] == 7 && mac[i] == 9,
+                 "oversized decryption mutated data or tag");
+  }
+  /* encryption fails safely (no abort): data and tag are zeroed */
+  {
+    uint8_t key[32] = {0}, nonce[12] = {0};
+    uint8_t mac[16], buf[16], ad[16] = {0};
+    FIO_MEMSET(mac, 9, sizeof(mac));
+    FIO_MEMSET(buf, 7, sizeof(buf));
+    FIO_ASSERT(fio_aes128_gcm_enc(mac, buf, 16, ad, max_ad + 1, key, nonce) ==
+                   -1,
+               "oversized AES-128-GCM encryption should return -1");
+    for (size_t i = 0; i < 16; ++i)
+      FIO_ASSERT(!buf[i] && !mac[i], "oversized AES-128-GCM enc not zeroed");
+    FIO_MEMSET(mac, 9, sizeof(mac));
+    FIO_MEMSET(buf, 7, sizeof(buf));
+    FIO_ASSERT(fio_aes256_gcm_enc(mac, buf, 16, ad, max_ad + 1, key, nonce) ==
+                   -1,
+               "oversized AES-256-GCM encryption should return -1");
+    for (size_t i = 0; i < 16; ++i)
+      FIO_ASSERT(!buf[i] && !mac[i], "oversized AES-256-GCM enc not zeroed");
+    FIO_ASSERT(fio_aes128_gcm_dec(mac, buf, 16, NULL, 0, key, nonce) == -1,
+               "zeroed failure output should not authenticate");
+  }
+#endif
+  FIO_ASSERT(fio___aes_gcm_len_ok(0, 0), "empty input is fine");
+  FIO_ASSERT(fio___aes_gcm_len_ok((size_t)0xFFFFFFFFUL, (size_t)0xFFFFFFFFUL),
+             "32 bit lengths should always be accepted");
+}
+
+/* *****************************************************************************
+Argument validation (NULL pointers fail with -1, never crash)
+***************************************************************************** */
+
+typedef int (*fio___aes_test_fn)(void *restrict,
+                                 void *restrict,
+                                 size_t,
+                                 const void *,
+                                 size_t,
+                                 const void *,
+                                 const void *);
+
+/* true if `arg` was NULL (buffer untouched by design) or `buf` is all zero. */
+FIO_SFUNC int fio___aes_test_zeroed(const void *arg, const uint8_t *buf) {
+  if (!arg)
+    return 1;
+  for (size_t i = 0; i < 16; ++i)
+    if (buf[i])
+      return 0;
+  return 1;
+}
+
+FIO_SFUNC void fio___aes_test_args(fio___aes_test_fn enc,
+                                   fio___aes_test_fn dec,
+                                   const char *name) {
+  uint8_t key[32] = {1, 2, 3}, nonce[12] = {4, 5, 6}, ad[8] = {7};
+  uint8_t mac[16], buf[16], good_mac[16], good_ct[16];
+  /* reference ciphertext */
+  FIO_MEMSET(good_ct, 0x5A, 16);
+  FIO_ASSERT(!enc(good_mac, good_ct, 16, ad, 8, key, nonce),
+             "%s: valid encryption failed",
+             name);
+#define FIO___AES_ENC_FAILS(m, d, l, a, al, k, n, what)                        \
+  do {                                                                         \
+    FIO_MEMSET(mac, 9, 16);                                                    \
+    FIO_MEMSET(buf, 7, 16);                                                    \
+    FIO_ASSERT(enc(m, d, l, a, al, k, n) == -1,                                \
+               "%s: enc should fail (%s)",                                     \
+               name,                                                           \
+               what);                                                          \
+    FIO_ASSERT(fio___aes_test_zeroed((m), mac),                                \
+               "%s: enc fail left tag (%s)",                                   \
+               name,                                                           \
+               what);                                                          \
+    FIO_ASSERT(fio___aes_test_zeroed((d), buf),                                \
+               "%s: enc fail left data (%s)",                                  \
+               name,                                                           \
+               what);                                                          \
+  } while (0)
+  FIO___AES_ENC_FAILS(mac, buf, 16, ad, 8, NULL, nonce, "NULL key");
+  FIO___AES_ENC_FAILS(mac, buf, 16, ad, 8, key, NULL, "NULL nonce");
+  FIO___AES_ENC_FAILS(NULL, buf, 16, ad, 8, key, nonce, "NULL mac");
+  FIO___AES_ENC_FAILS(mac, NULL, 16, ad, 8, key, nonce, "NULL data, len");
+  FIO___AES_ENC_FAILS(mac, buf, 16, NULL, 8, key, nonce, "NULL ad, adlen");
+#undef FIO___AES_ENC_FAILS
+#define FIO___AES_DEC_FAILS(m, d, l, a, al, k, n, what)                        \
+  do {                                                                         \
+    FIO_MEMCPY(mac, good_mac, 16);                                             \
+    FIO_MEMCPY(buf, good_ct, 16);                                              \
+    FIO_ASSERT(dec(m, d, l, a, al, k, n) == -1,                                \
+               "%s: dec should fail (%s)",                                     \
+               name,                                                           \
+               what);                                                          \
+    FIO_ASSERT(!memcmp(buf, good_ct, 16) && !memcmp(mac, good_mac, 16),        \
+               "%s: dec fail mutated data/tag (%s)",                           \
+               name,                                                           \
+               what);                                                          \
+  } while (0)
+  FIO___AES_DEC_FAILS(mac, buf, 16, ad, 8, NULL, nonce, "NULL key");
+  FIO___AES_DEC_FAILS(mac, buf, 16, ad, 8, key, NULL, "NULL nonce");
+  FIO___AES_DEC_FAILS(NULL, buf, 16, ad, 8, key, nonce, "NULL mac");
+  FIO___AES_DEC_FAILS(mac, NULL, 16, ad, 8, key, nonce, "NULL data, len");
+  FIO___AES_DEC_FAILS(mac, buf, 16, NULL, 8, key, nonce, "NULL ad, adlen");
+#undef FIO___AES_DEC_FAILS
+  /* sanity: the reference still authenticates */
+  FIO_MEMCPY(mac, good_mac, 16);
+  FIO_MEMCPY(buf, good_ct, 16);
+  FIO_ASSERT(!dec(mac, buf, 16, ad, 8, key, nonce),
+             "%s: valid decryption failed",
+             name);
+  /* (NULL, 0) data and AAD remain valid */
+  FIO_ASSERT(!enc(mac, NULL, 0, NULL, 0, key, nonce),
+             "%s: (NULL, 0) enc should succeed",
+             name);
+  FIO_ASSERT(!dec(mac, NULL, 0, NULL, 0, key, nonce),
+             "%s: (NULL, 0) dec should authenticate",
+             name);
+  FIO_ASSERT(!enc(mac, buf, 16, NULL, 0, key, nonce),
+             "%s: NULL ad with adlen 0 should succeed",
+             name);
+  FIO_ASSERT(!dec(mac, buf, 16, NULL, 0, key, nonce),
+             "%s: NULL ad with adlen 0 should authenticate",
+             name);
+  FIO_ASSERT(!enc(mac, NULL, 0, ad, 8, key, nonce),
+             "%s: NULL data with len 0 should succeed",
+             name);
+  FIO_ASSERT(!dec(mac, NULL, 0, ad, 8, key, nonce),
+             "%s: NULL data with len 0 should authenticate",
+             name);
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, aes_gcm_args)(void) {
+  fio___aes_test_args(fio_aes128_gcm_enc, fio_aes128_gcm_dec, "AES-128-GCM");
+  fio___aes_test_args(fio_aes256_gcm_enc, fio_aes256_gcm_dec, "AES-256-GCM");
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 
@@ -470,5 +643,7 @@ int main(void) {
   FIO_NAME_TEST(stl, aes128_gcm_kat)();
   FIO_NAME_TEST(stl, aes256_gcm_kat)();
   FIO_NAME_TEST(stl, aes_gcm_edges)();
+  FIO_NAME_TEST(stl, aes_gcm_limits)();
+  FIO_NAME_TEST(stl, aes_gcm_args)();
   return 0;
 }

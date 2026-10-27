@@ -84,23 +84,24 @@ struct fio_mustache_bargs_s {
   void *(*write_text)(void *udata, fio_buf_info_s txt);
   /* same as `write_text`, but should also  HTML escape (sanitize) data. */
   void *(*write_text_escaped)(void *udata, fio_buf_info_s raw);
-  /* callback should return a new context pointer with the value of `name`. */
+  /* Returns an acquired value; release_var is called after its last use. */
   void *(*get_var)(void *ctx, fio_buf_info_s name);
   /* if context is an Array, should return its length. */
   size_t (*array_length)(void *ctx);
-  /* if context is an Array, should return a context pointer @ index. */
+  /* Returns an acquired array item, released after its rendered section. */
   void *(*get_var_index)(void *ctx, size_t index);
-  /* should return the String value of context `var` as a `fio_buf_info_s`. */
+  /* Returns a borrowed string view valid until release_var(var). */
   fio_buf_info_s (*var2str)(void *var);
   /* should return non-zero if the context pointer refers to a valid value. */
   int (*var_is_truthful)(void *ctx);
-  /* callback signals that the `ctx` context pointer is no longer in use. */
+  /* Releases each acquired lookup/item, including falsey/intermediate values.
+   * Root/current-context aliases (`.`) are borrowed and are not released. */
   void (*release_var)(void *ctx);
   /* returns non-zero if `ctx` is a lambda and handles section manually. */
   int (*is_lambda)(void **udata,
                    void *ctx,
                    fio_buf_info_s raw_template_section);
-  /* the root context for finding named values. */
+  /* Borrowed root context for finding named values; never released here. */
   void *ctx;
   /* opaque user data (settable as well as readable), the final return value. */
   void *udata;
@@ -242,7 +243,9 @@ FIO_IFUNC void *fio___mustache_get_var_in_context(fio_mustache_bargs_s *a,
 }
 
 FIO_IFUNC void *fio___mustache_get_var(fio___mustache_bldr_s *b,
-                                       fio_buf_info_s val_name) {
+                                       fio_buf_info_s val_name,
+                                       int *owned) {
+  *owned = !(val_name.len == 1 && val_name.buf[0] == '.');
   void *v = b->ctx;
   if (val_name.len == 1 && val_name.buf[0] == '.')
     return v;
@@ -259,8 +262,11 @@ FIO_IFUNC void *fio___mustache_get_var(fio___mustache_bldr_s *b,
     if (!b)
       return v;
   }
-  while (val_name.len && v)
-    v = fio___mustache_get_var_in_context(b->args, v, &val_name);
+  while (val_name.len && v) {
+    void *parent = v;
+    v = fio___mustache_get_var_in_context(b->args, parent, &val_name);
+    b->args->release_var(parent);
+  }
   return v;
 }
 
@@ -373,17 +379,19 @@ FIO_IFUNC char *fio___mustache_i_var_internal(
     void *(*writer)(void *, fio_buf_info_s txt)) {
   fio_buf_info_s var = FIO_BUF_INFO2(p + 3, fio_buf2u16u(p + 1));
   p = var.buf + var.len;
-  void *v = fio___mustache_get_var(b, var);
+  int owned;
+  void *v = fio___mustache_get_var(b, var, &owned);
   if (!v)
     return p;
   var = b->args->var2str(v);
-  b->args->release_var(v);
 #if FIO_MUSTACHE_PRESERVE_PADDING
   fio___mustache_writer_route(b, var, writer);
 #else
   fio___mustache_write_padding(b);
   b->args->udata = writer(b->args->udata, var);
 #endif
+  if (owned)
+    b->args->release_var(v);
   return p;
 }
 FIO_SFUNC char *fio___mustache_i_var(char *p, fio___mustache_bldr_s *b) {
@@ -407,9 +415,13 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
   const fio_buf_info_s section_raw_txt = FIO_BUF_INFO2(NULL, 0);
 #endif
 
-  void *v = fio___mustache_get_var(b, var);
-  if (!(b->args->var_is_truthful(v)))
+  int owned;
+  void *v = fio___mustache_get_var(b, var, &owned);
+  if (!(b->args->var_is_truthful(v))) {
+    if (owned && v)
+      b->args->release_var(v);
     return p;
+  }
   size_t index = 0;
   const size_t ary_len = b->args->array_length(v);
   void *nctx = v;
@@ -428,9 +440,10 @@ FIO_SFUNC char *fio___mustache_i_ary(char *p, fio___mustache_bldr_s *b) {
     if (!b->args->is_lambda(&(b->args->udata), nctx, section_raw_txt)) {
       fio___mustache_build_section(var.buf + var.len, builder);
     }
-    b->args->release_var(nctx);
+    if (ary_len && nctx)
+      b->args->release_var(nctx);
     if (index >= ary_len) {
-      if (nctx != v)
+      if (owned && v)
         b->args->release_var(v);
       return p;
     }
@@ -442,9 +455,11 @@ FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
   uint32_t skip_pos = fio_buf2u32u(p + 3);
   p = b->root + skip_pos;
 
-  void *v = fio___mustache_get_var(b, var);
+  int owned;
+  void *v = fio___mustache_get_var(b, var, &owned);
   if (b->args->var_is_truthful(v)) {
-    b->args->release_var(v);
+    if (owned && v)
+      b->args->release_var(v);
     return p;
   }
 
@@ -456,6 +471,8 @@ FIO_SFUNC char *fio___mustache_i_missing(char *p, fio___mustache_bldr_s *b) {
       .depth = b->depth + 1,
   };
   fio___mustache_build_section(var.buf + var.len, builder);
+  if (owned && v)
+    b->args->release_var(v);
   return p;
 }
 
@@ -478,7 +495,8 @@ FIO_SFUNC char *fio___mustache_i_var_padded(char *p, fio___mustache_bldr_s *b) {
   fio_buf_info_s var = FIO_BUF_INFO2(p + 5, fio_buf2u16u(p + 1));
   fio_buf_info_s padding = FIO_BUF_INFO2(p + 5 + var.len, fio_buf2u16u(p + 3));
   p = padding.buf + padding.len;
-  void *v = fio___mustache_get_var(b, var);
+  int owned;
+  void *v = fio___mustache_get_var(b, var, &owned);
   if (!v)
     return p;
   var = b->args->var2str(v);
@@ -488,7 +506,8 @@ FIO_SFUNC char *fio___mustache_i_var_padded(char *p, fio___mustache_bldr_s *b) {
   b2.padding = padding;
   fio___mustache_writer_route(&b2, var, b->args->write_text_escaped);
 done:
-  b->args->release_var(v);
+  if (owned)
+    b->args->release_var(v);
   return p;
 }
 FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *p,
@@ -496,7 +515,8 @@ FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *p,
   fio_buf_info_s var = FIO_BUF_INFO2(p + 5, fio_buf2u16u(p + 1));
   fio_buf_info_s padding = FIO_BUF_INFO2(p + 5 + var.len, fio_buf2u16u(p + 3));
   p = padding.buf + padding.len;
-  void *v = fio___mustache_get_var(b, var);
+  int owned;
+  void *v = fio___mustache_get_var(b, var, &owned);
   if (!v)
     return p;
   var = b->args->var2str(v);
@@ -505,7 +525,8 @@ FIO_SFUNC char *fio___mustache_i_var_raw_padded(char *p,
     b2.padding = padding;
     fio___mustache_writer_route(&b2, var, b->args->write_text);
   }
-  b->args->release_var(v);
+  if (owned)
+    b->args->release_var(v);
   return p;
 }
 
@@ -572,7 +593,41 @@ typedef struct fio___mustache_parser_s {
   uint32_t starts_at;
   uint32_t depth;
   uint32_t dirty;
+  int err; /* sticky instruction append failure; never execute a partial stream
+            */
 } fio___mustache_parser_s;
+
+/* Bytecode offsets are 32-bit; leave room for the terminal POP (bstr NUL).
+ * Reserve a complete instruction before writing any of its fields. */
+FIO_IFUNC char *fio___mustache_write2(fio___mustache_parser_s *p,
+                                      fio_string_write_s *parts) {
+  size_t old = fio_bstr_len(p->root), added = 0;
+  if (p->err)
+    return p->root;
+  for (const fio_string_write_s *i = parts; i->klass; ++i) {
+    if (i->info.str.len > UINT32_MAX - 1U - old - added) {
+      p->err = 1;
+      return p->root;
+    }
+    added += i->info.str.len;
+  }
+  p->root = fio_bstr_reserve(p->root, added);
+  if (!p->root || fio_bstr_info(p->root).capa <= old + added) {
+    p->err = 1;
+    return p->root;
+  }
+  p->root = fio_bstr_write2 FIO_NOOP(p->root, parts);
+  if (fio_bstr_len(p->root) != old + added)
+    p->err = 1;
+  return p->root;
+}
+#define fio___mustache_write2(p, ...)                                          \
+  fio___mustache_write2((p), (fio_string_write_s[]){__VA_ARGS__, {0}})
+FIO_IFUNC char *fio___mustache_write(fio___mustache_parser_s *p,
+                                     const char *buf,
+                                     size_t len) {
+  return fio___mustache_write2(p, FIO_STRING_WRITE_STR2(buf, len));
+}
 
 /* *****************************************************************************
 Template file loading
@@ -620,6 +675,9 @@ FIO_SFUNC fio_buf_info_s fio___mustache_load_template(fio___mustache_parser_s *p
           r = p->args->load_file_data(FIO_STR2BUF_INFO(fn), p->args->udata);
           if (r.len)
             goto file_loaded_successfully;
+          if (r.buf)
+            p->args->free_file_data(r, p->args->udata);
+          r = (fio_buf_info_s){0};
         }
       }
       tp = tp->prev;
@@ -640,6 +698,9 @@ absolute_path_or_cwd:
     r = p->args->load_file_data(FIO_STR2BUF_INFO(fn), p->args->udata);
     if (r.len)
       goto file_loaded_successfully;
+    if (r.buf)
+      p->args->free_file_data(r, p->args->udata);
+    r = (fio_buf_info_s){0};
   }
 
 file_loaded_successfully:
@@ -649,7 +710,7 @@ already_exists:
   fn.len = 5; /* TODO: fixme? */
   fn.buf[0] = FIO___MUSTACHE_I_GOTO_PUSH;
   fio_u2buf32u(fn.buf + 1, tp->starts_at);
-  p->root = fio_bstr_write(p->root, fn.buf, fn.len);
+  p->root = fio___mustache_write(p, fn.buf, fn.len);
   return r;
 }
 
@@ -686,10 +747,10 @@ FIO_IFUNC int fio___mustache_parse_add_text(fio___mustache_parser_s *p,
   FIO_ASSERT_DEBUG(txt.len < (1 << 16),
                    "(mustache) text instruction overflow!");
   fio_u2buf16u(buf.u8 + 1, txt.len);
-  p->root = fio_bstr_write2(p->root,
-                            FIO_STRING_WRITE_STR2(buf.u8, 3),
-                            FIO_STRING_WRITE_STR2(txt.buf, txt.len));
-  return 0;
+  p->root = fio___mustache_write2(p,
+                                  FIO_STRING_WRITE_STR2(buf.u8, 3),
+                                  FIO_STRING_WRITE_STR2(txt.buf, txt.len));
+  return p->err ? -1 : 0;
 }
 
 FIO_IFUNC int fio___mustache_parse_comment(fio___mustache_parser_s *p,
@@ -710,6 +771,8 @@ FIO_IFUNC int fio___mustache_parse_section_end(fio___mustache_parser_s *p,
   buf.u8[0] = FIO___MUSTACHE_I_STACK_POP;
   if (!p->prev)
     goto section_not_open;
+  if (p->err)
+    return -1;
   prev = p->root + p->starts_at;
   if (*prev != FIO___MUSTACHE_I_ARY && *prev != FIO___MUSTACHE_I_MISSING)
     goto section_not_open; /* TODO: review this line - I_TXT ? */
@@ -729,14 +792,14 @@ FIO_IFUNC int fio___mustache_parse_section_end(fio___mustache_parser_s *p,
   if (old_var_name.len && old_var_name.len < (1U << 16)) {
     buf.u8[1] = FIO___MUSTACHE_I_METADATA;
     fio_u2buf16u(buf.u8 + 2, old_var_name.len);
-    p->root = fio_bstr_write2(
-        p->root,
+    p->root = fio___mustache_write2(
+        p,
         FIO_STRING_WRITE_STR2(buf.u8, 4),
         FIO_STRING_WRITE_STR2(old_var_name.buf, old_var_name.len));
   } else
 #endif
-    p->root = fio_bstr_write(p->root, buf.u8, 1);
-  return -2;
+    p->root = fio___mustache_write(p, buf.u8, 1);
+  return p->err ? -1 : -2;
 
 value_name_mismatch:
   FIO_LOG_ERROR(
@@ -759,7 +822,7 @@ section_not_open:
 FIO_IFUNC int fio___mustache_parse_section_start(fio___mustache_parser_s *p,
                                                  fio_buf_info_s var,
                                                  size_t inverted) {
-  if (p->depth == FIO_MUSTACHE_MAX_DEPTH)
+  if (p->depth == FIO_MUSTACHE_MAX_DEPTH || var.len >= 0xFFFFU)
     return -1;
   fio___mustache_stand_alone_skip_eol(p);
 
@@ -772,31 +835,34 @@ FIO_IFUNC int fio___mustache_parse_section_start(fio___mustache_parser_s *p,
       .starts_at = (uint32_t)fio_bstr_len(p->root),
       .depth = p->depth + 1,
       .dirty = p->dirty,
+      .err = p->err,
   };
   union {
     uint64_t u64[1];
     char u8[8];
-  } buf;
+  } buf = {0};
   buf.u8[0] = FIO___MUSTACHE_I_ARY + inverted;
   fio_u2buf16u(buf.u8 + 1, var.len);
   /* + 32 bit value to be filled by closure. */
-  new_section.root = fio_bstr_write2(new_section.root,
-                                     FIO_STRING_WRITE_STR2(buf.u8, 7),
-                                     FIO_STRING_WRITE_STR2(var.buf, var.len));
+  new_section.root =
+      fio___mustache_write2(&new_section,
+                            FIO_STRING_WRITE_STR2(buf.u8, 7),
+                            FIO_STRING_WRITE_STR2(var.buf, var.len));
 #if FIO_MUSTACHE_PRESERVE_PADDING
   if (!p->dirty && p->backwards.len) {
     buf.u8[0] = FIO___MUSTACHE_I_PADDING_PUSH;
     fio_u2buf16u(buf.u8 + 1, p->backwards.len);
-    new_section.root = fio_bstr_write2(
-        new_section.root,
+    new_section.root = fio___mustache_write2(
+        &new_section,
         FIO_STRING_WRITE_STR2(buf.u8, 3),
         FIO_STRING_WRITE_STR2(p->backwards.buf, p->backwards.len));
   }
 #endif
   int r = fio___mustache_parse_block(&new_section);
   p->root = new_section.root;
+  p->err |= new_section.err;
   p->forwards = new_section.forwards;
-  return r;
+  return p->err ? -1 : r;
 }
 
 FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
@@ -811,7 +877,7 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
   for (fio_buf_info_s path = filename; path.len > 1;) {
     /* Check for leading "../" which escapes the base directory */
     if (path.buf[0] == '.' && path.buf[1] == '.' &&
-        (path.len < 3 || path.buf[2] == '/')) {
+        (path.len < 3 || path.buf[2] == '/' || path.buf[2] == '\\')) {
       FIO_LOG_SECURITY(
           "Path traversal attack detected in Mustache partial: %.*s (skipped)",
           (int)filename.len,
@@ -819,7 +885,7 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
       filename.len = 0;
       break;
     }
-    while (path.len && path.buf[0] != '/') {
+    while (path.len && path.buf[0] != '/' && path.buf[0] != '\\') {
       --path.len;
       ++path.buf;
     }
@@ -835,22 +901,22 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
 
   fio_buf_info_s file_content = fio___mustache_load_template(p, filename);
   if (!file_content.len)
-    return 0;
+    return p->err ? -1 : 0;
 
   union {
     uint64_t u64[1];
     char u8[8];
-  } buf;
+  } buf = {0};
 
   buf.u8[0] = FIO___MUSTACHE_I_STACK_PUSH;
   size_t ipos = fio_bstr_len(p->root) + 1;
-  p->root = fio_bstr_write(p->root, buf.u8, 5);
+  p->root = fio___mustache_write(p, buf.u8, 5);
 
   if (!p->dirty && p->backwards.len) {
     buf.u8[0] = FIO___MUSTACHE_I_PADDING_PUSH;
     fio_u2buf16u(buf.u8 + 1, p->backwards.len);
-    p->root = fio_bstr_write2(
-        p->root,
+    p->root = fio___mustache_write2(
+        p,
         FIO_STRING_WRITE_STR2(buf.u8, 3),
         FIO_STRING_WRITE_STR2(p->backwards.buf, p->backwards.len));
   }
@@ -868,12 +934,15 @@ FIO_IFUNC int fio___mustache_parse_partial(fio___mustache_parser_s *p,
       .dirty = 0,
   };
 
+  new_section.err = p->err;
   int r = fio___mustache_parse_template_file(&new_section);
   buf.u8[0] = FIO___MUSTACHE_I_STACK_POP;
-  p->root = fio_bstr_write(new_section.root, buf.u8, 1);
-  fio_u2buf32u(p->root + ipos, (uint32_t)fio_bstr_len(p->root));
+  p->root = fio___mustache_write(&new_section, buf.u8, 1);
+  p->err |= new_section.err;
+  if (!r && !p->err)
+    fio_u2buf32u(p->root + ipos, (uint32_t)fio_bstr_len(p->root));
   fio___mustache_free_template(p, file_content);
-  return r;
+  return p->err ? -1 : r;
 }
 
 FIO_IFUNC int fio___mustache_parse_set_delim(fio___mustache_parser_s *p,
@@ -899,7 +968,7 @@ FIO_IFUNC int fio___mustache_parse_set_delim(fio___mustache_parser_s *p,
   if (pos == end)
     goto delim_tag_error;
   buf.len = (size_t)(pos - buf.buf);
-  while (*pos == ' ' || *pos == '\t')
+  while (pos < end && (*pos == ' ' || *pos == '\t'))
     ++pos;
   if (pos >= end)
     goto delim_tag_error;
@@ -942,9 +1011,9 @@ FIO_IFUNC int fio___mustache_parse_var_name(fio___mustache_parser_s *p,
 #endif
   buf.u8[0] = (char)(FIO___MUSTACHE_I_VAR + (char)raw);
   fio_u2buf16u(buf.u8 + 1, var.len);
-  p->root = fio_bstr_write2(p->root,
-                            FIO_STRING_WRITE_STR2(buf.u8, 3),
-                            FIO_STRING_WRITE_STR2(var.buf, var.len));
+  p->root = fio___mustache_write2(p,
+                                  FIO_STRING_WRITE_STR2(buf.u8, 3),
+                                  FIO_STRING_WRITE_STR2(var.buf, var.len));
   return 0;
 #if FIO_MUSTACHE_PRESERVE_PADDING
 padded:
@@ -952,8 +1021,8 @@ padded:
   buf.u8[0] = (char)(FIO___MUSTACHE_I_VAR_PADDED + raw);
   fio_u2buf16u(buf.u8 + 1, var.len);
   fio_u2buf16u(buf.u8 + 3, p->backwards.len);
-  p->root = fio_bstr_write2(
-      p->root,
+  p->root = fio___mustache_write2(
+      p,
       FIO_STRING_WRITE_STR2(buf.u8, 5),
       FIO_STRING_WRITE_STR2(var.buf, var.len),
       FIO_STRING_WRITE_STR2(p->backwards.buf, p->backwards.len));
@@ -1035,9 +1104,12 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
   const char *end = p->forwards.buf + p->forwards.len;
   fio_buf_info_s tag;
   p->backwards = FIO_BUF_INFO2(p->forwards.buf, 0);
-  p->root = fio_bstr_reserve(p->root, p->forwards.len);
+  if (p->err)
+    return -1;
   /* consume each line (in case it's a stand alone line) */
   for (;;) {
+    if (p->err)
+      return -1;
     p->backwards.len = (size_t)(p->forwards.buf - p->backwards.buf);
     if (p->forwards.buf >= end) {
       /* check for unclosed sections at EOF - only if we're inside a section
@@ -1051,23 +1123,23 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
       break;
     }
     if (FIO_UNLIKELY(p->forwards.buf[0] == p->delim.in.buf[0] &&
-                     p->forwards.buf + p->delim.in.len <= end &&
+                     (size_t)(end - p->forwards.buf) >= p->delim.in.len &&
                      p->delim.in.cmp(p->forwards.buf, p->delim.in.buf))) {
       /* tag started */
       p->forwards.buf += p->delim.in.len;
       tag = FIO_BUF_INFO2(p->forwards.buf, 0);
       for (;;) {
-        if (p->forwards.buf + p->delim.out.len > end)
+        if ((size_t)(end - p->forwards.buf) < p->delim.out.len)
           goto incomplete_tag_error;
         if (p->forwards.buf[0] == p->delim.out.buf[0] &&
-            p->forwards.buf + p->delim.out.len <= end &&
+            (size_t)(end - p->forwards.buf) >= p->delim.out.len &&
             p->delim.out.cmp(p->forwards.buf, p->delim.out.buf))
           break;
         ++(p->forwards.buf);
       }
       /* advance tag ending when triple mustache is detected. */
       p->forwards.buf +=
-          ((p->forwards.buf + p->delim.out.len) < end &&
+          ((size_t)(end - p->forwards.buf) > p->delim.out.len &&
            p->forwards.buf[0] == '}' &&
            p->delim.out.cmp(p->forwards.buf + 1, p->delim.out.buf));
       /* finalize tag */
@@ -1083,6 +1155,8 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
         fio___mustache_parse_add_text(p, p->backwards);
         p->backwards = FIO_BUF_INFO2((p->backwards.buf + p->backwards.len), 0);
       }
+      if (p->err)
+        return -1;
       if ((r = fio___mustache_parse_consume_tag(p, tag)))
         goto done;
       p->backwards = FIO_BUF_INFO2(p->forwards.buf, 0);
@@ -1104,7 +1178,7 @@ FIO_SFUNC int fio___mustache_parse_block(fio___mustache_parser_s *p) {
 
 done:
   r += ((r == -2) << 1); /* end-tag stop shouldn't propagate onward. */
-  return r;
+  return p->err ? -1 : r;
 incomplete_tag_error:
   FIO_LOG_ERROR("(mustache) template error, un-terminated {{tag}}:\n\t%.*s",
                 (int)(end - (p->backwards.buf + p->backwards.len) > 32
@@ -1126,43 +1200,45 @@ unclosed_section_error:
 }
 
 FIO_SFUNC int fio___mustache_parse_template_file(fio___mustache_parser_s *p) {
-  /* remove (possible) filename comment line */
-  if (p->forwards.buf[0] == '@' && p->forwards.buf[1] == ':') {
+  if (p->err || !p->forwards.len)
+    return p->err ? -1 : 0;
+  char *end = p->forwards.buf + p->forwards.len;
+  /* Remove the filename comment line without probing beyond the byte view. */
+  if (p->forwards.len >= 2 && p->forwards.buf[0] == '@' &&
+      p->forwards.buf[1] == ':') {
     char *pos = (char *)FIO_MEMCHR(p->forwards.buf, '\n', p->forwards.len);
     if (!pos)
-      return 0; /* done with file... though nothing happened. */
+      return 0;
     ++pos;
-    pos += (pos[0] == '\r' || pos[0] == '\n');
-    p->forwards.len -= (size_t)(pos - p->forwards.buf);
-    p->forwards.buf = (char *)pos;
-  }
-  /* consume (possible) YAML front matter */
-  if (p->forwards.len > 3 && p->forwards.buf[0] == '-' &&
-      p->forwards.buf[1] == '-' && p->forwards.buf[2] == '-' &&
-      (p->forwards.buf[3] == '\n' || p->forwards.buf[3] == '\r')) {
-    const char *end = p->forwards.buf + p->forwards.len;
-    const char *pos = p->forwards.buf;
-    pos += 4;
-    pos += (pos[0] == '\r' || pos[0] == '\n');
-    const char *yml_start = pos;
-    size_t yaml_len;
-    for (;;) {
-      pos = (const char *)FIO_MEMCHR(pos, '\n', end - pos);
-      if (!pos)
-        return 0; /* done with file... though nothing happened. */
+    if (pos < end && (*pos == '\r' || *pos == '\n'))
       ++pos;
-      if (pos[0] == '-' && pos[1] == '-' && pos[2] == '-' &&
-          (pos[3] == '\n' || pos[3] == '\r' || !pos[3])) {
-        yaml_len = (size_t)(pos - yml_start);
-        pos += 4;
-        pos += (pos[0] == '\r' || pos[0] == '\n');
+    p->forwards = FIO_BUF_INFO2(pos, (size_t)(end - pos));
+  }
+  if (p->forwards.len >= 4 && !FIO_MEMCMP(p->forwards.buf, "---", 3) &&
+      (p->forwards.buf[3] == '\r' || p->forwards.buf[3] == '\n')) {
+    char *pos = p->forwards.buf + 4;
+    if (pos < end && pos[-1] == '\r' && *pos == '\n')
+      ++pos;
+    char *yaml = pos;
+    for (;;) {
+      size_t left = (size_t)(end - pos);
+      if (left >= 3 && !FIO_MEMCMP(pos, "---", 3) &&
+          (left == 3 || pos[3] == '\r' || pos[3] == '\n')) {
+        p->args->on_yaml_front_matter(FIO_BUF_INFO2(yaml, (size_t)(pos - yaml)),
+                                      p->args->udata);
+        pos += 3;
+        if (pos < end && *pos == '\r')
+          ++pos;
+        if (pos < end && *pos == '\n')
+          ++pos;
+        p->forwards = FIO_BUF_INFO2(pos, (size_t)(end - pos));
         break;
       }
+      pos = (char *)FIO_MEMCHR(pos, '\n', left);
+      if (!pos)
+        return 0; /* Unterminated front matter consumes the remainder. */
+      ++pos;
     }
-    p->args->on_yaml_front_matter(FIO_BUF_INFO2((char *)yml_start, yaml_len),
-                                  p->args->udata);
-    p->forwards.len = (size_t)(end - pos);
-    p->forwards.buf = (char *)pos;
   }
   return fio___mustache_parse_block(p);
 }
@@ -1256,10 +1332,9 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
     FIO_STR_INFO_TMP_VAR(fn, (PATH_MAX | 2096));
     if (!a.filename.len)
       a.filename.len = FIO_STRLEN(a.filename.buf);
-    if (a.filename.buf[a.filename.len])
-      fio_string_write(&fn, NULL, a.filename.buf, a.filename.len);
-    else
-      fn = FIO_BUF2STR_INFO(a.filename);
+    if (a.filename.len >= fn.capa ||
+        fio_string_write(&fn, NULL, a.filename.buf, a.filename.len))
+      return NULL;
     if (!a.data.buf && fn.buf) {
       a.data = a.load_file_data(FIO_STR2BUF_INFO(fn), a.udata);
       if (!a.data.buf)
@@ -1270,13 +1345,20 @@ SFUNC fio_mustache_s *fio_mustache_load FIO_NOOP(fio_mustache_load_args_s a) {
     base_path = pathname.folder;
   }
   parser.args = &a;
-  parser.root = NULL;
+  /* Pre-size ordinary templates, but validate reserve: bstr keeps its old
+   * pointer on failure. Empty/comment-only templates still own a valid stream.
+   */
+  if (a.data.len < UINT32_MAX - 1U)
+    parser.root = fio_bstr_reserve(NULL, a.data.len ? a.data.len : 1);
+  if (!parser.root || fio_bstr_info(parser.root).capa <= a.data.len)
+    parser.err = 1;
   parser.delim = fio___mustache_delimiter_init();
   parser.depth = 0;
   parser.fname = a.filename;
   parser.forwards = a.data;
   parser.path = base_path;
-  if (fio___mustache_parse_template_file(&parser)) { /* parser failed(!) */
+  if (fio___mustache_parse_template_file(&parser) ||
+      parser.err) { /* parser failed(!) */
     fio_bstr_free(parser.root);
     parser.root = NULL;
   }
@@ -1345,6 +1427,7 @@ Cleanup
 ***************************************************************************** */
 
 #endif /* FIO_EXTERN_COMPLETE */
+#undef fio___mustache_write2
 #undef FIO_MODULE_PTR
 #undef FIO_MUSTACHE
 #undef FIO___UNTAG_T

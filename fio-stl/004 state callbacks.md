@@ -63,7 +63,7 @@ SFUNC void fio_state_callback_add(fio_state_event_type_e,
 
 Adds `func(arg)` to an event queue. Adding the same function / argument pair replaces the existing map entry rather than creating a duplicate.
 
-If `FIO_CALL_ON_INITIALIZE` already ran, adding another initialize callback calls it immediately.
+If `FIO_CALL_ON_INITIALIZE` already completed, adding another initialize callback calls it immediately. Registrations made while its snapshot is running execute after the current initialization callbacks finish. A null callback is ignored.
 
 #### `fio_state_callback_remove`
 
@@ -114,7 +114,7 @@ Prints callback counts and capacities for every event queue to `stderr`.
 
 ### Thread-Safety
 
-Each event queue has its own lock. Adding, removing, clearing, and forcing callbacks are synchronized while touching the queue. Callback execution happens after the queue has been copied and unlocked.
+Each event queue has its own lock. Adding, removing, clearing, forcing, global cleanup, and diagnostic reads are synchronized while touching a queue. Callback execution happens after the queue has been copied and unlocked. During initialization, new initialize callbacks execute after the current snapshot, without overlapping that snapshot. Forcing a nonempty event allocates a snapshot; allocation failure is fatal, consistent with the library's default allocation assertion. Do not call the registry from other threads during process teardown or fork an active multithreaded process.
 
 ### Example
 

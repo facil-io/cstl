@@ -102,7 +102,7 @@ static void test_resp3_reply_to_fiobj(void) {
              "RESP3 reply should become FIOBJ array");
   FIO_ASSERT(fiobj_array_count(reply) == 3,
              "RESP3 reply array count mismatch: %zu",
-             fiobj_array_count(reply));
+             (size_t)fiobj_array_count(reply));
   assert_cstr_eq(fiobj2cstr(fiobj_array_get(reply, 0)), "PONG", 4, "PONG");
   FIO_ASSERT(fiobj2i(fiobj_array_get(reply, 1)) == 7,
              "RESP3 number mismatch");
@@ -278,7 +278,8 @@ static void test_subscribe_command_builder(void) {
 Payload Budget Tests (fio___redis_parse_state_s)
 ***************************************************************************** */
 
-/** Builds a `$<len>\r\n<pattern bytes>\r\n` wire image; returns total length. */
+/** Builds a `$<len>\r\n<pattern bytes>\r\n` wire image; returns total length.
+ */
 static size_t redis_test_make_blob_wire(uint8_t **out, size_t blob_len) {
   char hdr[32];
   int hpos = 0;
@@ -311,6 +312,198 @@ static void redis_test_parser_cleanup(fio_resp3_parser_s *parser) {
       fiobj_free((FIOBJ)f->ctx);
     --parser->depth;
   }
+}
+
+/* A RESP top-level completion is the only point where Redis resets msg_total.
+ * Rejecting an embedded token while a $?-string is open must not return an
+ * inner object and thereby make an uncharged outer continuation possible. */
+static void test_chunked_invalid_token_keeps_budget(void) {
+  fprintf(stderr, "* Testing Redis chunked-string token isolation...\n");
+  const char *bad[] = {"$?\r\n$0\r\n\r\n", "$?\r\n$?\r\n"};
+  for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); ++i) {
+    fio___redis_parse_state_s ps = {.payload_limit = 40};
+    fio_resp3_parser_s p = {.udata = &ps};
+    fio_resp3_result_s r = fio_resp3_parse(&p,
+                                           &FIO___REDIS_RESP3_CALLBACKS,
+                                           bad[i],
+                                           FIO_STRLEN(bad[i]));
+    FIO_ASSERT(r.err && !r.obj,
+               "nested token inside $?-string must not complete a Redis reply");
+    FIO_ASSERT(ps.msg_total == FIO___REDIS_PAYLOAD_OBJECT_COST,
+               "invalid nested token changed Redis budget: %zu",
+               ps.msg_total);
+    FIO_ASSERT(p.streaming_string && p.streaming_string_ctx &&
+                   p.streaming_string_ctx != FIO___REDIS_PS_SENTINEL,
+               "outer string context must remain owned for reset");
+    /* Exercise actual Redis disconnect/reset cleanup, including budget. */
+    fio_redis_connection_s conn = {.parser = p, .ps = ps};
+    conn.parser.udata = &conn.ps;
+    fio___redis_connection_reset(&conn);
+    FIO_ASSERT(!conn.parser.streaming_string && !conn.ps.msg_total,
+               "reset must clear partial string and message charge");
+  }
+}
+
+static void test_chunked_fragmented_budget(void) {
+  fprintf(stderr, "* Testing Redis fragmented chunk payload charging...\n");
+  fio___redis_parse_state_s ps = {.payload_limit = 38};
+  fio_resp3_parser_s p = {.udata = &ps};
+  const char *parts[] = {"$?\r\n;3\r\n", "abc\r", "\n;3\r\n", "def\r\n"};
+  for (size_t i = 0; i < sizeof(parts) / sizeof(*parts); ++i) {
+    fio_resp3_result_s r = fio_resp3_parse(&p,
+                                           &FIO___REDIS_RESP3_CALLBACKS,
+                                           parts[i],
+                                           FIO_STRLEN(parts[i]));
+    FIO_ASSERT(!r.err && !r.obj && r.consumed == FIO_STRLEN(parts[i]),
+               "valid split chunk %zu must drain input",
+               i);
+  }
+  FIO_ASSERT(ps.msg_total == 38 && !ps.limit_exceeded,
+             "six payload bytes plus string overhead must exactly fit: %zu",
+             ps.msg_total);
+  FIO_ASSERT(p.streaming_string &&
+                 fiobj2cstr((FIOBJ)p.streaming_string_ctx).len == 6,
+             "valid chunks must append all six bytes");
+  fio_resp3_result_s r = fio_resp3_parse(&p,
+                                         &FIO___REDIS_RESP3_CALLBACKS,
+                                         ";1\r\ng\r\n;0\r\n",
+                                         FIO_STRLEN(";1\r\ng\r\n;0\r\n"));
+  FIO_ASSERT(r.err && !r.obj && ps.limit_exceeded && ps.msg_total == 38,
+             "seventh byte must breach before append or completion");
+  FIO_ASSERT(p.streaming_string &&
+                 fiobj2cstr((FIOBJ)p.streaming_string_ctx).len == 6,
+             "breaching byte must not be appended");
+  redis_test_parser_cleanup(&p);
+
+  ps = (fio___redis_parse_state_s){.payload_limit = 38};
+  p = (fio_resp3_parser_s){.udata = &ps};
+  r = fio_resp3_parse(&p,
+                      &FIO___REDIS_RESP3_CALLBACKS,
+                      "$?\r\n;3\r\nabc\r\n;3\r\ndef\r\n;0\r\n",
+                      FIO_STRLEN("$?\r\n;3\r\nabc\r\n;3\r\ndef\r\n;0\r\n"));
+  FIO_ASSERT(!r.err && r.obj && !ps.limit_exceeded && ps.msg_total == 38,
+             "valid terminated chunked string must fit exact budget");
+  assert_cstr_eq(fiobj2cstr((FIOBJ)r.obj), "abcdef", 6, "chunked value");
+  fiobj_free((FIOBJ)r.obj);
+}
+
+static void test_nested_attribute_reply_accounting(void) {
+  fprintf(stderr, "* Testing Redis nested attribute reply association...\n");
+  /* String metadata is intentionally allocated, then must be discarded by
+   * Redis's attr_push. The metadata must not consume the array's element. */
+  const char *parts[] = {"*1\r\n|1\r\n+k\r\n", "+v\r\n", ":7\r\n:8\r\n"};
+  fio___redis_parse_state_s ps = {.payload_limit = 256};
+  fio_resp3_parser_s p = {.udata = &ps};
+  for (size_t i = 0; i < sizeof(parts) / sizeof(*parts); ++i) {
+    fio_resp3_result_s r = fio_resp3_parse(&p,
+                                           &FIO___REDIS_RESP3_CALLBACKS,
+                                           parts[i],
+                                           FIO_STRLEN(parts[i]));
+    FIO_ASSERT(!r.err, "nested attribute split %zu failed", i);
+    if (i < 2) {
+      FIO_ASSERT(!r.obj && r.consumed == FIO_STRLEN(parts[i]),
+                 "attribute cannot complete the parent reply");
+    } else {
+      FIO_ASSERT(r.obj && r.consumed == FIO_STRLEN(":7\r\n"),
+                 "array must consume value but leave next FIFO reply");
+      FIOBJ arr = (FIOBJ)r.obj;
+      FIO_ASSERT(FIOBJ_TYPE(arr) == FIOBJ_T_ARRAY &&
+                     fiobj_array_count(arr) == 1 &&
+                     fiobj2i(fiobj_array_get(arr, 0)) == 7,
+                 "attribute must not truncate fixed aggregate");
+      fiobj_free(arr);
+      ps.msg_total = 0; /* real Redis parse loop: one reset per reply */
+      r = fio_resp3_parse(&p,
+                          &FIO___REDIS_RESP3_CALLBACKS,
+                          parts[i] + r.consumed,
+                          FIO_STRLEN(parts[i]) - r.consumed);
+      FIO_ASSERT(!r.err && r.obj && fiobj2i((FIOBJ)r.obj) == 8,
+                 "second FIFO reply must not steal attribute value");
+      fiobj_free((FIOBJ)r.obj);
+    }
+  }
+}
+
+static void test_redis_nested_attribute_metadata_cleanup(void) {
+  fprintf(stderr, "* Testing Redis nested attribute metadata cleanup...\n");
+  /* Metadata values may themselves be aggregates; nested attributes must
+   * discard their strings without leaking or shifting the array boundary. */
+  const char *wire = "*1\r\n|1\r\n+k\r\n*2\r\n$1\r\na\r\n"
+                     "|1\r\n+x\r\n+y\r\n$1\r\nb\r\n:7\r\n:8\r\n";
+  fio___redis_parse_state_s ps = {.payload_limit = 512};
+  fio_resp3_parser_s p = {.udata = &ps};
+  fio_resp3_result_s r =
+      fio_resp3_parse(&p, &FIO___REDIS_RESP3_CALLBACKS, wire, FIO_STRLEN(wire));
+  FIO_ASSERT(!r.err && r.obj && r.consumed == FIO_STRLEN(wire) - 4,
+             "nested metadata must leave exactly the second FIFO reply");
+  FIOBJ arr = (FIOBJ)r.obj;
+  FIO_ASSERT(FIOBJ_TYPE(arr) == FIOBJ_T_ARRAY && fiobj_array_count(arr) == 1 &&
+                 fiobj2i(fiobj_array_get(arr, 0)) == 7,
+             "metadata aggregate cannot consume reply element");
+  fiobj_free(arr);
+
+  /* Reconnect with partial metadata at three different ownership points:
+   * pending key, nested container, and in-progress streamed value. */
+  const char *partial[] = {
+      "*1\r\n|1\r\n+k\r\n",
+      "*1\r\n|1\r\n+k\r\n*2\r\n$1\r\na\r\n",
+      "*1\r\n|1\r\n+k\r\n$?\r\n;3\r\nab",
+  };
+  for (size_t i = 0; i < sizeof(partial) / sizeof(*partial); ++i) {
+    fio_redis_connection_s conn = {0};
+    conn.ps.payload_limit = 512;
+    conn.parser.udata = &conn.ps;
+    r = fio_resp3_parse(&conn.parser,
+                        &FIO___REDIS_RESP3_CALLBACKS,
+                        partial[i],
+                        FIO_STRLEN(partial[i]));
+    FIO_ASSERT(!r.err && !r.obj && r.consumed == FIO_STRLEN(partial[i]),
+               "partial metadata %zu should remain owned by parser",
+               i);
+    FIO_ASSERT(conn.parser.depth >= 2 && conn.ps.msg_total,
+               "partial metadata %zu should have registered contexts",
+               i);
+    if (i == 2)
+      FIO_ASSERT(
+          conn.parser.streaming_string && conn.parser.streaming_string_ctx &&
+              conn.parser.streaming_string_ctx != FIO___REDIS_PS_SENTINEL,
+          "split metadata string must be resettable");
+    fio___redis_connection_reset(&conn);
+    FIO_ASSERT(!conn.parser.depth && !conn.parser.streaming_string &&
+                   !conn.ps.msg_total && !conn.ps.limit_exceeded,
+               "reconnect must free all partial metadata state");
+  }
+}
+
+static void test_rejected_context_redis_budget(void) {
+  fprintf(stderr, "* Testing Redis rejected container callback ownership...\n");
+  fio___redis_parse_state_s ps = {.payload_limit = 4096};
+  fio_resp3_parser_s p = {.udata = &ps};
+  fio_resp3_result_s r =
+      fio_resp3_parse(&p,
+                      &FIO___REDIS_RESP3_CALLBACKS,
+                      "%4611686018427387904\r\n",
+                      FIO_STRLEN("%4611686018427387904\r\n"));
+  FIO_ASSERT(r.err && !r.obj && !ps.msg_total,
+             "invalid map count must reject before Redis allocates context");
+  redis_test_parser_cleanup(&p);
+
+  ps = (fio___redis_parse_state_s){.payload_limit = 4096};
+  p = (fio_resp3_parser_s){.udata = &ps};
+  for (size_t i = 0; i < FIO_RESP3_MAX_NESTING; ++i) {
+    r = fio_resp3_parse(&p, &FIO___REDIS_RESP3_CALLBACKS, "*1\r\n", 4);
+    FIO_ASSERT(!r.err && !r.obj && r.consumed == 4,
+               "accepted nesting level %zu",
+               i);
+  }
+  FIO_ASSERT(p.depth == FIO_RESP3_MAX_NESTING,
+             "precondition: parser nesting is full");
+  size_t before = ps.msg_total;
+  r = fio_resp3_parse(&p, &FIO___REDIS_RESP3_CALLBACKS, "*1\r\n", 4);
+  FIO_ASSERT(r.err && !r.obj && ps.msg_total == before,
+             "depth rejection must not allocate/charge orphan context");
+  /* Redis disconnect frees only registered stack frames. */
+  redis_test_parser_cleanup(&p);
 }
 
 static void test_payload_limit_oversize_declared(void) {
@@ -576,13 +769,14 @@ static void test_hello_reply_routing(void) {
 
   /* The HELLO callback accepts a hash reply - engine keeps running */
   fio_redis_engine_s engine = {0};
-  engine.running = 1;
+  engine.state = FIO_REDIS_STATE_CONNECTING;
   fio___redis_on_hello_reply(&engine.engine, hello_reply, NULL);
-  FIO_ASSERT(engine.running == 1, "HELLO success must keep the engine up");
+  FIO_ASSERT(engine.state == FIO_REDIS_STATE_CONNECTED,
+             "HELLO success must mark the engine connected");
   fiobj_free(hello_reply);
 
   /* HELLO failure (-ERR, e.g. Redis < 6.0): a string, NOT a hash -> hard
-   * engine error (running cleared, no RESP2 fallback).
+   * engine error (ERROR state, no RESP2 fallback).
    * NOTE: the canned -ERR wire below mimics a live server reply, so the
    * WARNING/ERROR log lines it produces are expected test output. */
   fprintf(stderr,
@@ -600,14 +794,14 @@ static void test_hello_reply_routing(void) {
              "HELLO failure reply is not a hash");
   FIO_ASSERT(!ps.is_push, "HELLO -ERR is a reply, not a push frame");
   fio___redis_on_hello_reply(&engine.engine, (FIOBJ)r.obj, NULL);
-  FIO_ASSERT(engine.running == 0,
+  FIO_ASSERT(engine.state == FIO_REDIS_STATE_ERROR,
              "HELLO failure must be a hard engine error");
   fiobj_free((FIOBJ)r.obj);
 
   /* Disconnected reply (FIOBJ_INVALID) is also a hard error */
-  engine.running = 1;
+  engine.state = FIO_REDIS_STATE_CONNECTING;
   fio___redis_on_hello_reply(&engine.engine, FIOBJ_INVALID, NULL);
-  FIO_ASSERT(engine.running == 0, "HELLO INVALID reply -> hard error");
+  FIO_ASSERT(engine.state == FIO_REDIS_STATE_ERROR, "HELLO INVALID reply -> hard error");
 }
 
 static fio_redis_engine_s *test_redis_engine_new(void);
@@ -707,12 +901,140 @@ static void test_queue_cmd_bytes_order(void) {
   fio___redis_free(r);
 }
 
+typedef struct {
+  fio_pubsub_engine_s *engine;
+  fio_redis_state_e expected;
+} redis_state_query_s;
+
+static void *test_redis_state_thread(void *arg) {
+  redis_state_query_s *q = (redis_state_query_s *)arg;
+  FIO_ASSERT(fio_redis_state(q->engine) == q->expected,
+             "state snapshot must be callable from a different thread");
+  return NULL;
+}
+
+static void test_redis_state_other_thread(fio_redis_engine_s *r,
+                                         fio_redis_state_e expected) {
+  redis_state_query_s q = {.engine = fio_redis_dup(&r->engine),
+                           .expected = expected};
+  fio_thread_t thread;
+  FIO_ASSERT(!fio_thread_create(&thread, test_redis_state_thread, &q),
+             "couldn't create state-query thread");
+  FIO_ASSERT(!fio_thread_join(&thread), "couldn't join state-query thread");
+  fio_redis_free(q.engine); /* stopped reactor: release on the main thread */
+}
+
+typedef struct {
+  uintptr_t thread;
+  size_t calls;
+} redis_release_result_s;
+
+static redis_release_result_s redis_release_results[4];
+static uintptr_t redis_release_main_thread;
+static fio_redis_engine_s *redis_release_retained;
+
+static void test_redis_release_callback(fio_pubsub_engine_s *engine,
+                                        FIOBJ reply,
+                                        void *udata) {
+  redis_release_result_s *result = (redis_release_result_s *)udata;
+  FIO_ASSERT(engine && reply == FIOBJ_INVALID,
+             "destruction must fail the queued command");
+  result->thread = fio_thread_nid();
+  ++result->calls;
+}
+
+static fio_redis_engine_s *test_redis_release_engine(size_t index) {
+  fio_redis_engine_s *r = test_redis_engine_new();
+  static const char ping[] = "*1\r\n$4\r\nPING\r\n";
+  FIO_ASSERT(fio___redis_queue_cmd_bytes(r,
+                                          ping,
+                                          sizeof(ping) - 1,
+                                          test_redis_release_callback,
+                                          &redis_release_results[index],
+                                          1),
+             "couldn't queue release observer");
+  return r;
+}
+
+static void *test_redis_release_worker(void *arg) {
+  FIO_ASSERT(fio_thread_nid() != redis_release_main_thread,
+             "release worker must be a different thread");
+  fio_redis_free((fio_pubsub_engine_s *)arg);
+  return NULL;
+}
+
+static void test_redis_release_finish(void *u1, void *u2) {
+  (void)u1, (void)u2;
+  for (size_t i = 0; i < 3; ++i)
+    FIO_ASSERT(redis_release_results[i].calls == 1 &&
+                   redis_release_results[i].thread == redis_release_main_thread,
+               "engine %zu must be destroyed once on the main thread", i);
+  fio_io_stop();
+  fio_redis_engine_s *r = test_redis_release_engine(3);
+  fio_redis_free(&r->engine);
+  FIO_ASSERT(redis_release_results[3].calls == 1 &&
+                 redis_release_results[3].thread == redis_release_main_thread,
+             "release after stop must be immediate on the main thread");
+}
+
+static void test_redis_release_after_tasks(void *u1, void *u2) {
+  (void)u1, (void)u2;
+  FIO_ASSERT(fio___redis_references(redis_release_retained) == 1,
+             "release task must decrement exactly once");
+  FIO_ASSERT(redis_release_results[2].calls == 1 &&
+                 redis_release_results[2].thread == redis_release_main_thread,
+             "worker's final release must destroy on the main IO thread");
+  fio_redis_free(&redis_release_retained->engine);
+  redis_release_retained = NULL;
+  FIO_ASSERT(!redis_release_results[1].calls,
+             "main IO thread releases must also be deferred while running");
+  fio_io_defer(test_redis_release_finish, NULL, NULL);
+}
+
+static void test_redis_release_on_start(void *unused) {
+  (void)unused;
+  FIO_ASSERT(fio_io_is_running(), "release test requires a running reactor");
+  fio_redis_engine_s *worker_engine = test_redis_release_engine(2);
+  fio_thread_t thread;
+  FIO_ASSERT(!fio_thread_create(&thread,
+                                test_redis_release_worker,
+                                &worker_engine->engine),
+             "couldn't create release worker");
+  FIO_ASSERT(!fio_thread_join(&thread), "couldn't join release worker");
+  FIO_ASSERT(!redis_release_results[2].calls,
+             "worker release must not destroy before the main queue runs");
+  redis_release_retained = test_redis_release_engine(1);
+  fio_redis_dup(&redis_release_retained->engine);
+  fio_redis_free(&redis_release_retained->engine);
+  FIO_ASSERT(fio___redis_references(redis_release_retained) == 2,
+             "queued release must keep the transferred reference alive");
+  fio_io_defer(test_redis_release_after_tasks, NULL, NULL);
+}
+
+static void test_redis_release_thread(void) {
+  fprintf(stderr, "* Testing Redis release thread and transferred references...\n");
+  redis_release_main_thread = fio_thread_nid();
+  FIO_MEMSET(redis_release_results, 0, sizeof(redis_release_results));
+  FIO_ASSERT(!fio_io_is_running(), "direct release requires a stopped reactor");
+  fio_redis_free(NULL);
+  fio_redis_engine_s *r = test_redis_release_engine(0);
+  fio_redis_free(&r->engine);
+  FIO_ASSERT(redis_release_results[0].calls == 1 &&
+                 redis_release_results[0].thread == redis_release_main_thread,
+             "stopped release must destroy immediately on the main thread");
+  fio_state_callback_add(FIO_CALL_ON_START, test_redis_release_on_start, NULL);
+  fio_io_start(0);
+  fio_state_callback_remove(FIO_CALL_ON_START, test_redis_release_on_start, NULL);
+  fio_queue_perform_all(fio_io_queue());
+  fprintf(stderr, "* Redis direct / main-task / worker-task release: OK\n");
+}
+
 static void test_redis_state(void) {
   fprintf(stderr, "* Testing Redis connection state...\n");
 
   fio_redis_engine_s *r = test_redis_engine_new();
-  FIO_ASSERT(fio_redis_state(NULL) == FIO_REDIS_STATE_ERROR,
-             "NULL engine state must be an error");
+  FIO_ASSERT(fio_redis_state(NULL) == FIO_REDIS_STATE_STOPPED,
+             "NULL engine state must be stopped");
   FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTING,
              "detached engine must be connecting");
 
@@ -721,18 +1043,35 @@ static void test_redis_state(void) {
              "io assigned before on_attach (not ready) must be connecting");
 
   r->conn.ready = 1;
-  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTED,
-             "attached engine without HELLO must be connected in test setup");
-
-  fio_redis_cmd_s hello = {.callback = fio___redis_on_hello_reply};
-  FIO_LIST_PUSH(&r->cmd_queue, &hello.node);
   FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTING,
-             "queued HELLO must keep state connecting");
-  FIO_LIST_REMOVE(&hello.node);
-
-  r->running = 0;
+             "socket readiness alone must not finish HELLO");
+  FIOBJ hello = fiobj_hash_new();
+  fio___redis_on_hello_reply(&r->engine, hello, NULL);
+  fiobj_free(hello);
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTED,
+             "successful HELLO must mark the engine connected");
+  /* State observation must not follow mutable queue nodes. */
+  r->cmd_queue.next = NULL;
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTED,
+             "state query must not traverse the command queue");
+  test_redis_state_other_thread(r, FIO_REDIS_STATE_CONNECTED);
+  r->cmd_queue = FIO_LIST_INIT(r->cmd_queue);
+  r->conn.io = NULL;
+  fio___redis_on_close_internal(r, &r->conn);
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_CONNECTING,
+             "connection loss must return to connecting");
+  test_redis_state_other_thread(r, FIO_REDIS_STATE_CONNECTING);
+  fio___redis_on_hello_reply(&r->engine, FIOBJ_INVALID, NULL);
   FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_ERROR,
-             "stopped engine state must be an error");
+             "failed engine state must be error");
+  test_redis_state_other_thread(r, FIO_REDIS_STATE_ERROR);
+  fio___redis_on_close_internal(r, &r->conn);
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_ERROR,
+             "closing after HELLO failure must preserve the error");
+  r->state = FIO_REDIS_STATE_STOPPED;
+  FIO_ASSERT(fio_redis_state(&r->engine) == FIO_REDIS_STATE_STOPPED,
+             "stopped and failed engines must be distinct");
+  test_redis_state_other_thread(r, FIO_REDIS_STATE_STOPPED);
   r->conn.io = NULL;
   fio___redis_free(r);
 }
@@ -1068,8 +1407,8 @@ static void test_resubscribe_engine_guards(void) {
   r->attached = 1;
   fio___redis_resubscribe(r);
 
-  /* Not running: no-op. */
-  r->running = 0;
+  /* Stopped: no-op. */
+  r->state = FIO_REDIS_STATE_STOPPED;
   fio___redis_resubscribe(r);
 
   fio___redis_free(r);
@@ -1134,7 +1473,7 @@ static fio_redis_engine_s *test_redis_engine_new(void) {
   FIO_LEAK_COUNTER_ON_ALLOC(fio___redis_engine);
   *r = (fio_redis_engine_s){
       .cmd_queue = FIO_LIST_INIT(r->cmd_queue),
-      .running = 1,
+      .state = FIO_REDIS_STATE_CONNECTING,
   };
   r->conn.ps.payload_limit = FIO___REDIS_DEFAULT_PAYLOAD_LIMIT;
   r->conn.parser.udata = &r->conn.ps;
@@ -1153,8 +1492,114 @@ static void test_redis_feed(fio_redis_engine_s *r,
   fio___redis_parse_buffered(r, &r->conn, r->buf, NULL);
 }
 
+static void test_chunked_large_bounded_buffer(void) {
+  fprintf(stderr, "* Testing Redis >64KiB chunk bounded-buffer progress...\n");
+  enum { N = FIO_REDIS_READ_BUFFER + 4096 };
+  fio_redis_engine_s *r = test_redis_engine_new();
+  char hdr[40];
+  int header_len = snprintf(hdr, sizeof(hdr), "$?\r\n;%u\r\n", (unsigned)N);
+  FIO_ASSERT(header_len > 0 && (size_t)header_len < sizeof(hdr),
+             "chunk header formatting failed");
+  uint8_t *wire = (uint8_t *)FIO_MEM_REALLOC(NULL, 0,
+                                              (size_t)header_len + N + 6,
+                                              0);
+  FIO_ASSERT_ALLOC(wire);
+  FIO_MEMCPY(wire, hdr, (size_t)header_len);
+  FIO_MEMSET(wire + header_len, 'x', N);
+  FIO_MEMCPY(wire + header_len + N, "\r\n;0\r\n", 6);
+  size_t wire_len = (size_t)header_len + N + 6;
+  size_t fed = 0;
+  while (fed < wire_len) {
+    size_t avail = FIO_REDIS_READ_BUFFER - r->conn.buf_pos;
+    FIO_ASSERT(avail, "valid large chunk must not stall the bounded read buffer");
+    size_t n = wire_len - fed < avail ? wire_len - fed : avail;
+    test_redis_feed(r, wire + fed, n);
+    fed += n;
+    FIO_ASSERT(r->conn.buf_pos < FIO_REDIS_READ_BUFFER,
+               "Redis must drain bytes while chunk is incomplete");
+  }
+  FIO_ASSERT(!r->conn.parser.streaming_string && !r->conn.buf_pos &&
+                 !r->conn.ps.msg_total && !r->conn.ps.limit_exceeded,
+             "large chunk must finish within bounded buffer and budget");
+  FIO_MEM_FREE(wire, (size_t)header_len + N + 6);
+  fio___redis_free(r);
+}
+
 static int test_ptr_in_buf(fio_redis_engine_s *r, const uint8_t *ptr) {
   return ptr >= r->buf && ptr < r->buf + FIO_REDIS_READ_BUFFER;
+}
+
+static void test_push_capture_attributed_elements(void) {
+  fprintf(stderr, "* Testing Redis attributed push capture isolation...\n");
+  pub_log_reset();
+  fio_redis_engine_s *r = test_redis_engine_new();
+  /* Attribute strings before verb/channel/payload must never classify or
+   * publish. A nested metadata array and nested attribute exercise ownership.
+   */
+  const char *wire = ">3\r\n"
+                     "|1\r\n+verb\r\n+message\r\n$7\r\nmessage\r\n"
+                     "|1\r\n+chan\r\n*2\r\n$12\r\nwrongchannel\r\n"
+                     "|1\r\n+nested\r\n+metadata\r\n+ignored\r\n"
+                     "$4\r\nchan\r\n"
+                     "|1\r\n+payload\r\n$?\r\n;12\r\nwrongpayload\r\n;0\r\n"
+                     "$5\r\nhello\r\n";
+  test_redis_feed(r, wire, FIO_STRLEN(wire));
+  FIO_ASSERT(pub_log.count == 1 && pub_log.ch_len[0] == 4 &&
+                 pub_log.msg_len[0] == 5 &&
+                 !FIO_MEMCMP(pub_log.ch_copy[0], "chan", 4) &&
+                 !FIO_MEMCMP(pub_log.msg_copy[0], "hello", 5),
+             "attribute metadata must not classify verb/channel/payload");
+  FIO_ASSERT(!r->conn.ps.capture && !r->conn.ps.attr_depth &&
+                 !r->conn.ps.msg_total && !r->conn.parser.depth,
+             "completed attributed push must reset capture state");
+  pub_log_reset();
+  fio___redis_free(r);
+
+  /* Reconnect while attributed push metadata is incomplete: active string
+   * and pending attribute key must be discarded without publishing. */
+  pub_log_reset();
+  r = test_redis_engine_new();
+  const char *partial = ">3\r\n|1\r\n+key\r\n$5000\r\npart";
+  test_redis_feed(r, partial, FIO_STRLEN(partial));
+  FIO_ASSERT(!pub_log.count && r->conn.ps.capture && r->conn.ps.attr_depth &&
+                 r->conn.parser.streaming_string,
+             "partial push metadata must remain owned until reconnect");
+  fio___redis_connection_reset(&r->conn);
+  FIO_ASSERT(!pub_log.count && !r->conn.ps.capture && !r->conn.ps.attr_depth &&
+                 !r->conn.parser.depth && !r->conn.parser.streaming_string &&
+                 !r->conn.ps.msg_total,
+             "reconnect must clear partial push attribute state");
+  pub_log_reset();
+  fio___redis_free(r);
+
+  /* Active zero-copy capture uses &ps.cur, not a FIOBJ. */
+  r = test_redis_engine_new();
+  partial = ">3\r\n$5000\r\npart";
+  test_redis_feed(r, partial, FIO_STRLEN(partial));
+  FIO_ASSERT(r->conn.parser.streaming_string_ctx == &r->conn.ps.cur,
+             "test must reach the in-progress push capture context");
+  fio___redis_connection_reset(&r->conn);
+  fio___redis_free(r);
+
+  /* Chunked capture metadata must still consume its per-chunk budget. */
+  r = test_redis_engine_new();
+  r->conn.ps.payload_limit = 96;
+  partial = ">3\r\n|1\r\n+k\r\n$?\r\n;1000\r\nA";
+  test_redis_feed(r, partial, FIO_STRLEN(partial));
+  FIO_ASSERT(r->conn.ps.limit_exceeded,
+             "chunked metadata cannot bypass the payload budget");
+  fio___redis_connection_reset(&r->conn);
+  fio___redis_free(r);
+
+  /* Budget rejection uses a non-FIOBJ sentinel until reset. */
+  r = test_redis_engine_new();
+  r->conn.ps.payload_limit = 64;
+  partial = "$5000\r\nA";
+  test_redis_feed(r, partial, FIO_STRLEN(partial));
+  FIO_ASSERT(r->conn.parser.streaming_string_ctx == FIO___REDIS_PS_SENTINEL,
+             "test must reach the budget sentinel");
+  fio___redis_connection_reset(&r->conn);
+  fio___redis_free(r);
 }
 
 static void test_push_capture_zero_copy(void) {
@@ -1864,7 +2309,7 @@ static int fio___redis_test_rof_poll(void *u1, void *u2) {
     return -1; /* test done - cancel this timer */
   if (fio___redis_test_rof.attempts >= 2) {
     /* A second connection reached the listener: loss detection AND the
-     * 1s retry are both proven. Destroy now: running=0 suppresses any
+     * 1s retry are both proven. Destroy now: state=STOPPED suppresses any
      * further retry and destroy closes the in-flight io. */
     fio_redis_free((fio_pubsub_engine_s *)r);
     fio___redis_test_rof.engine = NULL;
@@ -1939,6 +2384,11 @@ int main(void) {
   test_pubsub_command_builder();
   test_subscribe_command_builder();
   test_resp3_reply_to_fiobj();
+  test_nested_attribute_reply_accounting();
+  test_redis_nested_attribute_metadata_cleanup();
+  test_chunked_invalid_token_keeps_budget();
+  test_chunked_fragmented_budget();
+  test_rejected_context_redis_budget();
   test_payload_limit_oversize_declared();
   test_payload_limit_cumulative_strings();
   test_payload_limit_ok_and_reset();
@@ -1948,12 +2398,15 @@ int main(void) {
   test_verb_should_wait();
   test_queue_cmd_bytes_order();
   test_redis_state();
+  test_redis_release_thread();
   test_push_reply_frame_routing();
   test_push_confirmation_ignored();
   test_resubscribe_batch_bytes();
   test_resubscribe_batch_flush();
   test_resubscribe_batch_oversized();
   test_resubscribe_engine_guards();
+  test_chunked_large_bounded_buffer();
+  test_push_capture_attributed_elements();
   test_push_capture_zero_copy();
   test_push_capture_split_payload();
   test_push_capture_temp_1mb();

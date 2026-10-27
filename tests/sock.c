@@ -3,7 +3,8 @@ Test - Socket helpers (004 sock.h)
 
 Correctness coverage for fio_sock_open, fio_sock_open2, fio_sock_accept,
 fio_sock_read/write, fio_sock_dup, fio_sock_set_non_block, fio_sock_wait_io,
-fio_sock_socketpair, fio_sock_peer_addr, and fio_sock_maximize_limits.
+fio_sock_socketpair, fio_sock_addr, fio_sock_peer_addr, fio___sock_addr2txt,
+and fio_sock_maximize_limits.
 
 All roundtrips use in-process loopback or socketpair; no external processes.
 ***************************************************************************** */
@@ -19,11 +20,259 @@ All roundtrips use in-process loopback or socketpair; no external processes.
 #define FIO___TEST_SOCK_ERRNO() errno
 #endif
 
+/* Compare explicit lengths and the terminator, including after ring reuse.
+ * Count failures so one broken format does not hide the other address cases. */
+static size_t test_sock_addr2txt_expect(struct sockaddr *addr,
+                                        socklen_t len,
+                                        bool with_port,
+                                        const char *expected,
+                                        size_t expected_len) {
+  fio_buf_info_s actual = fio___sock_addr2txt(addr, len, with_port);
+  if (!expected) {
+    if (!actual.buf && !actual.len)
+      return 0;
+  } else if (actual.buf && actual.len == expected_len &&
+             !memcmp(actual.buf, expected, expected_len) &&
+             !actual.buf[expected_len]) {
+    return 0;
+  }
+  fprintf(stderr,
+          "addr2txt mismatch (family=%u, addrlen=%zu, with_port=%u): "
+          "expected \"%.*s\" (%zu bytes), got \"%.*s\" (%zu bytes)\n",
+          (unsigned)addr->sa_family,
+          (size_t)len,
+          (unsigned)with_port,
+          (int)expected_len,
+          expected ? expected : "",
+          expected_len,
+          (int)actual.len,
+          actual.buf ? actual.buf : "",
+          actual.len);
+  return 1;
+}
+
+/* Synthetic addresses need neither network access nor AF_UNIX runtime support.
+ */
+static void test_sock_addr2txt(void) {
+  size_t failures = 0;
+  static const struct {
+    const char *host;
+    uint8_t bytes[16];
+    bool ipv6;
+  } hosts[] = {
+      {"0.0.0.0", {0}, false},
+      {"127.0.0.1", {127, 0, 0, 1}, false},
+      {"192.0.2.10", {192, 0, 2, 10}, false},
+      {"255.255.255.255", {255, 255, 255, 255}, false},
+      {"::", {0}, true},
+      {"::1", {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}, true},
+      {"2001:db8::1",
+       {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1},
+       true},
+      {"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+       {255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255,
+        255},
+       true},
+  };
+  static const uint16_t ports[] = {0, 1, 80, 443, 54321, 65535};
+
+  for (size_t i = 0; i < sizeof(hosts) / sizeof(*hosts); ++i) {
+    for (size_t j = 0; j < sizeof(ports) / sizeof(*ports); ++j) {
+      union {
+        struct sockaddr_in v4;
+        struct sockaddr_in6 v6;
+      } addr = {0};
+      socklen_t len;
+      if (hosts[i].ipv6) {
+        addr.v6.sin6_family = AF_INET6;
+        addr.v6.sin6_port = htons(ports[j]);
+        FIO_MEMCPY(&addr.v6.sin6_addr, hosts[i].bytes, 16);
+        len = sizeof(addr.v6);
+#if defined(__APPLE__)
+        addr.v6.sin6_len = (uint8_t)len;
+#endif
+      } else {
+        addr.v4.sin_family = AF_INET;
+        addr.v4.sin_port = htons(ports[j]);
+        FIO_MEMCPY(&addr.v4.sin_addr, hosts[i].bytes, 4);
+        len = sizeof(addr.v4);
+#if defined(__APPLE__)
+        addr.v4.sin_len = (uint8_t)len;
+#endif
+      }
+      char expected[64];
+      int n = snprintf(expected,
+                       sizeof(expected),
+                       hosts[i].ipv6 ? "[%s]:%u" : "%s:%u",
+                       hosts[i].host,
+                       (unsigned)ports[j]);
+      FIO_ASSERT(n > 0 && (size_t)n < sizeof(expected),
+                 "test endpoint must fit the expected buffer");
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            len,
+                                            true,
+                                            expected,
+                                            (size_t)n);
+      /* Host-only output must have neither brackets nor a stale port suffix. */
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            len,
+                                            false,
+                                            hosts[i].host,
+                                            strlen(hosts[i].host));
+    }
+  }
+
+  struct sockaddr unsupported = {0};
+  unsupported.sa_family = AF_UNSPEC;
+  for (unsigned with_port = 0; with_port < 2; ++with_port)
+    failures += test_sock_addr2txt_expect(&unsupported,
+                                          sizeof(unsupported),
+                                          with_port != 0,
+                                          NULL,
+                                          0);
+
+#ifdef AF_UNIX
+  {
+    struct sockaddr_un addr = {0};
+    const size_t offset = offsetof(struct sockaddr_un, sun_path);
+    static const char path[] = "/run/myapp/ipc.sock";
+    char longest[sizeof(addr.sun_path) + 1];
+    addr.sun_family = AF_UNIX;
+#if defined(__APPLE__)
+    addr.sun_len = sizeof(addr);
+#endif
+    for (unsigned with_port = 0; with_port < 2; ++with_port) {
+      /* Terminated pathname with nonzero padding after the terminator. */
+      FIO_MEMSET(addr.sun_path, 'x', sizeof(addr.sun_path));
+      FIO_MEMCPY(addr.sun_path, path, sizeof(path));
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            sizeof(addr),
+                                            with_port != 0,
+                                            path,
+                                            sizeof(path) - 1);
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            (socklen_t)(offset + sizeof(path)),
+                                            with_port != 0,
+                                            path,
+                                            sizeof(path) - 1);
+      /* No NUL inside the declared address: stop at the supplied length. */
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            (socklen_t)(offset + 4),
+                                            with_port != 0,
+                                            path,
+                                            4);
+      /* Unnamed endpoints must not expose bytes outside the address length. */
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            (socklen_t)offset,
+                                            with_port != 0,
+                                            NULL,
+                                            0);
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            0,
+                                            with_port != 0,
+                                            NULL,
+                                            0);
+      /* Empty and abstract-style names have no printable filesystem path. */
+      addr.sun_path[0] = '\0';
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            (socklen_t)(offset + 1),
+                                            with_port != 0,
+                                            NULL,
+                                            0);
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            sizeof(addr),
+                                            with_port != 0,
+                                            NULL,
+                                            0);
+      /* Exercise all sun_path bytes without relying on a trailing NUL. */
+      FIO_MEMSET(addr.sun_path, 'p', sizeof(addr.sun_path));
+      FIO_MEMSET(longest, 'p', sizeof(longest) - 1);
+      longest[sizeof(longest) - 1] = '\0';
+      const bool fits = sizeof(addr.sun_path) < FIO___SOCK_ADDR_CAP;
+      failures += test_sock_addr2txt_expect((struct sockaddr *)&addr,
+                                            sizeof(addr),
+                                            with_port != 0,
+                                            fits ? longest : NULL,
+                                            fits ? sizeof(longest) - 1 : 0);
+    }
+  }
+#endif
+
+  /* Mixed host-only and endpoint results must survive 128 shared-ring calls. */
+  {
+    struct sockaddr_in addr = {0};
+    fio_buf_info_s results[128];
+    char expected[128][32];
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(0x7F000001U);
+#if defined(__APPLE__)
+    addr.sin_len = sizeof(addr);
+#endif
+    for (size_t i = 0; i < 128; ++i) {
+      addr.sin_port = htons((uint16_t)i);
+      int n =
+          (i & 1)
+              ? snprintf(expected[i],
+                         sizeof(expected[i]),
+                         "127.0.0.1:%u",
+                         (unsigned)i)
+              : snprintf(expected[i], sizeof(expected[i]), "%s", "127.0.0.1");
+      FIO_ASSERT(n > 0 && (size_t)n < sizeof(expected[i]),
+                 "test ring endpoint must fit");
+      results[i] = fio___sock_addr2txt((struct sockaddr *)&addr,
+                                       sizeof(addr),
+                                       (i & 1) != 0);
+    }
+    for (size_t i = 0; i < 128; ++i) {
+      size_t n = strlen(expected[i]);
+      if (!results[i].buf || results[i].len != n ||
+          memcmp(results[i].buf, expected[i], n) || results[i].buf[n]) {
+        fprintf(stderr,
+                "addr2txt ring result %zu incorrect or overwritten\n",
+                i);
+        ++failures;
+      }
+      for (size_t j = 0; j < i; ++j)
+        FIO_ASSERT(results[i].buf != results[j].buf,
+                   "addr2txt ring must provide 128 distinct slots");
+    }
+    fio_buf_info_s wrapped =
+        fio___sock_addr2txt((struct sockaddr *)&addr, sizeof(addr), false);
+    FIO_ASSERT(wrapped.buf == results[0].buf,
+               "addr2txt ring should reuse the first slot on call 129");
+  }
+
+  FIO_ASSERT(!failures, "fio___sock_addr2txt failed %zu cases", failures);
+  fprintf(stderr, "* fio___sock_addr2txt: OK\n");
+}
+
 static void test_sock_invalid_wait(void) {
   short ev = fio_sock_wait_io(FIO_SOCKET_INVALID, POLLIN | POLLOUT, 0);
-  FIO_ASSERT(ev == 0,
-             "fio_sock_wait_io on invalid fd should return 0 (got %d)",
+#if defined(_WIN32)
+  FIO_ASSERT(ev == POLLNVAL,
+             "Windows invalid socket should return POLLNVAL (got %d)",
              (int)ev);
+#else
+  FIO_ASSERT(ev == 0 || ev == POLLNVAL,
+             "invalid socket should not report readiness (got %d)",
+             (int)ev);
+#endif
+  FIO_ASSERT(!FIO_SOCK_IS_OPEN(FIO_SOCKET_INVALID),
+             "invalid socket must not appear open");
 }
 
 static void test_sock_open_and_readwrite(void) {
@@ -73,28 +322,93 @@ static void test_sock_open_and_readwrite(void) {
   FIO_ASSERT(!memcmp(buf, payload, sizeof(payload) - 1),
              "payload mismatch");
 
-  fio_buf_info_s peer = fio_sock_peer_addr(cl);
-  FIO_ASSERT(peer.buf && peer.len, "peer address should be available");
-  FIO_ASSERT(peer.len == 9 && !memcmp(peer.buf, "127.0.0.1", 9) &&
-                 !peer.buf[9],
-             "peer address should be \"127.0.0.1\", got \"%.*s\"",
-             (int)peer.len,
-             peer.buf);
-  { /* 128 calls in a row use 128 separate (non-overlapping) slots */
+  /* Query ports independently: the client's source port is not the listener's
+   * port. Both are assigned by the OS, so neither can be hard-coded. */
+  char endpoints[2][32]; /* server, client */
+  size_t endpoint_lengths[2];
+  int n =
+      snprintf(endpoints[0], sizeof(endpoints[0]), "%s:%s", address, port_str);
+  FIO_ASSERT(n > 0 && (size_t)n < sizeof(endpoints[0]),
+             "server endpoint must fit");
+  endpoint_lengths[0] = (size_t)n;
+  addrlen = sizeof(addr);
+  FIO_ASSERT(!getsockname(cl, (struct sockaddr *)&addr, &addrlen),
+             "client getsockname failed: %s",
+             strerror(errno));
+  FIO_ASSERT(addr.ss_family == AF_INET, "expected IPv4 client socket");
+  n = snprintf(endpoints[1],
+               sizeof(endpoints[1]),
+               "%s:%u",
+               address,
+               (unsigned)ntohs(((struct sockaddr_in *)&addr)->sin_port));
+  FIO_ASSERT(n > 0 && (size_t)n < sizeof(endpoints[1]),
+             "client endpoint must fit");
+  endpoint_lengths[1] = (size_t)n;
+
+  const struct {
+    fio_socket_i fd;
+    size_t endpoint;
+    bool peer;
+  } checks[] = {
+      {srv, 0, false},
+      {accepted, 0, false},
+      {cl, 1, false},
+      {cl, 0, true},
+      {accepted, 1, true},
+  };
+  for (size_t i = 0; i < sizeof(checks) / sizeof(*checks); ++i) {
+    fio_buf_info_s r = checks[i].peer ? fio_sock_peer_addr(checks[i].fd, true)
+                                      : fio_sock_addr(checks[i].fd, true);
+    const size_t endpoint = checks[i].endpoint;
+    FIO_ASSERT(r.buf && r.len == endpoint_lengths[endpoint] &&
+                   !memcmp(r.buf, endpoints[endpoint], r.len) && !r.buf[r.len],
+               "%s result %zu should be \"%s\", got \"%.*s\"",
+               checks[i].peer ? "peer address" : "local address",
+               i,
+               endpoints[endpoint],
+               (int)r.len,
+               r.buf ? r.buf : "");
+  }
+  /* Host-only callers must not receive a port or IPv6 endpoint brackets. */
+  fio_buf_info_s host = fio_sock_addr(srv, false);
+  FIO_ASSERT(host.buf && host.len == strlen(address) &&
+                 !memcmp(host.buf, address, host.len) && !host.buf[host.len],
+             "local host-only address should omit port");
+  host = fio_sock_peer_addr(cl, false);
+  FIO_ASSERT(host.buf && host.len == strlen(address) &&
+                 !memcmp(host.buf, address, host.len) && !host.buf[host.len],
+             "peer host-only address should omit port");
+  fio_buf_info_s invalid = fio_sock_addr(FIO_SOCKET_INVALID, false);
+  FIO_ASSERT(!invalid.buf && !invalid.len,
+             "invalid socket has no local address");
+  invalid = fio_sock_peer_addr(FIO_SOCKET_INVALID, true);
+  FIO_ASSERT(!invalid.buf && !invalid.len,
+             "invalid socket has no peer address");
+
+  { /* Both functions share 128 separate (non-overlapping) output slots. */
     fio_buf_info_s r[128];
-    for (size_t i = 0; i < 128; ++i)
-      r[i] = fio_sock_peer_addr(i & 1 ? accepted : cl);
     for (size_t i = 0; i < 128; ++i) {
-      FIO_ASSERT(r[i].len == 9 && !memcmp(r[i].buf, "127.0.0.1", 9),
-                 "peer_addr result %zu overwritten: \"%.*s\"",
+      switch (i & 3) {
+      case 0: r[i] = fio_sock_addr(srv, true); break;
+      case 1: r[i] = fio_sock_peer_addr(cl, true); break;
+      case 2: r[i] = fio_sock_addr(cl, true); break;
+      case 3: r[i] = fio_sock_peer_addr(accepted, true); break;
+      }
+    }
+    for (size_t i = 0; i < 128; ++i) {
+      const size_t endpoint = (i >> 1) & 1;
+      FIO_ASSERT(r[i].buf && r[i].len == endpoint_lengths[endpoint] &&
+                     !memcmp(r[i].buf, endpoints[endpoint], r[i].len) &&
+                     !r[i].buf[r[i].len],
+                 "address result %zu incorrect or overwritten: \"%.*s\"",
                  i,
                  (int)r[i].len,
-                 r[i].buf);
+                 r[i].buf ? r[i].buf : "");
       for (size_t j = 0; j < i; ++j) {
         size_t d = (size_t)(r[i].buf > r[j].buf ? r[i].buf - r[j].buf
                                                 : r[j].buf - r[i].buf);
-        FIO_ASSERT(d >= 64,
-                   "peer_addr results %zu and %zu overlap (%zu bytes apart)",
+        FIO_ASSERT(d >= FIO___SOCK_ADDR_CAP,
+                   "address results %zu and %zu overlap (%zu bytes apart)",
                    j,
                    i,
                    d);
@@ -105,7 +419,7 @@ static void test_sock_open_and_readwrite(void) {
   fio_sock_close(accepted);
   fio_sock_close(cl);
   fio_sock_close(srv);
-  fprintf(stderr, "* TCP open/read/write/peer_addr: OK\n");
+  fprintf(stderr, "* TCP open/read/write/local and peer endpoints: OK\n");
 }
 
 static void test_sock_open2_url(void) {
@@ -285,6 +599,21 @@ static void test_sock_udp(void) {
 
 static void test_sock_unix(void) {
 #if defined(AF_UNIX)
+  /* Headers can advertise AF_UNIX even when the Winsock provider (e.g. Wine)
+   * cannot create one. Only skip that unsupported runtime case. */
+  fio_socket_i probe = socket(AF_UNIX, SOCK_STREAM, 0);
+  if (!FIO_SOCK_FD_ISVALID(probe)) {
+#if defined(_WIN32)
+    if (WSAGetLastError() == WSAEAFNOSUPPORT ||
+        WSAGetLastError() == WSAEPROTONOSUPPORT) {
+      fprintf(stderr, "* AF_UNIX socket: skipped (runtime unsupported)\n");
+      return;
+    }
+#endif
+    FIO_ASSERT(0, "AF_UNIX probe failed (socket_error=%d)",
+               FIO___TEST_SOCK_ERRNO());
+  }
+  fio_sock_close(probe);
 #if defined(P_tmpdir) && !defined(__MINGW32__)
   static const char *const path =
       P_tmpdir "/tmp_sock_testing_facil_io_cstl.sock";
@@ -469,6 +798,7 @@ static void test_sock_maximize_limits(void) {
 }
 
 int main(void) {
+  test_sock_addr2txt();
   test_sock_invalid_wait();
   test_sock_open_and_readwrite();
   test_sock_open2_url();

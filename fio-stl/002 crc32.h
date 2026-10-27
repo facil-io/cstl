@@ -1041,9 +1041,8 @@ Guard: SSE4.2 + PCLMULQDQ compile-time flags
 #elif defined(FIO___HAS_X86_INTRIN) && defined(__SSE4_2__) &&                  \
     defined(__PCLMUL__)
 
-#include <emmintrin.h>
-#include <smmintrin.h>
-#include <wmmintrin.h>
+/* Native intrinsics are provided by core; shadow mode supplies them via fx86.
+ * Do not include x86 compiler headers after fx86 has shadowed their names. */
 
 /* Folding constants — same bit-reflected values as the ARM path. */
 static const uint64_t fio___crc32_k1k2[2]
@@ -1057,10 +1056,11 @@ static const uint64_t fio___crc32_poly[2]
 
 /* Bulk-fold 64 bytes/iteration with 4 parallel __m128i accumulators.
  * Returns the folded 32-bit CRC; caller manages the 0xFFFFFFFF XOR. */
-__attribute__((target("sse4.2,pclmul"))) static uint32_t fio___crc32_x86_pclmul(
-    const uint8_t *p,
-    size_t len,
-    uint32_t crc) {
+#if !defined(FIO_FAKE_X86_SHADOW)
+__attribute__((target("sse4.2,pclmul")))
+#endif
+static uint32_t
+fio___crc32_x86_pclmul(const uint8_t *p, size_t len, uint32_t crc) {
   __m128i k1k2 = _mm_loadu_si128((const __m128i *)fio___crc32_k1k2);
   __m128i k3k4 = _mm_loadu_si128((const __m128i *)fio___crc32_k3k4);
   __m128i k5k0 = _mm_loadu_si128((const __m128i *)fio___crc32_k5k0);

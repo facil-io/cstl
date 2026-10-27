@@ -47,7 +47,7 @@ SFUNC void *fio_memchr(const void *buffer, const char token, size_t len);
  */
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len);
 
-/** An alternative to `strlen` - may raise Address Sanitation errors. */
+/** An alternative to `strlen`; stops at the first NUL byte. */
 SFUNC size_t fio_strlen(const char *str);
 
 /* *****************************************************************************
@@ -153,8 +153,15 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
     return d;
   }
 
+  /* Supported targets use flat, byte-addressed uintptr_t values. Compare
+   * ordered address distances, not unrelated pointers or wrapping ends. */
+  const uintptr_t dest_addr = (uintptr_t)d, src_addr = (uintptr_t)s;
+  const int no_overlap = (dest_addr < src_addr)
+                             ? (src_addr - dest_addr >= bytes)
+                             : (dest_addr - src_addr >= bytes);
+
   /* Fast path for small, non-overlapping copies (<=64 bytes) */
-  if (bytes <= 64 && (d + bytes <= s || s + bytes <= d)) {
+  if (bytes <= 64 && no_overlap) {
     if (bytes <= 8) {
       /* Handle 1-8 bytes with overlapping copies */
       if (bytes >= 4) {
@@ -190,14 +197,14 @@ SFUNC void *fio_memcpy(void *dest_, const void *src_, size_t bytes) {
    * NOTE: no "margin" shortcut here - the step size used by
    * fio___memcpy_unsafe_x may exceed any fixed margin, so any overlap at
    * all must take the buffered (memmove-safe) paths (ASAN/UB proof). */
-  if (s + bytes <= d || d + bytes <= s) {
-    return fio___memcpy_unsafe_x(d, s, bytes);
-  } else if (d < s) { /* memory overlaps at end (copy forward, use buffer) */
-    return fio___memcpy_buffered_x(d, s, bytes);
-  } else { /* memory overlaps at beginning, walk backwards (memmove) */
-    return fio___memcpy_buffered_reversed_x(d, s, bytes);
+  if (no_overlap) {
+    fio___memcpy_unsafe_x(d, s, bytes);
+  } else if (dest_addr < src_addr) { /* overlap at end: copy forward */
+    fio___memcpy_buffered_x(d, s, bytes);
+  } else { /* overlap at beginning: copy backwards */
+    fio___memcpy_buffered_reversed_x(d, s, bytes);
   }
-  return d;
+  return dest_;
 }
 
 /* *****************************************************************************
@@ -332,8 +339,17 @@ found_in_map:
   flag = u[i];
   r += i << 3;
 found_in_8:
+#if __BIG_ENDIAN__
+  /* Subtraction can mark a preceding 0x01 byte through borrow propagation.
+   * The flag proves a match exists, but is not an exact big-endian bitmap. */
+  for (i = 0; i < 8; ++i)
+    if (r[i] == token)
+      return (void *)(r + i);
+  return NULL;
+#else
   flag = fio_has_byte2bitmap(flag);
   return (void *)(r + fio_lsb_index_unsafe(flag));
+#endif
 }
 
 /* *****************************************************************************
@@ -346,22 +362,21 @@ FIO_SFUNC void *fio___memchr_sse2(const void *buffer,
                                   const char token,
                                   size_t len) {
   const uint8_t *r = (const uint8_t *)buffer;
-  const uint8_t *e = r + len;
   /* Broadcast token to all 16 bytes */
   const __m128i needle = _mm_set1_epi8(token);
 
   /* Handle unaligned head - process byte by byte until aligned */
-  while (((uintptr_t)r & 15) && r < e) {
+  while (((uintptr_t)r & 15) && len) {
     if (*r == (uint8_t)token)
       return (void *)r;
     ++r;
+    --len;
   }
-  if (r >= e)
+  if (!len)
     return NULL;
 
   /* Main loop: process 64 bytes (4x16) at a time for better throughput */
-  const uint8_t *e64 = e - 63;
-  while (r < e64) {
+  while (len >= 64) {
     __m128i v0 = _mm_load_si128((const __m128i *)(r));
     __m128i v1 = _mm_load_si128((const __m128i *)(r + 16));
     __m128i v2 = _mm_load_si128((const __m128i *)(r + 32));
@@ -390,24 +405,26 @@ FIO_SFUNC void *fio___memchr_sse2(const void *buffer,
       return (void *)(r + 48 + fio_lsb_index_unsafe((uint64_t)m3));
     }
     r += 64;
+    len -= 64;
   }
 
   /* Process remaining 16-byte chunks */
-  const uint8_t *e16 = e - 15;
-  while (r < e16) {
+  while (len >= 16) {
     __m128i v = _mm_load_si128((const __m128i *)r);
     __m128i cmp = _mm_cmpeq_epi8(v, needle);
     int mask = _mm_movemask_epi8(cmp);
     if (mask)
       return (void *)(r + fio_lsb_index_unsafe((uint64_t)mask));
     r += 16;
+    len -= 16;
   }
 
   /* Handle tail bytes */
-  while (r < e) {
+  while (len) {
     if (*r == (uint8_t)token)
       return (void *)r;
     ++r;
+    --len;
   }
   return NULL;
 }
@@ -419,22 +436,21 @@ FIO_SFUNC void *fio___memchr_avx2(const void *buffer,
                                   const char token,
                                   size_t len) {
   const uint8_t *r = (const uint8_t *)buffer;
-  const uint8_t *e = r + len;
   /* Broadcast token to all 32 bytes */
   const __m256i needle = _mm256_set1_epi8(token);
 
   /* Handle unaligned head - process byte by byte until 32-byte aligned */
-  while (((uintptr_t)r & 31) && r < e) {
+  while (((uintptr_t)r & 31) && len) {
     if (*r == (uint8_t)token)
       return (void *)r;
     ++r;
+    --len;
   }
-  if (r >= e)
+  if (!len)
     return NULL;
 
   /* Main loop: process 128 bytes (4x32) at a time for better throughput */
-  const uint8_t *e128 = e - 127;
-  while (r < e128) {
+  while (len >= 128) {
     __m256i v0 = _mm256_load_si256((const __m256i *)(r));
     __m256i v1 = _mm256_load_si256((const __m256i *)(r + 32));
     __m256i v2 = _mm256_load_si256((const __m256i *)(r + 64));
@@ -463,24 +479,26 @@ FIO_SFUNC void *fio___memchr_avx2(const void *buffer,
       return (void *)(r + 96 + fio_lsb_index_unsafe((uint64_t)m3));
     }
     r += 128;
+    len -= 128;
   }
 
   /* Process remaining 32-byte chunks */
-  const uint8_t *e32 = e - 31;
-  while (r < e32) {
+  while (len >= 32) {
     __m256i v = _mm256_load_si256((const __m256i *)r);
     __m256i cmp = _mm256_cmpeq_epi8(v, needle);
     int mask = _mm256_movemask_epi8(cmp);
     if (mask)
       return (void *)(r + fio_lsb_index_unsafe((uint64_t)mask));
     r += 32;
+    len -= 32;
   }
 
-  /* Handle tail bytes - fall through to SSE2 or scalar for remaining */
-  while (r < e) {
+  /* Handle tail bytes */
+  while (len) {
     if (*r == (uint8_t)token)
       return (void *)r;
     ++r;
+    --len;
   }
   return NULL;
 }
@@ -490,22 +508,21 @@ FIO_SFUNC void *fio___memchr_neon(const void *buffer,
                                   const char token,
                                   size_t len) {
   const uint8_t *r = (const uint8_t *)buffer;
-  const uint8_t *e = r + len;
   /* Broadcast token to all 16 bytes */
   const uint8x16_t needle = vdupq_n_u8((uint8_t)token);
 
   /* Handle unaligned head - process byte by byte until aligned */
-  while (((uintptr_t)r & 15) && r < e) {
+  while (((uintptr_t)r & 15) && len) {
     if (*r == (uint8_t)token)
       return (void *)r;
     ++r;
+    --len;
   }
-  if (r >= e)
+  if (!len)
     return NULL;
 
   /* Main loop: process 64 bytes (4x16) at a time for better throughput */
-  const uint8_t *e64 = e - 63;
-  while (r < e64) {
+  while (len >= 64) {
     uint8x16_t v0 = vld1q_u8(r);
     uint8x16_t v1 = vld1q_u8(r + 16);
     uint8x16_t v2 = vld1q_u8(r + 32);
@@ -546,11 +563,11 @@ FIO_SFUNC void *fio___memchr_neon(const void *buffer,
           return (void *)(r + 48 + i);
     }
     r += 64;
+    len -= 64;
   }
 
   /* Process remaining 16-byte chunks */
-  const uint8_t *e16 = e - 15;
-  while (r < e16) {
+  while (len >= 16) {
     uint8x16_t v = vld1q_u8(r);
     uint8x16_t cmp = vceqq_u8(v, needle);
     uint64x2_t cmp64 = vreinterpretq_u64_u8(cmp);
@@ -560,13 +577,15 @@ FIO_SFUNC void *fio___memchr_neon(const void *buffer,
           return (void *)(r + i);
     }
     r += 16;
+    len -= 16;
   }
 
   /* Handle tail bytes */
-  while (r < e) {
+  while (len) {
     if (*r == (uint8_t)token)
       return (void *)r;
     ++r;
+    --len;
   }
   return NULL;
 }
@@ -595,20 +614,14 @@ fio_strlen - (trust the compiler to optimize)
 ***************************************************************************** */
 
 /** An alternative to `strlen` - though really, strlen should be much better. */
-SFUNC FIO___ASAN_AVOID size_t fio_strlen(const char *str) {
+SFUNC size_t fio_strlen(const char *str) {
   if (FIO_UNLIKELY(!str))
     return 0;
-  /* set iterations to pointer alignment + impossibly high number */
-  const size_t iterations = ((~(uintptr_t)str) + 1) | (1ULL << 31);
-  /* marks the number of bytes since NUL */
-  size_t since_zero = 0;
-#define FIO___STRLEN_ACTION                                                    \
-  since_zero += ((!str[i]) | (!!since_zero)); /* runs inside loop */           \
-  if (since_zero)                             /* runs outside loop */          \
-    return i - since_zero;
-  FIO_FOR_UNROLL(iterations, 1, i, FIO___STRLEN_ACTION);
-#undef FIO___STRLEN_ACTION
-  return ~(size_t)0;
+  size_t len = 0;
+  /* No accessible size is supplied: even the byte after NUL may be invalid. */
+  while (str[len])
+    ++len;
+  return len;
 }
 
 /* *****************************************************************************
@@ -640,7 +653,7 @@ FIO_SFUNC int fio___memcmp7x(const void *restrict a_,
 }
 
 SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
-  unsigned r = 0;
+  int r = 0;
   if (!len)
     return r;
   if (a_ == b_)
@@ -649,7 +662,7 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   uint64_t la, lb;
   r = *a - *b;
   if (r)
-    return (int)r;
+    return (r > 0) - (r < 0);
 
   if (len > 255)
     while (len > 127) {
@@ -693,7 +706,9 @@ SFUNC int fio_memcmp(const void *a_, const void *b_, size_t len) {
   fio___memcmp_tst(32);
   fio___memcmp_tst(16);
   fio___memcmp_tst(8);
-  return fio___memcmp7x(a, b, len);
+#undef fio___memcmp_tst
+  r = fio___memcmp7x(a, b, len);
+  return (r > 0) - (r < 0);
 
 stop:
   while ((la = fio_buf2u64u(a)) == (lb = fio_buf2u64u(b))) {

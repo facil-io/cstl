@@ -20,6 +20,12 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 /* *****************************************************************************
 ChaCha20Poly1305 API
+
+No function in this module aborts or crashes on invalid arguments. A `NULL`
+`key`, `nonce` or `mac`, or a `NULL` `data` / `ad` with a non-zero length, is
+treated like over-limit input: functions return `-1` (encryption zeroes
+`data` and `mac`, decryption leaves `data` untouched, MAC-only functions zero
+a writable `mac`). A `NULL` buffer with zero length is valid.
 ***************************************************************************** */
 
 /**
@@ -31,14 +37,20 @@ ChaCha20Poly1305 API
  * * `ad`     MAY be omitted, will NOT be encrypted.
  * * `data`   MAY be omitted, WILL be encrypted.
  * * `mac`    MUST point to a buffer with (at least) 16 available bytes.
+ *
+ * A key/nonce pair MUST NEVER be reused.
+ *
+ * Returns `0` on success or `-1` if `len` exceeds the AEAD limit of
+ * (2^32 - 1) * 64 bytes. On error no keystream is used: `data` and `mac` are
+ * zeroed (no plaintext or valid tag is left behind).
  */
-SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
-                                     void *restrict data,
-                                     size_t len,
-                                     const void *ad, /* additional data */
-                                     size_t adlen,
-                                     const void *key,
-                                     const void *nonce);
+SFUNC int fio_chacha20_poly1305_enc(void *restrict mac,
+                                    void *restrict data,
+                                    size_t len,
+                                    const void *ad, /* additional data */
+                                    size_t adlen,
+                                    const void *key,
+                                    const void *nonce);
 
 /**
  * Performs an in-place decryption of `data` using ChaCha20 after authenticating
@@ -50,7 +62,8 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
  * * `data`   MAY be omitted, WILL be decrypted.
  * * `mac`    MUST point to a buffer where the 16 byte MAC is placed.
  *
- * Returns `-1` on error (authentication failed).
+ * Returns `-1` on error (authentication failed or `len` exceeds the AEAD
+ * limit of (2^32 - 1) * 64 bytes).
  */
 SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     void *restrict data,
@@ -60,6 +73,22 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *key,
                                     const void *nonce);
 
+/**
+ * Computes the 16 byte ChaCha20Poly1305 MAC of already encrypted `data`
+ * without decrypting it (the caller compares it with the received MAC).
+ *
+ * Returns `0` on success or `-1` on invalid arguments (see above) or if `len`
+ * exceeds the AEAD limit of (2^32 - 1) * 64 bytes. On error a writable `mac`
+ * is zeroed; callers MUST reject the message on `-1` and never compare it.
+ */
+SFUNC int fio_chacha20_poly1305_auth(void *restrict mac,
+                                     void *restrict data,
+                                     size_t len,
+                                     const void *ad, /* additional data */
+                                     size_t adlen,
+                                     const void *key,
+                                     const void *nonce);
+
 /* *****************************************************************************
 XChaCha20Poly1305 API (Extended Nonce - 24 bytes)
 ***************************************************************************** */
@@ -68,22 +97,26 @@ XChaCha20Poly1305 API (Extended Nonce - 24 bytes)
  * Performs an in-place encryption of `data` using XChaCha20 with additional
  * data, producing a 16 byte message authentication code (MAC) using Poly1305.
  *
- * XChaCha20 uses a 192-bit (24 byte) nonce, making it safe to use with
- * randomly-generated nonces without risk of nonce collision.
+ * XChaCha20 uses a 192-bit (24 byte) nonce, large enough for nonces generated
+ * by a cryptographically secure RNG (collision odds are negligible, ~2^-96
+ * after 2^48 messages). A key/nonce pair MUST NEVER be reused.
  *
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
  * * `nonce`  MUST point to a 192 bit long memory address (24 Bytes).
  * * `ad`     MAY be omitted, will NOT be encrypted.
  * * `data`   MAY be omitted, WILL be encrypted.
  * * `mac`    MUST point to a buffer with (at least) 16 available bytes.
+ *
+ * Returns `0` on success or `-1` if `len` exceeds the AEAD limit of
+ * (2^32 - 1) * 64 bytes (`data` and `mac` are zeroed on error).
  */
-SFUNC void fio_xchacha20_poly1305_enc(void *restrict mac,
-                                      void *restrict data,
-                                      size_t len,
-                                      const void *ad, /* additional data */
-                                      size_t adlen,
-                                      const void *key,
-                                      const void *nonce);
+SFUNC int fio_xchacha20_poly1305_enc(void *restrict mac,
+                                     void *restrict data,
+                                     size_t len,
+                                     const void *ad, /* additional data */
+                                     size_t adlen,
+                                     const void *key,
+                                     const void *nonce);
 
 /**
  * Performs an in-place decryption of `data` using XChaCha20 after
@@ -95,7 +128,8 @@ SFUNC void fio_xchacha20_poly1305_enc(void *restrict mac,
  * * `data`   MAY be omitted, WILL be decrypted.
  * * `mac`    MUST point to a buffer where the 16 byte MAC is placed.
  *
- * Returns `-1` on error (authentication failed).
+ * Returns `-1` on error (authentication failed or `len` exceeds the AEAD
+ * limit of (2^32 - 1) * 64 bytes).
  */
 SFUNC int fio_xchacha20_poly1305_dec(void *restrict mac,
                                      void *restrict data,
@@ -108,18 +142,22 @@ SFUNC int fio_xchacha20_poly1305_dec(void *restrict mac,
 /**
  * Performs an in-place encryption/decryption of `data` using XChaCha20.
  *
- * XChaCha20 uses a 192-bit (24 byte) nonce, making it safe to use with
- * randomly-generated nonces without risk of nonce collision.
+ * XChaCha20 uses a 192-bit (24 byte) nonce, large enough for nonces generated
+ * by a cryptographically secure RNG (collision odds are negligible, ~2^-96
+ * after 2^48 messages). A key/nonce pair MUST NEVER be reused.
  *
  * * `key`     MUST point to a 256 bit long memory address (32 Bytes).
  * * `nonce`   MUST point to a 192 bit long memory address (24 Bytes).
  * * `counter` is the block counter, usually 0 unless `data` is mid-cyphertext.
+ *
+ * Returns `0` on success or `-1` if the block counter would wrap
+ * (`counter + ceil(len / 64)` exceeds 2^32); `data` is zeroed on error.
  */
-SFUNC void fio_xchacha20(void *restrict data,
-                         size_t len,
-                         const void *key,
-                         const void *nonce,
-                         uint32_t counter);
+SFUNC int fio_xchacha20(void *restrict data,
+                        size_t len,
+                        const void *key,
+                        const void *nonce,
+                        uint32_t counter);
 
 /* *****************************************************************************
 Using ChaCha20 and Poly1305 separately
@@ -131,12 +169,16 @@ Using ChaCha20 and Poly1305 separately
  * * `key`    MUST point to a 256 bit long memory address (32 Bytes).
  * * `nonce` MUST point to a  96 bit long memory address (12 Bytes).
  * * `counter` is the block counter, usually 1 unless `data` is mid-cyphertext.
+ *
+ * Returns `0` on success or `-1` if the block counter would wrap
+ * (`counter + ceil(len / 64)` exceeds 2^32). On error no keystream is reused:
+ * `data` is zeroed (it may hold plaintext the caller ignored the error for).
  */
-SFUNC void fio_chacha20(void *restrict data,
-                        size_t len,
-                        const void *key,
-                        const void *nonce,
-                        uint32_t counter);
+SFUNC int fio_chacha20(void *restrict data,
+                       size_t len,
+                       const void *key,
+                       const void *nonce,
+                       uint32_t counter);
 
 /**
  * Given a Poly1305 256bit (32 byte) key, writes the authentication code for the
@@ -145,19 +187,45 @@ SFUNC void fio_chacha20(void *restrict data,
  * * `mac_dest` MUST point to a buffer with (at least) 16 available bytes.
  * * `message`  MAY be omitted.
  * * `ad`       MAY be omitted (additional data).
- * * `key`      MUST point to a 256 bit long memory address (32 Bytes).
+ * * `key`      MUST point to a 256 bit long memory address (32 Bytes); a
+ *               Poly1305 key MUST only be used once (one-time key).
+ *
+ * Returns `0` on success or `-1` on invalid arguments (`NULL` `mac_dest` or
+ * `key`, or `NULL` `message` / `ad` with a non-zero length). On error nothing
+ * is read and a writable `mac_dest` is zeroed (never a MAC computed with a
+ * fallback key); callers MUST reject the message on `-1` and never compare it.
  */
-SFUNC void fio_poly1305_auth(void *restrict mac_dest,
-                             void *restrict message,
-                             size_t len,
-                             const void *ad,
-                             size_t ad_len,
-                             const void *key256bits);
+SFUNC int fio_poly1305_auth(void *restrict mac_dest,
+                            void *restrict message,
+                            size_t len,
+                            const void *ad,
+                            size_t ad_len,
+                            const void *key256bits);
 
 /* *****************************************************************************
 ChaCha20Poly1305 Implementation
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+/* *****************************************************************************
+Public Argument Validation
+
+Public functions reject invalid pointers (instead of crashing or asserting).
+A `NULL` buffer is valid only when its length is zero. Functions without a
+`mac` / `nonce` argument pass `key` in its place (tested once, same result).
+***************************************************************************** */
+
+/* Tests that pointers are valid for their lengths (single branch for caller) */
+FIO_IFUNC int fio___chacha_args_ok(const void *mac,
+                                   const void *data,
+                                   size_t len,
+                                   const void *ad,
+                                   size_t adlen,
+                                   const void *key,
+                                   const void *nonce) {
+  return (mac != NULL) & (key != NULL) & (nonce != NULL) &
+         ((data != NULL) | (len == 0)) & ((ad != NULL) | (adlen == 0));
+}
 
 /* *****************************************************************************
 Poly1305 (authentication)
@@ -179,9 +247,7 @@ typedef struct {
 } FIO_ALIGN(64) fio___poly_s;
 
 FIO_IFUNC fio___poly_s fio___poly_init(const void *key256b) {
-  static const uint64_t defkey[4] = {0};
-  if (!key256b)
-    key256b = (const void *)defkey;
+  FIO_ASSERT_DEBUG(key256b, "Poly1305 key MUST NOT be NULL");
   uint64_t t0, t1;
   /* r &= 0xffffffc0ffffffc0ffffffc0fffffff */
   t0 = fio_buf2u64_le((uint8_t *)key256b + 0);
@@ -376,12 +442,18 @@ FIO_IFUNC void fio___poly_consume_msg(fio___poly_s *pl,
 }
 
 /* Given a Poly1305 key, writes a MAC into `mac_dest`. */
-SFUNC void fio_poly1305_auth(void *restrict mac,
-                             void *restrict msg,
-                             size_t len,
-                             const void *ad,
-                             size_t ad_len,
-                             const void *key) {
+SFUNC int fio_poly1305_auth(void *restrict mac,
+                            void *restrict msg,
+                            size_t len,
+                            const void *ad,
+                            size_t ad_len,
+                            const void *key) {
+  if (FIO_UNLIKELY(
+          !fio___chacha_args_ok(mac, msg, len, ad, ad_len, key, key))) {
+    if (mac) /* deterministic, never a MAC computed with a fallback key */
+      FIO_MEMSET(mac, 0, 16);
+    return -1;
+  }
   fio___poly_s pl = fio___poly_init(key);
   fio___poly_consume_msg(&pl, (uint8_t *)ad, ad_len);
   fio___poly_consume_msg(&pl, (uint8_t *)msg, len);
@@ -389,6 +461,7 @@ SFUNC void fio_poly1305_auth(void *restrict mac,
   fio_u2buf64_le(mac, pl.a[0]);
   fio_u2buf64_le(&((char *)mac)[8], pl.a[1]);
   fio_secure_zero(&pl, sizeof(pl));
+  return 0;
 }
 
 /* *****************************************************************************
@@ -770,11 +843,30 @@ Scalar 4-Block ChaCha20 variations end
 ***************************************************************************** */
 #endif /* FIO___HAS_ARM_INTRIN (scalar 4-block) */
 
-SFUNC void fio_chacha20(void *restrict data,
-                        size_t len,
-                        const void *key,
-                        const void *nonce,
-                        uint32_t counter) {
+/* Tests if `len` bytes starting at block `counter` fit the 32 bit counter. */
+FIO_IFUNC int fio___chacha_counter_ok(size_t len, uint32_t counter) {
+  uint64_t blocks = (uint64_t)(len >> 6) + ((len & 63) != 0);
+  return blocks <= (((uint64_t)1 << 32) - (uint64_t)counter);
+}
+
+/* Fails safely: no keystream is used, no plaintext or valid tag remains. */
+FIO_SFUNC int fio___chacha_fail(void *mac, void *data, size_t len) {
+  if (mac)
+    FIO_MEMSET(mac, 0, 16);
+  if (data && len)
+    FIO_MEMSET(data, 0, len);
+  return -1;
+}
+
+SFUNC int fio_chacha20(void *restrict data,
+                       size_t len,
+                       const void *key,
+                       const void *nonce,
+                       uint32_t counter) {
+  if (FIO_UNLIKELY(
+          !(fio___chacha_counter_ok(len, counter) &
+            fio___chacha_args_ok(key, data, len, NULL, 0, key, nonce))))
+    return fio___chacha_fail(NULL, data, len);
   fio_u512 c = fio___chacha_init(key, nonce, counter);
   for (size_t pos = 255; pos < len; pos += 256) {
     fio___chacha_vround20x4(c, (uint8_t *)data);
@@ -799,7 +891,10 @@ SFUNC void fio_chacha20(void *restrict data,
     fio_memcpy63x(dest.u64, data, len);
     fio___chacha_vround20(c, dest.u8);
     fio_memcpy63x(data, dest.u64, len);
+    fio_secure_zero(&dest, sizeof(dest));
   }
+  fio_secure_zero(&c, sizeof(c));
+  return 0;
 }
 
 /* *****************************************************************************
@@ -811,18 +906,23 @@ FIO_IFUNC fio_u512 fio___chacha20_mixround(fio_u512 c) {
   fio___chacha_vround20(c, k.u8);
   return k;
 }
-SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
-                                     void *restrict data,
-                                     size_t len,
-                                     const void *ad, /* additional data */
-                                     size_t adlen,
-                                     const void *key,
-                                     const void *nonce) {
+SFUNC int fio_chacha20_poly1305_enc(void *restrict mac,
+                                    void *restrict data,
+                                    size_t len,
+                                    const void *ad, /* additional data */
+                                    size_t adlen,
+                                    const void *key,
+                                    const void *nonce) {
+  if (FIO_UNLIKELY(
+          !(fio___chacha_counter_ok(len, 1) &
+            fio___chacha_args_ok(mac, data, len, ad, adlen, key, nonce))))
+    return fio___chacha_fail(mac, data, len);
   fio_u512 c = fio___chacha_init(key, nonce, 0);
   fio___poly_s pl;
   {
     fio_u512 c2 = fio___chacha20_mixround(c);
     pl = fio___poly_init(&c2);
+    fio_secure_zero(&c2, sizeof(c2));
   }
   ++c.u32[12]; /* block counter */
   for (size_t i = 31; i < adlen; i += 32) {
@@ -885,7 +985,9 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
         p[i] = 0;
       fio___poly_consume128bit(&pl, p, 1);
     }
+    fio_secure_zero(&dest, sizeof(dest));
   }
+  fio_secure_zero(&c, sizeof(c));
   {
     uint64_t mac_data[2] = {fio_ltole64(adlen), fio_ltole64(len)};
     fio___poly_consume128bit(&pl, (uint8_t *)mac_data, 1);
@@ -894,20 +996,29 @@ SFUNC void fio_chacha20_poly1305_enc(void *restrict mac,
   fio_u2buf64_le(mac, pl.a[0]);
   fio_u2buf64_le(&((char *)mac)[8], pl.a[1]);
   fio_secure_zero(&pl, sizeof(pl));
+  return 0;
 }
 
-SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
-                                      void *restrict data,
-                                      size_t len,
-                                      const void *ad, /* additional data */
-                                      size_t adlen,
-                                      const void *key,
-                                      const void *nonce) {
+SFUNC int fio_chacha20_poly1305_auth(void *restrict mac,
+                                     void *restrict data,
+                                     size_t len,
+                                     const void *ad, /* additional data */
+                                     size_t adlen,
+                                     const void *key,
+                                     const void *nonce) {
+  if (FIO_UNLIKELY(
+          !(fio___chacha_counter_ok(len, 1) &
+            fio___chacha_args_ok(mac, data, len, ad, adlen, key, nonce)))) {
+    if (mac) /* deterministic, never a MAC computed with a fallback key */
+      FIO_MEMSET(mac, 0, 16);
+    return -1;
+  }
   fio___poly_s pl;
   {
     fio_u512 c = fio___chacha_init(key, nonce, 0);
     c = fio___chacha20_mixround(c); /* computes poly1305 key */
     pl = fio___poly_init(&c);
+    fio_secure_zero(&c, sizeof(c));
   }
   for (size_t i = 31; i < adlen; i += 32) {
     fio___poly_consume128bit(&pl, (uint8_t *)ad, 1);
@@ -937,6 +1048,7 @@ SFUNC void fio_chacha20_poly1305_auth(void *restrict mac,
   fio_u2buf64_le(mac, pl.a[0]);
   fio_u2buf64_le(&((char *)mac)[8], pl.a[1]);
   fio_secure_zero(&pl, sizeof(pl));
+  return 0;
 }
 
 SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
@@ -947,11 +1059,16 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
                                     const void *key,
                                     const void *nonce) {
   void *data_start = data;
+  if (FIO_UNLIKELY(
+          !(fio___chacha_counter_ok(len, 1) &
+            fio___chacha_args_ok(mac, data, len, ad, adlen, key, nonce))))
+    return -1; /* invalid / too long for a valid message, data untouched */
   fio_u512 c = fio___chacha_init(key, nonce, 0);
   fio___poly_s pl;
   {
     fio_u512 c2 = fio___chacha20_mixround(c);
     pl = fio___poly_init(&c2);
+    fio_secure_zero(&c2, sizeof(c2));
   }
   ++c.u32[12]; /* block counter */
   /* Authenticate additional data (same as enc) */
@@ -1019,7 +1136,9 @@ SFUNC int fio_chacha20_poly1305_dec(void *restrict mac,
     fio_memcpy63x(dest.u8, data, len);
     fio___chacha_vround20(c, dest.u8);
     fio_memcpy63x(data, dest.u8, len);
+    fio_secure_zero(&dest, sizeof(dest));
   }
+  fio_secure_zero(&c, sizeof(c));
   /* Finalize Poly1305 */
   {
     uint64_t mac_data[2] = {fio_ltole64(adlen), fio_ltole64(len)};
@@ -1116,6 +1235,7 @@ FIO_IFUNC void fio___hchacha20(void *restrict subkey,
   fio_u2buf32_le((uint8_t *)subkey + 20, v[13]);
   fio_u2buf32_le((uint8_t *)subkey + 24, v[14]);
   fio_u2buf32_le((uint8_t *)subkey + 28, v[15]);
+  fio_secure_zero(v, sizeof(v));
 }
 
 /**
@@ -1125,13 +1245,16 @@ FIO_IFUNC void fio___hchacha20(void *restrict subkey,
  * 2. Use remaining 8 bytes of nonce (prefixed with 4 zero bytes) as 12-byte
  *    nonce for standard ChaCha20
  */
-SFUNC void fio_xchacha20(void *restrict data,
-                         size_t len,
-                         const void *key,
-                         const void *nonce,
-                         uint32_t counter) {
+SFUNC int fio_xchacha20(void *restrict data,
+                        size_t len,
+                        const void *key,
+                        const void *nonce,
+                        uint32_t counter) {
   uint8_t subkey[32];
   uint8_t sub_nonce[12];
+  int result;
+  if (FIO_UNLIKELY(!key || !nonce))
+    return fio___chacha_fail(NULL, data, len);
 
   /* Derive subkey from first 16 bytes of nonce */
   fio___hchacha20(subkey, key, nonce);
@@ -1144,24 +1267,28 @@ SFUNC void fio_xchacha20(void *restrict data,
   FIO_MEMCPY(sub_nonce + 4, (const uint8_t *)nonce + 16, 8);
 
   /* Apply standard ChaCha20 with derived subkey and sub-nonce */
-  fio_chacha20(data, len, subkey, sub_nonce, counter);
+  result = fio_chacha20(data, len, subkey, sub_nonce, counter);
 
   /* Secure cleanup */
   fio_secure_zero(subkey, sizeof(subkey));
+  return result;
 }
 
 /**
  * XChaCha20-Poly1305 encryption with 192-bit nonce.
  */
-SFUNC void fio_xchacha20_poly1305_enc(void *restrict mac,
-                                      void *restrict data,
-                                      size_t len,
-                                      const void *ad,
-                                      size_t adlen,
-                                      const void *key,
-                                      const void *nonce) {
+SFUNC int fio_xchacha20_poly1305_enc(void *restrict mac,
+                                     void *restrict data,
+                                     size_t len,
+                                     const void *ad,
+                                     size_t adlen,
+                                     const void *key,
+                                     const void *nonce) {
   uint8_t subkey[32];
   uint8_t sub_nonce[12];
+  int result;
+  if (FIO_UNLIKELY(!key || !nonce))
+    return fio___chacha_fail(mac, data, len);
 
   /* Derive subkey from first 16 bytes of nonce */
   fio___hchacha20(subkey, key, nonce);
@@ -1174,10 +1301,12 @@ SFUNC void fio_xchacha20_poly1305_enc(void *restrict mac,
   FIO_MEMCPY(sub_nonce + 4, (const uint8_t *)nonce + 16, 8);
 
   /* Apply standard ChaCha20-Poly1305 with derived subkey and sub-nonce */
-  fio_chacha20_poly1305_enc(mac, data, len, ad, adlen, subkey, sub_nonce);
+  result =
+      fio_chacha20_poly1305_enc(mac, data, len, ad, adlen, subkey, sub_nonce);
 
   /* Secure cleanup */
   fio_secure_zero(subkey, sizeof(subkey));
+  return result;
 }
 
 /**
@@ -1193,6 +1322,8 @@ SFUNC int fio_xchacha20_poly1305_dec(void *restrict mac,
   uint8_t subkey[32];
   uint8_t sub_nonce[12];
   int result;
+  if (FIO_UNLIKELY(!key || !nonce))
+    return -1; /* data left untouched */
 
   /* Derive subkey from first 16 bytes of nonce */
   fio___hchacha20(subkey, key, nonce);

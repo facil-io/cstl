@@ -104,7 +104,9 @@ FIO_SFUNC void FIO_NAME_TEST(stl, poly1305_kat)(void) {
                                 0x27, 0xa9};
   uint8_t auth[24] = {0};
 
-  fio_poly1305_auth(auth, (char *)msg, FIO_STRLEN(msg), NULL, 0, key);
+  FIO_ASSERT(
+      !fio_poly1305_auth(auth, (char *)msg, FIO_STRLEN(msg), NULL, 0, key),
+      "Poly1305 should return 0 on success");
   FIO_ASSERT(!memcmp(auth, expected, 16),
              "Poly1305 RFC 7539 authentication mismatch");
   FIO_ASSERT(!fio_buf2u64u(auth + 16),
@@ -582,6 +584,291 @@ FIO_SFUNC void FIO_NAME_TEST(stl, xchacha20_poly1305_edges)(void) {
 }
 
 /* *****************************************************************************
+Block counter range (keystream reuse guard)
+***************************************************************************** */
+
+FIO_SFUNC void FIO_NAME_TEST(stl, chacha20_counter_range)(void) {
+  /* boundary math */
+  FIO_ASSERT(fio___chacha_counter_ok(64, 0xFFFFFFFFUL),
+             "last counter block should be usable");
+  FIO_ASSERT(!fio___chacha_counter_ok(65, 0xFFFFFFFFUL),
+             "counter wrap should be rejected");
+  FIO_ASSERT(fio___chacha_counter_ok(256, 0xFFFFFFFCUL),
+             "4-block run ending at UINT32_MAX should be usable");
+  FIO_ASSERT(!fio___chacha_counter_ok(257, 0xFFFFFFFCUL),
+             "4-block run wrapping the counter should be rejected");
+  FIO_ASSERT(fio___chacha_counter_ok(0, 0xFFFFFFFFUL), "empty input is fine");
+  /* last valid block: single block at UINT32_MAX matches 4-block lane 3 */
+  {
+    uint8_t key[32] = {1, 2, 3}, nonce[12] = {4, 5, 6};
+    uint8_t a[256] = {0}, b[64] = {0};
+    FIO_ASSERT(!fio_chacha20(a, 256, key, nonce, 0xFFFFFFFCUL),
+               "4-block run ending at UINT32_MAX should succeed");
+    FIO_ASSERT(!fio_chacha20(b, 64, key, nonce, 0xFFFFFFFFUL),
+               "last counter block should succeed");
+    FIO_ASSERT(!memcmp(a + 192, b, 64),
+               "4-block lane counter mismatch near UINT32_MAX");
+  }
+  /* counter wrap fails (no abort, no keystream reuse, data zeroed) */
+  {
+    uint8_t key[32] = {1, 2, 3}, nonce[24] = {4, 5, 6};
+    uint8_t buf[65];
+    FIO_MEMSET(buf, 7, sizeof(buf));
+    FIO_ASSERT(fio_chacha20(buf, 65, key, nonce, 0xFFFFFFFFUL) == -1,
+               "ChaCha20 counter wrap should fail");
+    for (size_t i = 0; i < sizeof(buf); ++i)
+      FIO_ASSERT(!buf[i], "ChaCha20 counter wrap should zero data");
+    FIO_MEMSET(buf, 7, sizeof(buf));
+    FIO_ASSERT(fio_xchacha20(buf, 65, key, nonce, 0xFFFFFFFFUL) == -1,
+               "XChaCha20 counter wrap should fail");
+    for (size_t i = 0; i < sizeof(buf); ++i)
+      FIO_ASSERT(!buf[i], "XChaCha20 counter wrap should zero data");
+    FIO_ASSERT(fio_xchacha20(buf, 64, key, nonce, 0xFFFFFFFFUL) == 0,
+               "XChaCha20 last counter block should succeed");
+    uint8_t mac[16];
+    FIO_ASSERT(
+        !fio_chacha20_poly1305_enc(mac, buf, 65, NULL, 0, key, nonce) &&
+            !fio_chacha20_poly1305_dec(mac, buf, 65, NULL, 0, key, nonce),
+        "AEAD encryption should return 0 on success");
+    FIO_ASSERT(
+        !fio_xchacha20_poly1305_enc(mac, buf, 65, NULL, 0, key, nonce) &&
+            !fio_xchacha20_poly1305_dec(mac, buf, 65, NULL, 0, key, nonce),
+        "XChaCha AEAD encryption should return 0 on success");
+  }
+#if SIZE_MAX > 0xFFFFFFFFUL
+  /* AEAD decryption rejects oversized input before touching data */
+  {
+    uint8_t key[32] = {0}, nonce[24] = {0}, mac[16] = {0};
+    uint8_t buf[16] = {7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7};
+    size_t too_long = ((size_t)0xFFFFFFFFUL * 64) + 1;
+    FIO_ASSERT(fio___chacha_counter_ok(too_long - 1, 1),
+               "AEAD maximum length should be accepted");
+    FIO_ASSERT(
+        fio_chacha20_poly1305_dec(mac, buf, too_long, NULL, 0, key, nonce) ==
+            -1,
+        "oversized AEAD decryption should fail");
+    FIO_ASSERT(
+        fio_xchacha20_poly1305_dec(mac, buf, too_long, NULL, 0, key, nonce) ==
+            -1,
+        "oversized XChaCha AEAD decryption should fail");
+    for (size_t i = 0; i < sizeof(buf); ++i)
+      FIO_ASSERT(buf[i] == 7, "oversized decryption mutated data");
+    /* MAC-only AEAD auth rejects oversized input without reading `data` */
+    FIO_MEMSET(mac, 9, sizeof(mac));
+    FIO_ASSERT(
+        fio_chacha20_poly1305_auth(mac, buf, too_long, NULL, 0, key, nonce) ==
+            -1,
+        "oversized AEAD auth should fail");
+    for (size_t i = 0; i < sizeof(mac); ++i)
+      FIO_ASSERT(!mac[i], "failed AEAD auth should zero the MAC");
+    /* AEAD encryption fails (no abort); `data` is NULL so only the length
+     * check runs (a non-NULL buffer would be zeroed for `too_long` bytes). */
+    FIO_MEMSET(mac, 9, sizeof(mac));
+    FIO_ASSERT(
+        fio_chacha20_poly1305_enc(mac, NULL, too_long, NULL, 0, key, nonce) ==
+            -1,
+        "oversized AEAD encryption should fail");
+    for (size_t i = 0; i < sizeof(mac); ++i)
+      FIO_ASSERT(!mac[i], "failed AEAD encryption should zero the MAC");
+    FIO_MEMSET(mac, 9, sizeof(mac));
+    FIO_ASSERT(
+        fio_xchacha20_poly1305_enc(mac, NULL, too_long, NULL, 0, key, nonce) ==
+            -1,
+        "oversized XChaCha AEAD encryption should fail");
+    for (size_t i = 0; i < sizeof(mac); ++i)
+      FIO_ASSERT(!mac[i], "failed XChaCha AEAD encryption should zero MAC");
+    FIO_ASSERT(fio_chacha20(NULL, too_long + 64, key, nonce, 0) == -1,
+               "oversized ChaCha20 input should fail");
+  }
+#endif
+}
+
+/* *****************************************************************************
+Invalid Public Arguments (never abort / crash; deterministic failure)
+***************************************************************************** */
+
+FIO_SFUNC int fio___chacha_test_is_zero(const uint8_t *p, size_t len) {
+  uint8_t r = 0;
+  for (size_t i = 0; i < len; ++i)
+    r |= p[i];
+  return !r;
+}
+
+FIO_SFUNC void FIO_NAME_TEST(stl, chacha20_invalid_args)(void) {
+  uint8_t key[32], nonce[24], ad[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+  uint8_t mac[16], mac2[16], buf[40], copy[40], empty[1] = {0};
+  uint8_t empty_ad[1] = {0}; /* restrict: mustn't alias `empty` */
+  for (size_t i = 0; i < 32; ++i)
+    key[i] = (uint8_t)(i * 7 + 1);
+  for (size_t i = 0; i < 24; ++i)
+    nonce[i] = (uint8_t)(i * 3 + 2);
+  /* Poly1305: zero length NULL buffers are valid */
+  FIO_MEMSET(mac, 0xAA, 16);
+  FIO_ASSERT(!fio_poly1305_auth(mac, NULL, 0, NULL, 0, key) &&
+                 !fio_poly1305_auth(mac2, empty, 0, empty_ad, 0, key),
+             "Poly1305 zero-length buffers should succeed");
+  FIO_ASSERT(!memcmp(mac, mac2, 16) && !fio___chacha_test_is_zero(mac, 16),
+             "Poly1305 NULL zero-length buffers should be valid");
+  /* Poly1305: invalid pointers fail (-1), clear the MAC and read nothing */
+  FIO_MEMSET(buf, 0x55, sizeof(buf));
+  FIO_MEMSET(mac, 0xAA, 16);
+  FIO_ASSERT(fio_poly1305_auth(mac, buf, sizeof(buf), ad, 8, NULL) == -1 &&
+                 fio___chacha_test_is_zero(mac, 16),
+             "Poly1305 NULL key");
+  FIO_MEMSET(mac, 0xAA, 16);
+  FIO_ASSERT(fio_poly1305_auth(mac, NULL, 5, NULL, 0, key) == -1 &&
+                 fio___chacha_test_is_zero(mac, 16),
+             "Poly1305 NULL message");
+  FIO_MEMSET(mac, 0xAA, 16);
+  FIO_ASSERT(fio_poly1305_auth(mac, NULL, 0, NULL, 5, key) == -1 &&
+                 fio___chacha_test_is_zero(mac, 16),
+             "Poly1305 NULL ad");
+  FIO_ASSERT(fio_poly1305_auth(NULL, buf, sizeof(buf), ad, 8, key) == -1,
+             "Poly1305 NULL MAC");
+  FIO_ASSERT(fio_poly1305_auth(NULL, NULL, 5, NULL, 5, NULL) == -1,
+             "Poly1305 all NULL");
+
+  /* AEAD MAC-only computation matches encryption */
+  FIO_ASSERT(
+      !fio_chacha20_poly1305_enc(mac2, buf, sizeof(buf), ad, 8, key, nonce),
+      "AEAD encryption failed");
+  FIO_ASSERT(
+      !fio_chacha20_poly1305_auth(mac, buf, sizeof(buf), ad, 8, key, nonce),
+      "AEAD auth should return 0 on success");
+  FIO_ASSERT(!memcmp(mac, mac2, 16), "AEAD auth should match encryption MAC");
+  {
+    const void *keys[] = {NULL, key, key, key};
+    const void *nonces[] = {nonce, NULL, nonce, nonce};
+    void *datas[] = {buf, buf, NULL, buf};
+    const void *ads[] = {ad, ad, ad, NULL};
+    for (size_t i = 0; i < 4; ++i) {
+      /* MAC-only: fail (-1) and clear a writable MAC */
+      FIO_MEMSET(mac, 0xAA, 16);
+      FIO_ASSERT(fio_chacha20_poly1305_auth(mac,
+                                            datas[i],
+                                            sizeof(buf),
+                                            ads[i],
+                                            8,
+                                            keys[i],
+                                            nonces[i]) == -1,
+                 "AEAD auth invalid argument %zu should fail",
+                 i);
+      FIO_ASSERT(fio___chacha_test_is_zero(mac, 16),
+                 "AEAD auth invalid argument %zu should clear MAC",
+                 i);
+      FIO_ASSERT(fio_chacha20_poly1305_auth(NULL,
+                                            datas[i],
+                                            sizeof(buf),
+                                            ads[i],
+                                            8,
+                                            keys[i],
+                                            nonces[i]) == -1,
+                 "AEAD auth NULL MAC (argument %zu) should fail",
+                 i);
+      /* decryption fails without touching data */
+      FIO_MEMCPY(copy, buf, sizeof(buf));
+      FIO_MEMCPY(mac, mac2, 16);
+      FIO_ASSERT(fio_chacha20_poly1305_dec(mac,
+                                           datas[i],
+                                           sizeof(buf),
+                                           ads[i],
+                                           8,
+                                           keys[i],
+                                           nonces[i]) == -1,
+                 "AEAD decryption invalid argument %zu should fail",
+                 i);
+      FIO_ASSERT(fio_xchacha20_poly1305_dec(mac,
+                                            datas[i],
+                                            sizeof(buf),
+                                            ads[i],
+                                            8,
+                                            keys[i],
+                                            nonces[i]) == -1,
+                 "XChaCha decryption invalid argument %zu should fail",
+                 i);
+      FIO_ASSERT(!memcmp(copy, buf, sizeof(buf)),
+                 "failed decryption (argument %zu) mutated data",
+                 i);
+      /* encryption fails, zeroing data and MAC */
+      FIO_MEMSET(mac, 0xAA, 16);
+      FIO_ASSERT(fio_chacha20_poly1305_enc(mac,
+                                           datas[i],
+                                           sizeof(buf),
+                                           ads[i],
+                                           8,
+                                           keys[i],
+                                           nonces[i]) == -1,
+                 "AEAD encryption invalid argument %zu should fail",
+                 i);
+      FIO_ASSERT(fio___chacha_test_is_zero(mac, 16) &&
+                     (!datas[i] || fio___chacha_test_is_zero(buf, 40)),
+                 "failed AEAD encryption (argument %zu) should zero output",
+                 i);
+      FIO_MEMSET(buf, 0x55, sizeof(buf));
+      FIO_MEMSET(mac, 0xAA, 16);
+      FIO_ASSERT(fio_xchacha20_poly1305_enc(mac,
+                                            datas[i],
+                                            sizeof(buf),
+                                            ads[i],
+                                            8,
+                                            keys[i],
+                                            nonces[i]) == -1,
+                 "XChaCha encryption invalid argument %zu should fail",
+                 i);
+      FIO_ASSERT(fio___chacha_test_is_zero(mac, 16) &&
+                     (!datas[i] || fio___chacha_test_is_zero(buf, 40)),
+                 "failed XChaCha encryption (argument %zu) should zero output",
+                 i);
+      /* stream ciphers (no `ad`): fail, zeroing data */
+      if (i < 3) {
+        FIO_MEMSET(buf, 0x55, sizeof(buf));
+        FIO_ASSERT(fio_chacha20(datas[i], sizeof(buf), keys[i], nonces[i], 1) ==
+                       -1,
+                   "ChaCha20 invalid argument %zu should fail",
+                   i);
+        FIO_ASSERT(!datas[i] || fio___chacha_test_is_zero(buf, 40),
+                   "failed ChaCha20 should zero data");
+        FIO_MEMSET(buf, 0x55, sizeof(buf));
+        FIO_ASSERT(
+            fio_xchacha20(datas[i], sizeof(buf), keys[i], nonces[i], 0) == -1,
+            "XChaCha20 invalid argument %zu should fail",
+            i);
+        FIO_ASSERT(!datas[i] || fio___chacha_test_is_zero(buf, 40),
+                   "failed XChaCha20 should zero data");
+      }
+      /* restore valid ciphertext for the next round */
+      FIO_MEMSET(buf, 0x55, sizeof(buf));
+      fio_chacha20_poly1305_enc(mac2, buf, sizeof(buf), ad, 8, key, nonce);
+    }
+  }
+  /* NULL MAC: decryption leaves data, encryption zeroes it */
+  FIO_ASSERT(fio_chacha20_poly1305_dec(NULL, buf, 40, ad, 8, key, nonce) == -1,
+             "AEAD decryption with NULL MAC should fail");
+  FIO_ASSERT(!fio___chacha_test_is_zero(buf, 40), "NULL MAC dec touched data");
+  FIO_ASSERT(fio_chacha20_poly1305_enc(NULL, buf, 40, ad, 8, key, nonce) == -1,
+             "AEAD encryption with NULL MAC should fail");
+  FIO_ASSERT(fio___chacha_test_is_zero(buf, 40), "NULL MAC enc kept data");
+  FIO_MEMSET(buf, 0x55, sizeof(buf));
+  FIO_ASSERT(fio_xchacha20_poly1305_enc(NULL, buf, 40, ad, 8, key, nonce) == -1,
+             "XChaCha encryption with NULL MAC should fail");
+  /* zero length NULL buffers work end to end */
+  FIO_ASSERT(!fio_chacha20(NULL, 0, key, nonce, 1) &&
+                 !fio_xchacha20(NULL, 0, key, nonce, 0),
+             "zero length NULL stream data should succeed");
+  FIO_ASSERT(!fio_chacha20_poly1305_enc(mac, NULL, 0, NULL, 0, key, nonce) &&
+                 !fio_chacha20_poly1305_dec(mac, NULL, 0, NULL, 0, key, nonce),
+             "zero length NULL AEAD roundtrip should succeed");
+  FIO_ASSERT(!fio_xchacha20_poly1305_enc(mac, NULL, 0, NULL, 0, key, nonce) &&
+                 !fio_xchacha20_poly1305_dec(mac, NULL, 0, NULL, 0, key, nonce),
+             "zero length NULL XChaCha AEAD roundtrip should succeed");
+  fio_chacha20_poly1305_enc(mac, NULL, 0, NULL, 0, key, nonce);
+  FIO_ASSERT(!fio_chacha20_poly1305_auth(mac2, NULL, 0, NULL, 0, key, nonce),
+             "zero length NULL AEAD auth should succeed");
+  FIO_ASSERT(!memcmp(mac, mac2, 16) && !fio___chacha_test_is_zero(mac2, 16),
+             "zero length NULL AEAD auth should match encryption MAC");
+}
+
+/* *****************************************************************************
 Main
 ***************************************************************************** */
 
@@ -592,5 +879,7 @@ int main(void) {
   FIO_NAME_TEST(stl, xchacha20_poly1305_kat)();
   FIO_NAME_TEST(stl, chacha20_poly1305_edges)();
   FIO_NAME_TEST(stl, xchacha20_poly1305_edges)();
+  FIO_NAME_TEST(stl, chacha20_counter_range)();
+  FIO_NAME_TEST(stl, chacha20_invalid_args)();
   return 0;
 }

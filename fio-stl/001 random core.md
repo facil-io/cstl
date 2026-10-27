@@ -32,7 +32,7 @@ Parameters:
 
 - `extern` — linkage prefix, e.g. `static` or `FIO_SFUNC`.
 - `name` — base name for all generated functions and internal state.
-- `reseed_log` — automatic reseed interval, `2^reseed_log` calls. Set to `0` for a fully deterministic stream.
+- `reseed_log` — automatic reseed interval, about every `2^reseed_log` calls. Set to `0` for a fully deterministic stream.
 - `seed_offset` — arbitrary offset added to the default seed constants.
 
 ### Non-Deterministic Mode
@@ -41,9 +41,9 @@ Parameters:
 FIO_DEFINE_RANDOM128_FN(static, my_rng, 5, 0x1234)
 ```
 
-When `reseed_log` is non-zero (and less than `64`), the generator calls `name_reseed()` automatically every `2^reseed_log` calls, mixing in timing data and the cycle counter. This makes the stream non-deterministic, and improves entropy.
+When `reseed_log` is non-zero (and less than `64`), the generator re-seeds itself automatically about every `2^reseed_log` calls. This makes the stream non-deterministic, and improves entropy.
 
-In this example, reseeding is set to `5`, resulting in reseeding every 32 calls (collecting new entropy every 4,096 bytes).
+In this example, reseeding is set to `5`, resulting in reseeding about every 32 calls.
 
 ## Generated API
 
@@ -63,7 +63,7 @@ Returns 128 pseudo-random bits. The return type is [`fio_u128`](./001%20vector%2
 uint64_t my_rng64(void);
 ```
 
-Returns 64 pseudo-random bits. Each call consumes half of a 128-bit result; a new 128-bit value is generated only every other call.
+Returns 64 pseudo-random bits.
 
 ### `my_rng_bytes`
 
@@ -117,6 +117,8 @@ Because `reseed_log` is `0`, the same seed always produces the same sequence.
 
 - Set `reseed_log = 0` for deterministic, repeatable output.
 - Set `reseed_log` to a practical value such as `31` for a non-deterministic stream that reseeds automatically.
+- The generated functions are thread-safe. Deterministic replay requires a single thread.
+- This is not a CSPRNG; use `fio_rand_bytes_secure` for secrets.
 - After `fork()`, call `name_reseed()` or register a wrapper that calls `name_on_fork()` with `pthread_atfork()` to avoid duplicated sequences in child processes.
 
 ## Testing

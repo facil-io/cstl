@@ -156,8 +156,8 @@ FIO_SFUNC void FIO_NAME_TEST(stl, atol_speed)(const char *name,
                  "roundtrip error for %s: %s != %lld (got %lld stopped: %s)",
                  name,
                  buf,
-                 i,
-                 a2l(&bf),
+                 (long long)i,
+                 (long long)a2l(&bf),
                  bf);
     }
     trt = FIO_NAME_TEST(stl, atol_time)() - start;
@@ -322,6 +322,7 @@ static struct {
   int fail_errno;    /* at `fail_at`: 0 = EOF (returns 0), else -1 + errno */
   size_t calls;      /* calls made */
   size_t eintr_seen; /* EINTR failures injected */
+  size_t bytes;      /* bytes read (successful calls) */
 } test_fd_read;
 
 /** `FIO___FILENAME_FSYNC` hook state. */
@@ -370,7 +371,10 @@ static ssize_t test_fd_pread_hook(int fd, void *buf, size_t len, off_t at) {
   }
   if (test_fd_read.max && len > test_fd_read.max)
     len = test_fd_read.max;
-  return fio___fd_pread(fd, buf, len, at);
+  ssize_t r = fio___fd_pread(fd, buf, len, at);
+  if (r > 0)
+    test_fd_read.bytes += (size_t)r;
+  return r;
 }
 
 static int test_fd_fsync_hook(int fd) {

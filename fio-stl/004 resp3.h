@@ -163,13 +163,15 @@ typedef struct {
   uint8_t streaming_string;
   /** Streaming string type (FIO_RESP3_BLOB_STR, FIO_RESP3_BLOB_ERR, etc.) */
   uint8_t streaming_string_type;
-  /** Streamed fixed-length blob: trailing CRLF bytes pending (0...2) */
+  /** Streamed blob or chunk: trailing CRLF bytes pending (0...2) */
   uint8_t streaming_blob_crlf;
+  /** Non-zero for `$?`: complete each chunk without completing the string. */
+  uint8_t streaming_chunked;
   /** Context for streaming string (from on_start_string) */
   void *streaming_string_ctx;
   /**
-   * Streamed fixed-length blob: data bytes remaining to stream.
-   * Zero when inactive or in `$?` (chunked) streaming mode.
+   * Data bytes remaining in the current fixed-length blob or `$?` chunk.
+   * Zero when inactive or awaiting the next chunk header.
    */
   int64_t streaming_remaining;
   /** Stack for nested structures */
@@ -527,10 +529,17 @@ Internal Helper: Parse integer from buffer
 
 FIO_IFUNC int64_t fio___resp3_parse_int(const uint8_t **pos,
                                         const uint8_t *eol) {
-  /* Typed adapter over the shared strict, bounded parser (002 atol.h).
-   * Clears `errno`; callers must test `errno == E2BIG` (overflow). */
+  /* Validate the complete field, including a digit after an optional sign. */
+  const uint8_t *digits = *pos;
   errno = 0;
-  return fio_stol10((char **)pos, (const char *)eol);
+  if (digits < eol && (*digits == '-' || *digits == '+'))
+    ++digits;
+  char *cursor = (char *)*pos;
+  int64_t n = fio_stol10(&cursor, (const char *)eol);
+  *pos = (const uint8_t *)cursor;
+  if (!errno && (digits == eol || *pos != eol))
+    errno = EINVAL;
+  return n;
 }
 
 /* *****************************************************************************
@@ -539,25 +548,52 @@ Internal Helper: Parse double from buffer
 
 FIO_IFUNC double fio___resp3_parse_double(const uint8_t *start,
                                           const uint8_t *eol) {
-  size_t len = (size_t)(eol - start);
-  if (len >= 3) {
-    if ((start[0] == 'i' || start[0] == 'I') &&
-        (start[1] == 'n' || start[1] == 'N') &&
-        (start[2] == 'f' || start[2] == 'F')) {
-      return (double)INFINITY;
-    }
-    if (start[0] == '-' && (start[1] == 'i' || start[1] == 'I') &&
-        (start[2] == 'n' || start[2] == 'N')) {
-      return (double)-INFINITY;
-    }
-    if ((start[0] == 'n' || start[0] == 'N') &&
-        (start[1] == 'a' || start[1] == 'A') &&
-        (start[2] == 'n' || start[2] == 'N')) {
-      return (double)NAN;
-    }
+  const uint8_t *p = start;
+  errno = 0;
+  if (p < eol && (*p == '-' || *p == '+'))
+    ++p;
+  if ((size_t)(eol - p) == 3) {
+    /* Exact specials; retain case-insensitive/-nan support for Redis < 7.2. */
+    if (fio_ct_tolower(p[0]) == 'i' && fio_ct_tolower(p[1]) == 'n' &&
+        fio_ct_tolower(p[2]) == 'f')
+      return (*start == '-') ? -INFINITY : INFINITY;
+    if (fio_ct_tolower(p[0]) == 'n' && fio_ct_tolower(p[1]) == 'a' &&
+        fio_ct_tolower(p[2]) == 'n')
+      return NAN;
   }
-  char *p = (char *)start;
-  return fio_atof(&p);
+  const uint8_t *digits = p;
+  while (p < eol && (uint8_t)(*p - '0') < 10)
+    ++p;
+  if (p == digits)
+    goto invalid;
+  if (p < eol && *p == '.') {
+    digits = ++p;
+    while (p < eol && (uint8_t)(*p - '0') < 10)
+      ++p;
+    if (p == digits)
+      goto invalid;
+  }
+  if (p < eol && (*p == 'e' || *p == 'E')) {
+    ++p;
+    if (p < eol && (*p == '-' || *p == '+'))
+      ++p;
+    digits = p;
+    while (p < eol && (uint8_t)(*p - '0') < 10)
+      ++p;
+    if (p == digits)
+      goto invalid;
+  }
+  if (p != eol)
+    goto invalid;
+  /* The validated decimal is followed by CRLF, which bounds fio_atof. */
+  char *cursor = (char *)start;
+  double n = fio_atof(&cursor);
+  if ((const uint8_t *)cursor != eol)
+    goto invalid;
+  return n;
+invalid:
+  errno = EINVAL;
+  return 0;
 }
 
 /* *****************************************************************************
@@ -649,8 +685,6 @@ Internal Helper: Handle value completion and container unwinding
 FIO_SFUNC void *fio___resp3_on_value(fio_resp3_parser_s *p,
                                      fio___resp3_cb_s *cb,
                                      void *value) {
-  int attr_completed_at_top = 0;
-
   /* Push to parent if nested */
   if (p->depth > 0) {
     if (fio___resp3_push_value(p, cb, value)) {
@@ -676,12 +710,10 @@ FIO_SFUNC void *fio___resp3_on_value(fio_resp3_parser_s *p,
     uint8_t type = f->type;
     value = fio___resp3_complete_frame(p, cb);
 
-    /* Attributes don't count as elements */
-    if (type == FIO_RESP3_ATTR) {
-      if (p->depth == 0)
-        attr_completed_at_top = 1;
-      continue;
-    }
+    /* Attributes annotate the next value; neither advance nor finish the
+     * parent when their metadata completes, even inside another attribute. */
+    if (type == FIO_RESP3_ATTR)
+      return NULL;
 
     /* Push completed container to parent */
     if (p->depth > 0) {
@@ -692,11 +724,20 @@ FIO_SFUNC void *fio___resp3_on_value(fio_resp3_parser_s *p,
     }
   }
 
-  /* If attribute completed at top level, return NULL to continue parsing */
-  if (attr_completed_at_top)
-    return NULL;
-
   return value;
+}
+
+/* *****************************************************************************
+Internal Helper: Reject nesting before a callback allocates an unowned context
+***************************************************************************** */
+
+FIO_IFUNC int fio___resp3_can_push_frame(fio_resp3_parser_s *p,
+                                         fio___resp3_cb_s *cb) {
+  if (p->depth < FIO_RESP3_MAX_NESTING)
+    return 1;
+  p->error = 1;
+  cb->on_error_protocol(p->udata);
+  return 0;
 }
 
 /* *****************************************************************************
@@ -740,17 +781,15 @@ Internal Helper: Start incremental streaming of a fixed-length blob
  * caller must `continue` the parse loop), zero if the caller should fall
  * back to the buffered (wait-for-contiguity) path.
  *
- * Streaming is skipped (fallback) when: the table has no streaming
- * callbacks, the blob is small, or a chunked (`$?`) string is in progress
- * (a `$` token is malformed inside `$?`; keep the historical lenient
- * buffered handling there).
+ * Streaming is skipped when callbacks are absent, the blob is small, or
+ * on_start_string declines the string. Chunked strings are handled separately.
  */
 FIO_SFUNC int fio___resp3_stream_blob_start(fio_resp3_parser_s *p,
                                             fio___resp3_cb_s *cb,
                                             size_t blob_len,
                                             uint8_t type) {
-  if (!cb->on_start_string || blob_len <= FIO_RESP3_STREAM_THRESHOLD ||
-      p->streaming_string)
+  if (!cb->on_start_string || !cb->on_string_write || !cb->on_string_done ||
+      blob_len <= FIO_RESP3_STREAM_THRESHOLD || p->streaming_string)
     return 0;
   void *ctx = cb->on_start_string(p->udata, blob_len, type);
   if (!ctx)
@@ -791,13 +830,8 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
   }
 
   while (pos < end) {
-    /* Streamed fixed-length blob continuation.
-     *
-     * Feed blob data as it arrives (no EOL search - blob data is arbitrary
-     * bytes) and advance result.consumed per chunk, so consumer read buffers
-     * keep draining mid-blob. This state is only entered for blobs larger
-     * than FIO_RESP3_STREAM_THRESHOLD (see fio___resp3_stream_blob_start).
-     */
+    /* Fixed blob or chunk continuation: drain arbitrary bytes without an
+     * EOL scan or buffering, even when one chunk exceeds the read window. */
     if (parser->streaming_remaining) {
       size_t avail = (size_t)(end - pos);
       size_t chunk = (avail < (size_t)parser->streaming_remaining)
@@ -818,22 +852,22 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break; /* need more data */
     }
     if (parser->streaming_blob_crlf) {
-      /* Consume the trailing CRLF. Tolerates the CRLF being split across
-       * parse calls; tolerates it missing entirely (matches the buffered
-       * path, which skips \r and \n only when present). */
+      /* Validate trailing CRLF, preserving progress across split calls. */
       while (parser->streaming_blob_crlf && pos < end) {
         if ((parser->streaming_blob_crlf == 2 && *pos == '\r') ||
             (parser->streaming_blob_crlf == 1 && *pos == '\n')) {
           ++pos;
           --parser->streaming_blob_crlf;
         } else {
-          parser->streaming_blob_crlf = 0; /* tolerate missing CRLF */
+          goto protocol_error;
         }
       }
       result.consumed = (size_t)(pos - start);
       if (parser->streaming_blob_crlf)
         break; /* need more data */
-      /* Streamed blob complete */
+      if (parser->streaming_chunked)
+        continue; /* Chunk complete, but only ;0 completes the string. */
+      /* Streamed fixed-length blob complete */
       obj = cb.on_string_done(parser->udata,
                               parser->streaming_string_ctx,
                               parser->streaming_string_type);
@@ -852,140 +886,66 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
       continue;
     }
 
+    /* Between chunks, no other RESP token may replace the active context. */
+    if (parser->streaming_string && *pos != FIO_RESP3_STREAM_CHUNK)
+      goto protocol_error;
+
     const uint8_t *eol = fio___resp3_find_eol(pos, end);
     if (!eol)
       break; /* Need more data */
-
+    if (eol - pos < 2 || eol[-1] != '\r')
+      goto protocol_error;
+    --eol; /* All field parsers use the exclusive end before CRLF. */
     uint8_t type = *pos++;
 
     switch (type) {
-    /* ===== Simple String: +<string>\r\n ===== */
-    case FIO_RESP3_SIMPLE_STR: {
-      const uint8_t *str_end = eol;
-      if (str_end > pos && *(str_end - 1) == '\r')
-        --str_end;
-      obj = cb.on_string(parser->udata,
-                         pos,
-                         (size_t)(str_end - pos),
-                         FIO_RESP3_SIMPLE_STR);
-      pos = eol + 1;
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
-    }
-
-    /* ===== Simple Error: -<string>\r\n ===== */
-    case FIO_RESP3_SIMPLE_ERR: {
-      const uint8_t *str_end = eol;
-      if (str_end > pos && *(str_end - 1) == '\r')
-        --str_end;
-      obj = cb.on_error(parser->udata,
-                        pos,
-                        (size_t)(str_end - pos),
-                        FIO_RESP3_SIMPLE_ERR);
-      pos = eol + 1;
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
-    }
-
-    /* ===== Number: :<number>\r\n ===== */
+    /* ===== Line-oriented values ===== */
+    case FIO_RESP3_SIMPLE_STR:
+    case FIO_RESP3_SIMPLE_ERR:
+      if (FIO_MEMCHR(pos, '\r', (size_t)(eol - pos)))
+        goto protocol_error;
+      obj = (type == FIO_RESP3_SIMPLE_STR)
+                ? cb.on_string(parser->udata, pos, (size_t)(eol - pos), type)
+                : cb.on_error(parser->udata, pos, (size_t)(eol - pos), type);
+      goto line_value;
     case FIO_RESP3_NUMBER: {
-      int64_t num = fio___resp3_parse_int(&pos, eol);
-      if (FIO_UNLIKELY(errno == E2BIG)) {
-        parser->error = 1;
-        result.err = 1;
-        cb.on_error_protocol(parser->udata);
-        goto done;
-      }
-      obj = cb.on_number(parser->udata, num);
-      pos = eol + 1;
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
+      int64_t n = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno))
+        goto protocol_error;
+      obj = cb.on_number(parser->udata, n);
+      goto line_value;
     }
-
-    /* ===== Null: _\r\n ===== */
-    case FIO_RESP3_NULL: {
+    case FIO_RESP3_NULL:
+      if (pos != eol)
+        goto protocol_error;
       obj = cb.on_null(parser->udata);
-      pos = eol + 1;
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
-    }
-
-    /* ===== Double: ,<double>\r\n ===== */
+      goto line_value;
     case FIO_RESP3_DOUBLE: {
-      const uint8_t *num_end = eol;
-      if (num_end > pos && *(num_end - 1) == '\r')
-        --num_end;
-      double num = fio___resp3_parse_double(pos, num_end);
-      obj = cb.on_double(parser->udata, num);
-      pos = eol + 1;
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
+      double n = fio___resp3_parse_double(pos, eol);
+      if (FIO_UNLIKELY(errno))
+        goto protocol_error;
+      obj = cb.on_double(parser->udata, n);
+      goto line_value;
     }
-
-    /* ===== Boolean: #t\r\n or #f\r\n ===== */
-    case FIO_RESP3_BOOL: {
-      int is_true = (*pos == 't' || *pos == 'T');
-      obj = cb.on_bool(parser->udata, is_true);
-      pos = eol + 1;
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
-    }
-
-    /* ===== Big Number: (<big number>\r\n ===== */
+    case FIO_RESP3_BOOL:
+      if (eol - pos != 1 || (*pos != 't' && *pos != 'f'))
+        goto protocol_error;
+      obj = cb.on_bool(parser->udata, *pos == 't');
+      goto line_value;
     case FIO_RESP3_BIGNUM: {
-      const uint8_t *num_end = eol;
-      if (num_end > pos && *(num_end - 1) == '\r')
-        --num_end;
-      obj = cb.on_bignum(parser->udata, pos, (size_t)(num_end - pos));
-      pos = eol + 1;
+      const uint8_t *digits = pos;
+      if (digits < eol && (*digits == '-' || *digits == '+'))
+        ++digits;
+      if (digits == eol)
+        goto protocol_error;
+      for (const uint8_t *d = digits; d < eol; ++d)
+        if ((uint8_t)(*d - '0') > 9)
+          goto protocol_error;
+      obj = cb.on_bignum(parser->udata, pos, (size_t)(eol - pos));
+      goto line_value;
+    }
+    line_value:
+      pos = eol + 2;
       obj = fio___resp3_on_value(parser, &cb, obj);
       if (parser->error) {
         result.err = 1;
@@ -996,289 +956,88 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         goto done;
       }
       break;
-    }
 
-    /* ===== Blob String: $<length>\r\n<bytes>\r\n or $?\r\n (streaming) =====
-     */
-    case FIO_RESP3_BLOB_STR: {
-      /* Streaming blob string: $?\r\n followed by ;len\r\ndata... chunks */
-      if (*pos == '?') {
-        pos = eol + 1;
-        /* Start streaming string if callbacks available */
-        if (cb.on_start_string) {
-          void *ctx =
-              cb.on_start_string(parser->udata, (size_t)-1, FIO_RESP3_BLOB_STR);
-          if (ctx) {
-            parser->streaming_string = 1;
-            parser->streaming_string_type = FIO_RESP3_BLOB_STR;
-            parser->streaming_string_ctx = ctx;
-            break;
-          }
-        }
-        /* No streaming callbacks - error (can't buffer unknown length) */
-        parser->error = 1;
-        result.err = 1;
-        cb.on_error_protocol(parser->udata);
-        goto done;
-      }
-
-      int64_t blob_len = fio___resp3_parse_int(&pos, eol);
-      if (FIO_UNLIKELY(errno == E2BIG)) {
-        parser->error = 1;
-        result.err = 1;
-        cb.on_error_protocol(parser->udata);
-        goto done;
-      }
-      pos = eol + 1;
-
-      if (blob_len < 0) {
-        /* Null blob (RESP2 compat) */
-        obj = cb.on_null(parser->udata);
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
-        }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
-        break;
-      }
-
-      /* Large blobs stream incrementally (see FIO_RESP3_STREAM_THRESHOLD) */
-      if (fio___resp3_stream_blob_start(parser,
-                                        &cb,
-                                        (size_t)blob_len,
-                                        FIO_RESP3_BLOB_STR))
-        continue;
-
-      /* Check if we have complete blob data */
-      if ((size_t)(end - pos) < (size_t)blob_len + 2) {
-        /* Not enough data - rewind to start of this message */
-        pos = start + result.consumed;
-        goto done;
-      }
-
-      /* Use streaming callbacks if available */
-      if (cb.on_start_string) {
-        void *ctx = cb.on_start_string(parser->udata,
-                                       (size_t)blob_len,
-                                       FIO_RESP3_BLOB_STR);
-        if (ctx) {
-          if (cb.on_string_write(parser->udata, ctx, pos, (size_t)blob_len)) {
-            parser->error = 1;
-            result.err = 1;
-            goto done;
-          }
-          obj = cb.on_string_done(parser->udata, ctx, FIO_RESP3_BLOB_STR);
-          pos += blob_len;
-          if (pos < end && *pos == '\r')
-            ++pos;
-          if (pos < end && *pos == '\n')
-            ++pos;
-          obj = fio___resp3_on_value(parser, &cb, obj);
-          if (parser->error) {
-            result.err = 1;
-            goto done;
-          }
-          if (obj && parser->depth == 0) {
-            result.obj = obj;
-            goto done;
-          }
-          break;
-        }
-        /* on_start_string returned NULL, fall back to on_string */
-      }
-
-      obj = cb.on_string(parser->udata,
-                         pos,
-                         (size_t)blob_len,
-                         FIO_RESP3_BLOB_STR);
-      pos += blob_len;
-      if (pos < end && *pos == '\r')
-        ++pos;
-      if (pos < end && *pos == '\n')
-        ++pos;
-
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
-    }
-
-    /* ===== Blob Error: !<length>\r\n<bytes>\r\n ===== */
-    case FIO_RESP3_BLOB_ERR: {
-      int64_t blob_len = fio___resp3_parse_int(&pos, eol);
-      if (FIO_UNLIKELY(errno == E2BIG)) {
-        parser->error = 1;
-        result.err = 1;
-        cb.on_error_protocol(parser->udata);
-        goto done;
-      }
-      pos = eol + 1;
-
-      if (blob_len <= 0) {
-        obj = cb.on_error(parser->udata, "", 0, FIO_RESP3_BLOB_ERR);
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
-        }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
-        break;
-      }
-
-      /* Large blobs stream incrementally (see FIO_RESP3_STREAM_THRESHOLD) */
-      if (fio___resp3_stream_blob_start(parser,
-                                        &cb,
-                                        (size_t)blob_len,
-                                        FIO_RESP3_BLOB_ERR))
-        continue;
-
-      if ((size_t)(end - pos) < (size_t)blob_len + 2) {
-        pos = start + result.consumed;
-        goto done;
-      }
-
-      /* Use streaming callbacks if available */
-      if (cb.on_start_string) {
-        void *ctx = cb.on_start_string(parser->udata,
-                                       (size_t)blob_len,
-                                       FIO_RESP3_BLOB_ERR);
-        if (ctx) {
-          if (cb.on_string_write(parser->udata, ctx, pos, (size_t)blob_len)) {
-            parser->error = 1;
-            result.err = 1;
-            goto done;
-          }
-          obj = cb.on_string_done(parser->udata, ctx, FIO_RESP3_BLOB_ERR);
-          pos += blob_len;
-          if (pos < end && *pos == '\r')
-            ++pos;
-          if (pos < end && *pos == '\n')
-            ++pos;
-          obj = fio___resp3_on_value(parser, &cb, obj);
-          if (parser->error) {
-            result.err = 1;
-            goto done;
-          }
-          if (obj && parser->depth == 0) {
-            result.obj = obj;
-            goto done;
-          }
-          break;
-        }
-        /* on_start_string returned NULL, fall back to on_error */
-      }
-
-      obj =
-          cb.on_error(parser->udata, pos, (size_t)blob_len, FIO_RESP3_BLOB_ERR);
-      pos += blob_len;
-      if (pos < end && *pos == '\r')
-        ++pos;
-      if (pos < end && *pos == '\n')
-        ++pos;
-
-      obj = fio___resp3_on_value(parser, &cb, obj);
-      if (parser->error) {
-        result.err = 1;
-        goto done;
-      }
-      if (obj && parser->depth == 0) {
-        result.obj = obj;
-        goto done;
-      }
-      break;
-    }
-
-    /* ===== Verbatim String: =<length>\r\n<type:><bytes>\r\n ===== */
+    /* ===== Length-prefixed strings share size and framing validation ===== */
+    case FIO_RESP3_BLOB_STR:
+    case FIO_RESP3_BLOB_ERR:
     case FIO_RESP3_VERBATIM: {
-      int64_t blob_len = fio___resp3_parse_int(&pos, eol);
-      if (FIO_UNLIKELY(errno == E2BIG)) {
-        parser->error = 1;
-        result.err = 1;
-        cb.on_error_protocol(parser->udata);
-        goto done;
-      }
-      pos = eol + 1;
-
-      if (blob_len < 0) {
-        obj = cb.on_null(parser->udata);
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
-        }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
+      if (type == FIO_RESP3_BLOB_STR && eol - pos == 1 && *pos == '?') {
+        /* Unknown-length strings require the entire callback trio. */
+        if (!cb.on_start_string || !cb.on_string_write || !cb.on_string_done)
+          goto protocol_error;
+        void *ctx = cb.on_start_string(parser->udata, (size_t)-1, type);
+        if (!ctx)
+          goto protocol_error;
+        parser->streaming_string = 1;
+        parser->streaming_chunked = 1;
+        parser->streaming_string_type = type;
+        parser->streaming_string_ctx = ctx;
+        pos = eol + 2;
         break;
       }
-
-      /* Large blobs stream incrementally (see FIO_RESP3_STREAM_THRESHOLD) */
-      if (fio___resp3_stream_blob_start(parser,
-                                        &cb,
-                                        (size_t)blob_len,
-                                        FIO_RESP3_VERBATIM))
+      int64_t declared = fio___resp3_parse_int(&pos, eol);
+      if (FIO_UNLIKELY(errno))
+        goto protocol_error;
+      pos = eol + 2;
+      if (declared < 0) {
+        /* Only RESP2's null bulk-string marker is valid here. */
+        if (type != FIO_RESP3_BLOB_STR || declared != -1)
+          goto protocol_error;
+        obj = cb.on_null(parser->udata);
+        goto blob_value;
+      }
+      /* Check the wire length BEFORE narrowing or invoking callbacks. */
+      if ((uint64_t)declared > (uint64_t)(SIZE_MAX - 2))
+        goto protocol_error;
+      size_t blob_len = (size_t)declared;
+      if (type == FIO_RESP3_VERBATIM) {
+        if (blob_len < 4)
+          goto protocol_error;
+        /* Retain only the small header until its format prefix is available;
+         * no extra parser state or copy is needed across a split prefix. */
+        if ((size_t)(end - pos) < 4) {
+          pos = start + result.consumed;
+          goto done;
+        }
+        if (pos[3] != ':' || pos[0] < '!' || pos[0] > '~' || pos[1] < '!' ||
+            pos[1] > '~' || pos[2] < '!' || pos[2] > '~')
+          goto protocol_error;
+      }
+      if (fio___resp3_stream_blob_start(parser, &cb, blob_len, type))
         continue;
-
-      if ((size_t)(end - pos) < (size_t)blob_len + 2) {
+      if ((size_t)(end - pos) < blob_len + 2) {
         pos = start + result.consumed;
         goto done;
       }
+      if (pos[blob_len] != '\r' || pos[blob_len + 1] != '\n')
+        goto protocol_error;
 
-      /* Use streaming callbacks if available */
-      if (cb.on_start_string) {
-        void *ctx = cb.on_start_string(parser->udata,
-                                       (size_t)blob_len,
-                                       FIO_RESP3_VERBATIM);
+      if (cb.on_start_string && cb.on_string_write && cb.on_string_done) {
+        void *ctx = cb.on_start_string(parser->udata, blob_len, type);
         if (ctx) {
-          if (cb.on_string_write(parser->udata, ctx, pos, (size_t)blob_len)) {
+          /* Register before writes: the caller can clean up even if a write
+           * fails (the same ownership as an incremental string). */
+          parser->streaming_string = 1;
+          parser->streaming_string_ctx = ctx;
+          parser->streaming_string_type = type;
+          if (cb.on_string_write(parser->udata, ctx, pos, blob_len)) {
             parser->error = 1;
             result.err = 1;
             goto done;
           }
-          obj = cb.on_string_done(parser->udata, ctx, FIO_RESP3_VERBATIM);
-          pos += blob_len;
-          if (pos < end && *pos == '\r')
-            ++pos;
-          if (pos < end && *pos == '\n')
-            ++pos;
-          obj = fio___resp3_on_value(parser, &cb, obj);
-          if (parser->error) {
-            result.err = 1;
-            goto done;
-          }
-          if (obj && parser->depth == 0) {
-            result.obj = obj;
-            goto done;
-          }
-          break;
+          obj = cb.on_string_done(parser->udata, ctx, type);
+          parser->streaming_string = 0;
+          parser->streaming_string_ctx = NULL;
+          parser->streaming_string_type = 0;
+          goto blob_consumed;
         }
-        /* on_start_string returned NULL, fall back to on_string */
       }
-
-      obj = cb.on_string(parser->udata,
-                         pos,
-                         (size_t)blob_len,
-                         FIO_RESP3_VERBATIM);
-      pos += blob_len;
-      if (pos < end && *pos == '\r')
-        ++pos;
-      if (pos < end && *pos == '\n')
-        ++pos;
-
+      obj = (type == FIO_RESP3_BLOB_ERR)
+                ? cb.on_error(parser->udata, pos, blob_len, type)
+                : cb.on_string(parser->udata, pos, blob_len, type);
+    blob_consumed:
+      pos += blob_len + 2;
+    blob_value:
       obj = fio___resp3_on_value(parser, &cb, obj);
       if (parser->error) {
         result.err = 1;
@@ -1296,21 +1055,27 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
       int streaming = 0;
       int64_t count;
 
-      if (*pos == '?') {
+      if ((size_t)(eol - pos) == 1 && *pos == '?') {
         streaming = 1;
         count = -1;
       } else {
         count = fio___resp3_parse_int(&pos, eol);
-        if (FIO_UNLIKELY(errno == E2BIG)) {
+        if (FIO_UNLIKELY(errno)) {
           parser->error = 1;
           result.err = 1;
           cb.on_error_protocol(parser->udata);
           goto done;
         }
       }
-      pos = eol + 1;
+      pos = eol + 2;
 
-      if (count < 0 && !streaming) {
+      if (count < -1 && !streaming) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
+      if (count == -1 && !streaming) {
         obj = cb.on_null(parser->udata);
         obj = fio___resp3_on_value(parser, &cb, obj);
         if (parser->error) {
@@ -1324,6 +1089,10 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break;
       }
 
+      if (count != 0 && !fio___resp3_can_push_frame(parser, &cb)) {
+        result.err = 1;
+        goto done;
+      }
       void *parent = fio___resp3_parent_ctx(parser);
       void *ctx = cb.on_array(parser->udata, parent, count);
 
@@ -1359,32 +1128,36 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
       int streaming = 0;
       int64_t count;
 
-      if (*pos == '?') {
+      if ((size_t)(eol - pos) == 1 && *pos == '?') {
         streaming = 1;
         count = -1;
       } else {
         count = fio___resp3_parse_int(&pos, eol);
-        if (FIO_UNLIKELY(errno == E2BIG)) {
+        if (FIO_UNLIKELY(errno)) {
           parser->error = 1;
           result.err = 1;
           cb.on_error_protocol(parser->udata);
           goto done;
         }
       }
-      pos = eol + 1;
+      pos = eol + 2;
 
       if (count < 0 && !streaming) {
-        obj = cb.on_null(parser->udata);
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
+      /* Count is pairs: validate before invoking potentially allocating
+       * callbacks, and before attempting to register a frame. */
+      if (count > (INT64_MAX >> 1) ||
+          (count != 0 && !fio___resp3_can_push_frame(parser, &cb))) {
+        if (!parser->error) {
+          parser->error = 1;
+          cb.on_error_protocol(parser->udata);
         }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
-        break;
+        result.err = 1;
+        goto done;
       }
 
       void *parent = fio___resp3_parent_ctx(parser);
@@ -1404,13 +1177,7 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break;
       }
 
-      /* Maps: count is pairs, need count*2 elements (guard the doubling) */
-      if (!streaming && count > (INT64_MAX >> 1)) {
-        parser->error = 1;
-        result.err = 1;
-        cb.on_error_protocol(parser->udata);
-        goto done;
-      }
+      /* Maps: count is pairs, need count*2 elements. */
       int64_t elements = streaming ? -1 : count * 2;
       if (fio___resp3_push_frame(parser,
                                  &cb,
@@ -1430,32 +1197,29 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
       int streaming = 0;
       int64_t count;
 
-      if (*pos == '?') {
+      if ((size_t)(eol - pos) == 1 && *pos == '?') {
         streaming = 1;
         count = -1;
       } else {
         count = fio___resp3_parse_int(&pos, eol);
-        if (FIO_UNLIKELY(errno == E2BIG)) {
+        if (FIO_UNLIKELY(errno)) {
           parser->error = 1;
           result.err = 1;
           cb.on_error_protocol(parser->udata);
           goto done;
         }
       }
-      pos = eol + 1;
+      pos = eol + 2;
 
       if (count < 0 && !streaming) {
-        obj = cb.on_null(parser->udata);
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
-        }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
-        break;
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
+      }
+      if (count != 0 && !fio___resp3_can_push_frame(parser, &cb)) {
+        result.err = 1;
+        goto done;
       }
 
       void *parent = fio___resp3_parent_ctx(parser);
@@ -1495,26 +1259,22 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     /* ===== Push: ><count>\r\n ===== */
     case FIO_RESP3_PUSH: {
       int64_t count = fio___resp3_parse_int(&pos, eol);
-      if (FIO_UNLIKELY(errno == E2BIG)) {
+      if (FIO_UNLIKELY(errno)) {
         parser->error = 1;
         result.err = 1;
         cb.on_error_protocol(parser->udata);
         goto done;
       }
-      pos = eol + 1;
+      pos = eol + 2;
 
-      if (count < 0) {
-        obj = cb.on_null(parser->udata);
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
+      if (count < 0 ||
+          (count != 0 && !fio___resp3_can_push_frame(parser, &cb))) {
+        if (!parser->error) {
+          parser->error = 1;
+          cb.on_error_protocol(parser->udata);
         }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
-        break;
+        result.err = 1;
+        goto done;
       }
 
       void *parent = fio___resp3_parent_ctx(parser);
@@ -1550,17 +1310,22 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     /* ===== Attribute: |<count>\r\n ===== */
     case FIO_RESP3_ATTR: {
       int64_t count = fio___resp3_parse_int(&pos, eol);
-      if (FIO_UNLIKELY(errno == E2BIG)) {
+      if (FIO_UNLIKELY(errno)) {
         parser->error = 1;
         result.err = 1;
         cb.on_error_protocol(parser->udata);
         goto done;
       }
-      pos = eol + 1;
+      pos = eol + 2;
 
-      if (count < 0) {
-        /* Skip null attribute */
-        break;
+      if (count < 0 || count > (INT64_MAX >> 1) ||
+          (count != 0 && !fio___resp3_can_push_frame(parser, &cb))) {
+        if (!parser->error) {
+          parser->error = 1;
+          cb.on_error_protocol(parser->udata);
+        }
+        result.err = 1;
+        goto done;
       }
 
       void *parent = fio___resp3_parent_ctx(parser);
@@ -1571,13 +1336,7 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         break;
       }
 
-      /* Attributes: count is pairs, need count*2 (guard the doubling) */
-      if (count > (INT64_MAX >> 1)) {
-        parser->error = 1;
-        result.err = 1;
-        cb.on_error_protocol(parser->udata);
-        goto done;
-      }
+      /* Attributes: count is pairs, need count*2 elements. */
       if (fio___resp3_push_frame(parser,
                                  &cb,
                                  FIO_RESP3_ATTR,
@@ -1602,9 +1361,9 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
       }
 
       int64_t chunk_len = fio___resp3_parse_int(&pos, eol);
-      pos = eol + 1;
+      pos = eol + 2;
 
-      if (FIO_UNLIKELY(errno == E2BIG)) {
+      if (FIO_UNLIKELY(errno)) {
         parser->error = 1;
         result.err = 1;
         cb.on_error_protocol(parser->udata);
@@ -1617,6 +1376,7 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
                                 parser->streaming_string_ctx,
                                 parser->streaming_string_type);
         parser->streaming_string = 0;
+        parser->streaming_chunked = 0;
         parser->streaming_string_ctx = NULL;
         parser->streaming_string_type = 0;
         obj = fio___resp3_on_value(parser, &cb, obj);
@@ -1640,66 +1400,38 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
         goto done;
       }
 
-      /* Check if we have complete chunk data */
-      if ((size_t)(end - pos) < (size_t)chunk_len + 2) {
-        /* Not enough data - rewind to start of this chunk */
-        pos = start + result.consumed;
-        goto done;
-      }
-
-      /* Write chunk data */
-      if (cb.on_string_write(parser->udata,
-                             parser->streaming_string_ctx,
-                             pos,
-                             (size_t)chunk_len)) {
-        parser->error = 1;
-        result.err = 1;
-        goto done;
-      }
-
-      pos += chunk_len;
-      if (pos < end && *pos == '\r')
-        ++pos;
-      if (pos < end && *pos == '\n')
-        ++pos;
-      break;
+      if ((uint64_t)chunk_len > (uint64_t)(SIZE_MAX - 2))
+        goto protocol_error;
+      /* Drain chunks with the same bounded incremental engine as fixed blobs.
+       */
+      parser->streaming_remaining = chunk_len;
+      parser->streaming_blob_crlf = 2;
+      result.consumed = (size_t)(pos - start);
+      continue;
     }
 
     /* ===== Streamed aggregate end: .\r\n ===== */
     case FIO_RESP3_STREAM_END: {
-      pos = eol + 1;
-
-      /* Handle streaming string end (alternative to ;0\r\n) */
-      if (parser->streaming_string) {
-        obj = cb.on_string_done(parser->udata,
-                                parser->streaming_string_ctx,
-                                parser->streaming_string_type);
-        parser->streaming_string = 0;
-        parser->streaming_string_ctx = NULL;
-        parser->streaming_string_type = 0;
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
-        }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
-        break;
+      if (eol != pos || !parser->depth ||
+          !parser->stack[parser->depth - 1].streaming ||
+          ((parser->stack[parser->depth - 1].type == FIO_RESP3_MAP ||
+            parser->stack[parser->depth - 1].type == FIO_RESP3_ATTR) &&
+           parser->stack[parser->depth - 1].expecting_value)) {
+        parser->error = 1;
+        result.err = 1;
+        cb.on_error_protocol(parser->udata);
+        goto done;
       }
-
-      if (parser->depth > 0 && parser->stack[parser->depth - 1].streaming) {
-        obj = fio___resp3_complete_frame(parser, &cb);
-        obj = fio___resp3_on_value(parser, &cb, obj);
-        if (parser->error) {
-          result.err = 1;
-          goto done;
-        }
-        if (obj && parser->depth == 0) {
-          result.obj = obj;
-          goto done;
-        }
+      pos = eol + 2;
+      obj = fio___resp3_complete_frame(parser, &cb);
+      obj = fio___resp3_on_value(parser, &cb, obj);
+      if (parser->error) {
+        result.err = 1;
+        goto done;
+      }
+      if (obj && parser->depth == 0) {
+        result.obj = obj;
+        goto done;
       }
       break;
     }
@@ -1715,6 +1447,11 @@ SFUNC fio_resp3_result_s fio_resp3_parse(fio_resp3_parser_s *parser,
     result.consumed = (size_t)(pos - start);
   }
 
+  goto done;
+protocol_error:
+  parser->error = 1;
+  result.err = 1;
+  cb.on_error_protocol(parser->udata);
 done:
   result.consumed = (size_t)(pos - start);
   return result;

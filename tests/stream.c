@@ -198,6 +198,102 @@ static void test_stream_file_packet(void) {
   fprintf(stderr, "* file descriptor packet: OK\n");
 }
 
+static void test_stream_file_short_read(void) {
+  FIO_ASSERT(sizeof(fio_stream_s) == 2 * sizeof(void *) + 2 * sizeof(size_t),
+             "stream layout must contain only pointers and byte counts");
+  fio_stream_s s = FIO_STREAM_INIT(s);
+  char mem[4096];
+  char *buf;
+  size_t len;
+  int fd = open(__FILE__, O_RDONLY);
+  FIO_ASSERT(fd >= 0, "failed to open %s", __FILE__);
+  size_t fsize = fio_fd_size(fd);
+  FIO_ASSERT(fsize > 64, "file size error (%zu)", fsize);
+
+  /* a packet declared past EOF: only existing bytes are reported, then the
+   * queued tail is discarded without adding stream state */
+  fio_stream_add(&s, fio_stream_pack_data((void *)"head", 4, 0, 1, NULL));
+  fio_stream_add(&s, fio_stream_pack_fd(fd, 200, fsize - 50, 1));
+  fio_stream_add(&s, fio_stream_pack_data((void *)"tail-data", 9, 0, 1, NULL));
+  FIO_ASSERT(fio_stream_length(&s) == 213, "stream length error");
+  memset(mem, 0xAA, sizeof(mem));
+  buf = mem;
+  len = sizeof(mem);
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 54 && !memcmp(buf, "head", 4),
+             "short file read should report 54 bytes (%zu)",
+             len);
+  FIO_ASSERT(fio_stream_length(&s) == 54,
+             "short file read should end the stream (%zu)",
+             fio_stream_length(&s));
+  fio_stream_advance(&s, 50);
+  buf = mem;
+  len = sizeof(mem);
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 4, "remaining file bytes error (%zu)", len);
+  fio_stream_advance(&s, 4);
+  FIO_ASSERT(!fio_stream_any(&s), "stream should be empty");
+  buf = mem;
+  len = sizeof(mem);
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(!buf && !len, "empty stream read");
+  /* No sticky failure state: the stream remains reusable. */
+  fio_stream_add(&s, fio_stream_pack_data((void *)"late", 4, 0, 1, NULL));
+  buf = mem;
+  len = sizeof(mem);
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 4 && !memcmp(buf, "late", 4),
+             "stream must accept data after a short-file read");
+  fio_stream_destroy(&s);
+
+  /* a packet entirely past EOF (with stale EINTR): no data leaks, the tail
+   * is never delivered */
+  fio_stream_add(&s, fio_stream_pack_fd(fd, 20, fsize + 10, 1));
+  fio_stream_add(&s, fio_stream_pack_data((void *)"tail", 4, 0, 1, NULL));
+  errno = EINTR;
+  memset(mem, 0xAA, sizeof(mem));
+  buf = mem;
+  len = sizeof(mem);
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(!buf && !len, "data after a failed file packet (%zu)", len);
+  FIO_ASSERT(!fio_stream_length(&s) && !fio_stream_any(&s),
+             "failed file packet should end the stream");
+  fio_stream_destroy(&s);
+
+  /* only a failed file packet: the stream empties */
+  fio_stream_add(&s, fio_stream_pack_fd(fd, 20, fsize + 10, 1));
+  buf = mem;
+  len = sizeof(mem);
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(!buf && !len, "failed file read should report no data");
+  FIO_ASSERT(!fio_stream_any(&s) && !fio_stream_length(&s),
+             "failed file packet should be dropped");
+  close(fd);
+  fprintf(stderr, "* file short read / EOF: OK\n");
+}
+
+static void test_stream_fragments_and_over_advance(void) {
+  fio_stream_s s = FIO_STREAM_INIT(s);
+  char mem[64];
+  char *buf = mem;
+  size_t len = sizeof(mem);
+  for (size_t i = 0; i < 64; ++i) {
+    char c = (char)('0' + (i & 31));
+    fio_stream_add(&s, fio_stream_pack_data(&c, 1, 0, 1, NULL));
+  }
+  FIO_ASSERT(fio_stream_length(&s) == 64, "fragment length error");
+  fio_stream_read(&s, &buf, &len);
+  FIO_ASSERT(len == 64 && buf == mem, "fragmented read length (%zu)", len);
+  for (size_t i = 0; i < 64; ++i)
+    FIO_ASSERT(mem[i] == (char)('0' + (i & 31)), "fragment data at %zu", i);
+  fio_stream_advance(&s, 3);
+  FIO_ASSERT(fio_stream_length(&s) == 61, "fragment advance length");
+  fio_stream_advance(&s, (size_t)-1);
+  FIO_ASSERT(!fio_stream_any(&s) && !fio_stream_length(&s),
+             "SIZE_MAX advance should drain the stream");
+  fprintf(stderr, "* fragments / over-advance: OK\n");
+}
+
 static void test_stream_pack_free(void) {
   const char *const str = "unused packet";
   size_t expect_dealloc = FIO_NAME_TEST(stl, stream___noop_dealloc_count);
@@ -222,6 +318,8 @@ int main(void) {
   test_stream_external_reference();
   test_stream_partial_read_and_advance();
   test_stream_file_packet();
+  test_stream_file_short_read();
+  test_stream_fragments_and_over_advance();
   test_stream_pack_free();
   return 0;
 }

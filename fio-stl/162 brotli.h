@@ -36,18 +36,21 @@ BROTLI API
  *
  * Returns:
  *  - On success: decompressed byte count (<= out_len).
- *  - On buffer too small: the REQUIRED buffer size (> out_len).
+ *  - On buffer too small: a required-size lower bound (> out_len).
  *  - On corrupt/invalid data: 0.
  *  - When out==NULL or out_len==0: performs a header scan summing MLEN
  *    values and returns the required size (0 if data is corrupt).
- *    This allows callers to query the decompressed size without allocating.
+ *    Header-only results do not validate compressed bodies. Multiple compressed
+ *    meta-blocks require decoding with temporary, growing storage. Untrusted
+ *    streams should be decoded into a caller-bounded output buffer instead.
  */
 SFUNC size_t fio_brotli_decompress(void *out,
                                    size_t out_len,
                                    const void *in,
                                    size_t in_len);
 
-/** Conservative upper bound on decompressed size for a Brotli stream. */
+/** Practical allocation estimate, NOT an upper bound for arbitrary streams.
+ * Use bounded decoding or fio_brotli_decompress(NULL, 0, ...) for sizing. */
 FIO_IFUNC size_t fio_brotli_decompress_bound(size_t in_len);
 
 /**
@@ -71,17 +74,23 @@ FIO_IFUNC size_t fio_brotli_compress_bound(size_t in_len);
 Inline implementations
 ***************************************************************************** */
 
-/** Conservative decompression bound - Brotli can expand up to ~1032x. */
+/** Practical decompression estimate; arbitrary streams may expand further. */
 FIO_IFUNC size_t fio_brotli_decompress_bound(size_t in_len) {
-  /* Brotli theoretical max is huge; use practical bound */
+  /* Brotli theoretical max is huge; use practical bound (4GB cap) */
+  if (sizeof(size_t) < 8) /* 32 bit: saturate instead of wrapping */
+    return (in_len > ((size_t)-1 - 1024) / 1032) ? (size_t)-1
+                                                 : in_len * 1032 + 1024;
   if (in_len > ((size_t)1 << 30))
-    return (size_t)1 << 32; /* 4GB cap */
+    return (size_t)((uint64_t)1 << 32);
   return in_len * 1032 + 1024;
 }
 
 /** Compression bound (generous, for future encoder). */
 FIO_IFUNC size_t fio_brotli_compress_bound(size_t in_len) {
-  return in_len + (in_len >> 2) + 1024;
+  size_t extra = (in_len >> 2);
+  if (in_len > SIZE_MAX - 1024 || extra > SIZE_MAX - 1024 - in_len)
+    return SIZE_MAX;
+  return in_len + extra + 1024;
 }
 
 /* *****************************************************************************
@@ -185,6 +194,7 @@ Bit reader - 64-bit buffer, LSB-first
 typedef struct {
   uint64_t bits;      /* bit buffer */
   unsigned avail;     /* bits available in buffer */
+  unsigned error;     /* sticky input exhaustion / invalid bit consumption */
   const uint8_t *src; /* current read position */
   const uint8_t *end; /* one past last byte of input */
 } fio___brotli_bits_s;
@@ -194,16 +204,14 @@ FIO_SFUNC void fio___brotli_bits_init(fio___brotli_bits_s *b,
                                       size_t len) {
   b->bits = 0;
   b->avail = 0;
+  b->error = 0;
   b->src = (const uint8_t *)data;
   b->end = b->src + len;
 }
 
 FIO_IFUNC void fio___brotli_bits_fill(fio___brotli_bits_s *b) {
-  if (b->src + 8 <= b->end) {
-    /* Branchless bulk refill: single 8-byte unaligned load.
-     * Condition b->src + 8 <= b->end guarantees the load is in-bounds.
-     * (Replaces the former b->src <= safe_end which used a NULL sentinel
-     *  when len < 8 — undefined behaviour per C99 6.5.8p5.) */
+  if ((size_t)(b->end - b->src) >= 8) {
+    /* Bulk refill only when the entire load is within the input. */
     b->bits |= fio_buf2u64_le(b->src) << b->avail;
     unsigned consumed = (63 - b->avail) >> 3;
     b->src += consumed;
@@ -222,6 +230,10 @@ FIO_IFUNC uint32_t fio___brotli_bits_peek(fio___brotli_bits_s *b, unsigned n) {
 }
 
 FIO_IFUNC void fio___brotli_bits_drop(fio___brotli_bits_s *b, unsigned n) {
+  if (n > b->avail) {
+    b->error = 1;
+    return;
+  }
   b->bits >>= n;
   b->avail -= n;
 }
@@ -231,8 +243,10 @@ FIO_IFUNC uint32_t fio___brotli_bits_get(fio___brotli_bits_s *b, unsigned n) {
   if (!n)
     return 0;
   fio___brotli_bits_fill(b);
-  if (n > b->avail)
-    return 0; /* input exhausted */
+  if (n > b->avail) {
+    b->error = 1;
+    return 0;
+  }
   v = fio___brotli_bits_peek(b, n);
   fio___brotli_bits_drop(b, n);
   return v;
@@ -241,8 +255,10 @@ FIO_IFUNC uint32_t fio___brotli_bits_get(fio___brotli_bits_s *b, unsigned n) {
 /* Read a single bit */
 FIO_IFUNC uint32_t fio___brotli_bits_get1(fio___brotli_bits_s *b) {
   fio___brotli_bits_fill(b);
-  if (b->avail == 0)
-    return 0; /* input exhausted */
+  if (b->avail == 0) {
+    b->error = 1;
+    return 0;
+  }
   uint32_t v = (uint32_t)(b->bits & 1);
   b->bits >>= 1;
   b->avail -= 1;
@@ -458,6 +474,8 @@ FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
                                             const uint32_t *table,
                                             unsigned root_bits) {
   fio___brotli_bits_fill(b);
+  if (b->error)
+    return FIO___BROTLI_HUFF_ERR;
   /* Peek root_bits from the buffer.  When avail < root_bits the upper bits
    * are zero (bits_fill only ORs bytes up to avail), so the index is
    * zero-padded.  For a canonical Huffman table this is safe: every entry
@@ -478,6 +496,10 @@ FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
   }
 
   /* Subtable lookup */
+  if (root_bits > b->avail) {
+    b->error = 1;
+    return FIO___BROTLI_HUFF_ERR;
+  }
   fio___brotli_bits_drop(b, root_bits);
   fio___brotli_bits_fill(b);
   unsigned sub_bits = FIO___BROTLI_ENTRY_SUB_BITS(entry);
@@ -533,9 +555,14 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
     uint16_t symbols[4];
     for (uint32_t i = 0; i < nsym; i++) {
       symbols[i] = (uint16_t)fio___brotli_bits_get(b, sym_bits);
-      if (symbols[i] >= alphabet_size)
+      if (b->error || symbols[i] >= alphabet_size)
         return 0; /* invalid */
     }
+
+    for (uint32_t i = 0; i < nsym; ++i)
+      for (uint32_t j = 0; j < i; ++j)
+        if (symbols[i] == symbols[j])
+          return 0;
 
     /* Build table directly for simple codes */
     uint32_t root_size = 1U << root_bits;
@@ -603,6 +630,8 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
     uint32_t ix = fio___brotli_bits_peek(b, 4) & 0xF;
     uint32_t cl_val = cl_vlc_val[ix];
     fio___brotli_bits_drop(b, cl_vlc_len[ix]);
+    if (b->error)
+      return 0;
     cl_lengths[fio___brotli_cl_order[i]] = (uint8_t)cl_val;
     if (cl_val) {
       cl_space = cl_space - (32U >> cl_val);
@@ -613,12 +642,25 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
 
   /* Build code-length Huffman table */
   uint32_t cl_table[1 << FIO___BROTLI_MAX_CL_LEN]; /* 32 entries */
-  if (!fio___brotli_build_table(cl_table,
-                                FIO___BROTLI_MAX_CL_LEN,
-                                cl_lengths,
-                                18,
-                                (uint32_t)(1U << FIO___BROTLI_MAX_CL_LEN)))
+  unsigned cl_used = 0, cl_only = 0;
+  for (unsigned i = 0; i < 18; i++) {
+    if (cl_lengths[i]) {
+      ++cl_used;
+      cl_only = i;
+    }
+  }
+  if (cl_used == 1) {
+    /* RFC 7932 section 3.5: a single used symbol has a zero-length code */
+    for (unsigned i = 0; i < (1U << FIO___BROTLI_MAX_CL_LEN); i++)
+      cl_table[i] = FIO___BROTLI_ENTRY_SYM(cl_only, 0);
+  } else if (!fio___brotli_build_table(
+                 cl_table,
+                 FIO___BROTLI_MAX_CL_LEN,
+                 cl_lengths,
+                 18,
+                 (uint32_t)(1U << FIO___BROTLI_MAX_CL_LEN))) {
     return 0;
+  }
 
   /* Read symbol code lengths using the code-length Huffman table.
    * Uses cumulative repeat mechanism per RFC 7932 / reference decoder:
@@ -634,6 +676,8 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
     uint32_t cl_sym =
         fio___brotli_huff_decode(b, cl_table, FIO___BROTLI_MAX_CL_LEN);
 
+    if (cl_sym > 17 || b->error)
+      return 0;
     if (cl_sym < 16) {
       /* Literal code length - resets repeat state */
       repeat = 0;
@@ -665,6 +709,8 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
         repeat <<= extra_bits;
       }
       repeat += fio___brotli_bits_get(b, extra_bits) + 3;
+      if (b->error)
+        return 0;
       uint32_t repeat_delta = repeat - old_repeat;
       /* Apply repeat_delta symbols */
       for (uint32_t r = 0; r < repeat_delta && sym_count < alphabet_size; r++) {
@@ -963,6 +1009,11 @@ FIO_SFUNC uint32_t fio___brotli_read_varlen_uint8(fio___brotli_bits_s *b) {
   return fio___brotli_bits_get(b, n) + (1U << n);
 }
 
+/** Read NBLTYPESx (RFC 7932 section 9.2): VarLenUint8 + 1, so 1-256. */
+FIO_SFUNC uint32_t fio___brotli_read_nbltypes(fio___brotli_bits_s *b) {
+  return fio___brotli_read_varlen_uint8(b) + 1;
+}
+
 /**
  * Decode insert-and-copy command symbol into insert_code, copy_code,
  * and dist_code_zero flag.
@@ -999,18 +1050,11 @@ FIO_SFUNC void fio___brotli_decode_iac(uint32_t cmd,
   /* clang-format on */
 
   uint32_t block = cmd >> 6;
-  if (block > 10)
-    block = 10;
   uint32_t within = cmd & 63;
 
   *insert_code = ib[block] + ((within >> 3) & 7);
   *copy_code = cb[block] + (within & 7);
   *dist_code_zero = dz[block];
-
-  if (*insert_code > 23)
-    *insert_code = 23;
-  if (*copy_code > 23)
-    *copy_code = 23;
 }
 
 /**
@@ -1029,9 +1073,13 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
     /* ISLASTEMPTY */
     if (is_last && fio___brotli_bits_get1(bits))
       break;
+    if (bits->error)
+      return 0;
 
     /* Meta-block length (MLEN) */
     uint32_t mnibbles = fio___brotli_bits_get(bits, 2);
+    if (bits->error)
+      return 0;
     if (mnibbles == 3) {
       /* Metadata or empty meta-block */
       if (!is_last) {
@@ -1042,9 +1090,10 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
           uint32_t mskiplen = fio___brotli_bits_get(bits, mskipbytes * 8) + 1;
           if (bits->avail & 7)
             fio___brotli_bits_drop(bits, bits->avail & 7);
-          bits->src += mskiplen;
-          if (bits->src > bits->end)
+          bits->src -= bits->avail / 8;
+          if (bits->error || mskiplen > (size_t)(bits->end - bits->src))
             return 0;
+          bits->src += mskiplen;
           bits->bits = 0;
           bits->avail = 0;
         } else {
@@ -1057,6 +1106,8 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
 
     uint32_t mlen_nibbles = mnibbles + 4;
     uint32_t mlen = fio___brotli_bits_get(bits, mlen_nibbles * 4) + 1;
+    if (bits->error || mlen > SIZE_MAX - total)
+      return 0;
     total += mlen;
 
     /* Check for uncompressed meta-block */
@@ -1067,7 +1118,7 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
       bits->src -= (bits->avail / 8);
       bits->bits = 0;
       bits->avail = 0;
-      if (bits->src + mlen > bits->end)
+      if (bits->error || mlen > (size_t)(bits->end - bits->src))
         return 0;
       bits->src += mlen;
       continue;
@@ -1079,7 +1130,7 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
     if (!is_last)
       return (size_t)-1;
   }
-  return total;
+  return bits->error ? 0 : total;
 }
 
 SFUNC size_t fio_brotli_decompress(void *out,
@@ -1117,6 +1168,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
      * buffer. The decoder's overflow return is an exact lower bound, but it
      * may advance only one meta-block per call — always at least double the
      * capacity so the retry loop converges in O(n) total work. */
+    if (in_len > SIZE_MAX / 4)
+      return 0;
     size_t cap = in_len << 2;
     if (cap < (1U << 20))
       cap = (1U << 20);
@@ -1129,6 +1182,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
       if (r <= cap)
         return r; /* exact size (or 0 on corrupt data) */
       /* r > cap: exact lower bound from the decoder; grow geometrically */
+      if (cap > SIZE_MAX / 2)
+        return 0;
       if (r > (cap << 1))
         cap = r;
       else
@@ -1182,6 +1237,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
     /* Meta-block length (MLEN) */
     uint32_t mnibbles = fio___brotli_bits_get(&bits, 2);
+    if (bits.error)
+      return 0;
     if (mnibbles == 3) {
       /* Metadata or empty meta-block */
       if (!is_last) {
@@ -1192,9 +1249,10 @@ SFUNC size_t fio_brotli_decompress(void *out,
           uint32_t mskiplen = fio___brotli_bits_get(&bits, mskipbytes * 8) + 1;
           if (bits.avail & 7)
             fio___brotli_bits_drop(&bits, bits.avail & 7);
-          bits.src += mskiplen;
-          if (bits.src > bits.end)
+          bits.src -= bits.avail / 8;
+          if (bits.error || mskiplen > (size_t)(bits.end - bits.src))
             return 0;
+          bits.src += mskiplen;
           bits.bits = 0;
           bits.avail = 0;
         } else {
@@ -1207,6 +1265,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
     uint32_t mlen_nibbles = mnibbles + 4;
     uint32_t mlen = fio___brotli_bits_get(&bits, mlen_nibbles * 4) + 1;
+    if (bits.error)
+      return 0;
 
     /* Check for uncompressed meta-block */
     if (!is_last && fio___brotli_bits_get1(&bits)) {
@@ -1216,17 +1276,17 @@ SFUNC size_t fio_brotli_decompress(void *out,
       bits.src -= (bits.avail / 8);
       bits.bits = 0;
       bits.avail = 0;
-      if (bits.src + mlen > bits.end)
+      if (bits.error || mlen > (size_t)(bits.end - bits.src))
         return 0;
-      if (pos + mlen > out_len) {
+      if (mlen > out_len - pos) {
         /* Buffer overflow on uncompressed meta-block.
          * Add remaining bytes and scan subsequent headers. */
-        size_t needed = pos + mlen;
+        size_t needed = mlen > SIZE_MAX - pos ? SIZE_MAX : pos + mlen;
         bits.src += mlen;
         size_t rest = fio___brotli_scan_remaining_mlen(&bits);
         if (rest == (size_t)-1)
           rest = 0; /* exact size needs decoding; return the lower bound */
-        return needed + rest;
+        return rest > SIZE_MAX - needed ? SIZE_MAX : needed + rest;
       }
       FIO_MEMCPY(dst + pos, bits.src, mlen);
       bits.src += mlen;
@@ -1236,40 +1296,21 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
     /* === Compressed meta-block === */
 
-    /* Read NBLTYPES for each category (L, I, D) */
+    /* Read NBLTYPES and block switch info for each category (L, I, D).
+     * Each category's codes follow its own NBLTYPES (RFC 7932 section 9.2) */
     uint32_t nbltypes[3];
-    for (int cat = 0; cat < 3; cat++) {
-      if (!fio___brotli_bits_get1(&bits)) {
-        nbltypes[cat] = 1;
-      } else {
-        nbltypes[cat] = fio___brotli_read_varlen_uint8(&bits) + 2;
-        if (nbltypes[cat] > 256)
-          return 0; /* RFC 7932: max 256 block types */
-      }
-    }
-
-    /* Read block switch info */
     fio___brotli_block_s blk_lit = {0}, blk_iac = {0}, blk_dist = {0};
-    blk_lit.num_types = nbltypes[0];
-    blk_iac.num_types = nbltypes[1];
-    blk_dist.num_types = nbltypes[2];
-
+    fio___brotli_block_s *blk_cat[3] = {&blk_lit, &blk_iac, &blk_dist};
     uint32_t blk_tables[6][FIO___BROTLI_HUFF_SIZE + 512];
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_lit,
-                                       blk_tables[0],
-                                       blk_tables[1]))
-      return 0;
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_iac,
-                                       blk_tables[2],
-                                       blk_tables[3]))
-      return 0;
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_dist,
-                                       blk_tables[4],
-                                       blk_tables[5]))
-      return 0;
+    for (int cat = 0; cat < 3; cat++) {
+      nbltypes[cat] = fio___brotli_read_nbltypes(&bits);
+      blk_cat[cat]->num_types = nbltypes[cat];
+      if (fio___brotli_read_block_switch(&bits,
+                                         blk_cat[cat],
+                                         blk_tables[cat * 2],
+                                         blk_tables[cat * 2 + 1]))
+        return 0;
+    }
 
     /* NPOSTFIX and NDIRECT */
     uint32_t npostfix = fio___brotli_bits_get(&bits, 2);
@@ -1384,6 +1425,9 @@ SFUNC size_t fio_brotli_decompress(void *out,
                                    iac_tables + iac_offsets[blk_iac.type],
                                    FIO___BROTLI_HUFF_BITS);
 
+      if (iac_sym >= 704 || bits.error)
+        goto err_free_all;
+
       uint32_t insert_code, copy_code;
       int dist_code_zero;
       fio___brotli_decode_iac(iac_sym,
@@ -1398,6 +1442,9 @@ SFUNC size_t fio_brotli_decompress(void *out,
           fio___brotli_copy_base[copy_code] +
           fio___brotli_bits_get(&bits, fio___brotli_copy_extra[copy_code]);
 
+      if (bits.error || insert_len > meta_remaining)
+        goto err_free_all;
+
       /* Insert literals */
       for (uint32_t li = 0; li < insert_len; li++) {
         if (pos >= out_len) {
@@ -1406,18 +1453,13 @@ SFUNC size_t fio_brotli_decompress(void *out,
            * Remaining literals in this insert: insert_len - li
            * But we can't continue decoding (context needs output).
            * Use meta_remaining as the count for this meta-block. */
-          size_t needed = pos + meta_remaining;
+          size_t needed =
+              meta_remaining > SIZE_MAX - pos ? SIZE_MAX : pos + meta_remaining;
           FIO_MEM_FREE(all_tables, total_table_size * sizeof(uint32_t));
           if (lit_cmap != lit_cmap_stack)
             FIO_MEM_FREE(lit_cmap, lit_map_size);
           if (dist_cmap != dist_cmap_stack)
             FIO_MEM_FREE(dist_cmap, dist_map_size);
-          if (!is_last) {
-            size_t rest = fio___brotli_scan_remaining_mlen(&bits);
-            if (rest == (size_t)-1)
-              rest = 0; /* exact size needs decoding; lower bound */
-            needed += rest;
-          }
           return needed;
         }
 
@@ -1449,6 +1491,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
                                      lit_tables + lit_offsets[lit_tree_idx],
                                      FIO___BROTLI_HUFF_BITS);
 
+        if (literal >= 256 || bits.error)
+          goto err_free_all;
         dst[pos++] = (uint8_t)literal;
         if (meta_remaining == 0) {
           goto err_free_all; /* more literals than meta-block length */
@@ -1461,6 +1505,9 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
       /* Decode distance */
       uint32_t distance;
+      /* Longer distances refer to the static dictionary (RFC 7932 section 4) */
+      uint32_t max_distance =
+          (uint32_t)((size_t)pos < (size_t)window_size ? pos : window_size);
       if (dist_code_zero) {
         distance = (uint32_t)dist_rb[(dist_rb_idx - 1) & 3];
       } else {
@@ -1533,14 +1580,17 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
         /* Update ring buffer (dist_sym 0 = last distance, not pushed;
          * static dictionary references also not pushed - RFC 7932 Sec 4) */
-        if (dist_sym != 0 && distance <= (uint32_t)pos) {
+        if (dist_sym != 0 && distance <= max_distance) {
           dist_rb[dist_rb_idx & 3] = (int32_t)distance;
           dist_rb_idx++;
         }
       }
 
+      if (bits.error || !distance)
+        goto err_free_all;
+
       /* Copy from backward reference or static dictionary */
-      if (distance <= (uint32_t)pos) {
+      if (distance <= max_distance) {
         /* Normal backward reference */
         if (copy_len > meta_remaining) {
           goto err_free_all;
@@ -1548,18 +1598,14 @@ SFUNC size_t fio_brotli_decompress(void *out,
         for (uint32_t ci = 0; ci < copy_len; ci++) {
           if (pos >= out_len) {
             /* Buffer overflow during back-reference copy */
-            size_t needed = pos + meta_remaining;
+            size_t needed = meta_remaining > SIZE_MAX - pos
+                                ? SIZE_MAX
+                                : pos + meta_remaining;
             FIO_MEM_FREE(all_tables, total_table_size * sizeof(uint32_t));
             if (lit_cmap != lit_cmap_stack)
               FIO_MEM_FREE(lit_cmap, lit_map_size);
             if (dist_cmap != dist_cmap_stack)
               FIO_MEM_FREE(dist_cmap, dist_map_size);
-            if (!is_last) {
-              size_t rest = fio___brotli_scan_remaining_mlen(&bits);
-              if (rest == (size_t)-1)
-                rest = 0; /* exact size needs decoding; lower bound */
-              needed += rest;
-            }
             return needed;
           }
           dst[pos] = dst[pos - distance];
@@ -1570,9 +1616,7 @@ SFUNC size_t fio_brotli_decompress(void *out,
         /* Static dictionary reference (RFC 7932 Section 8).
          * The word length is determined by copy_len.
          * The word index and transform are derived from the distance. */
-        uint32_t max_dist =
-            (uint32_t)((size_t)pos < (size_t)window_size ? pos : window_size);
-        uint32_t dict_off = distance - max_dist - 1;
+        uint32_t dict_off = distance - max_distance - 1;
         uint32_t wlen = copy_len;
         if (wlen < 4 || wlen > 24 || fio___brotli_ndbits[wlen] == 0) {
           goto err_free_all;
@@ -1590,21 +1634,19 @@ SFUNC size_t fio_brotli_decompress(void *out,
                                                word,
                                                (int)wlen,
                                                (int)transform_id);
+        if (tlen < 0 || (uint32_t)tlen > meta_remaining)
+          goto err_free_all;
         for (int ti = 0; ti < tlen; ti++) {
           if (pos >= out_len) {
             /* Buffer overflow during dict copy */
-            size_t needed = pos + meta_remaining;
+            size_t needed = meta_remaining > SIZE_MAX - pos
+                                ? SIZE_MAX
+                                : pos + meta_remaining;
             FIO_MEM_FREE(all_tables, total_table_size * sizeof(uint32_t));
             if (lit_cmap != lit_cmap_stack)
               FIO_MEM_FREE(lit_cmap, lit_map_size);
             if (dist_cmap != dist_cmap_stack)
               FIO_MEM_FREE(dist_cmap, dist_map_size);
-            if (!is_last) {
-              size_t rest = fio___brotli_scan_remaining_mlen(&bits);
-              if (rest == (size_t)-1)
-                rest = 0; /* exact size needs decoding; lower bound */
-              needed += rest;
-            }
             return needed;
           }
           dst[pos++] = transformed[ti];
@@ -1632,7 +1674,7 @@ SFUNC size_t fio_brotli_decompress(void *out,
     return 0;
   }
 
-  return pos;
+  return bits.error ? 0 : pos;
 }
 
 /* *****************************************************************************
@@ -1660,6 +1702,7 @@ Bit writer for compression
 typedef struct {
   uint64_t bits;
   uint32_t count;
+  unsigned error;
   uint8_t *out;
   uint8_t *out_end;
 } fio___brotli_bw_s;
@@ -1669,17 +1712,28 @@ FIO_IFUNC void fio___brotli_bw_init(fio___brotli_bw_s *w,
                                     size_t out_len) {
   w->bits = 0;
   w->count = 0;
+  w->error = 0;
   w->out = (uint8_t *)out;
   w->out_end = (uint8_t *)out + out_len;
 }
 
 FIO_IFUNC void fio___brotli_bw_flush(fio___brotli_bw_s *w) {
-  if (w->count >= 8 && w->out + 8 <= w->out_end) {
+  if (w->count >= 8 && (size_t)(w->out_end - w->out) >= 8) {
     fio_u2buf64_le(w->out, w->bits);
     uint32_t bytes = w->count >> 3;
     w->out += bytes;
     w->bits >>= (bytes << 3);
     w->count &= 7;
+  } else {
+    while (w->count >= 8) {
+      if (w->out == w->out_end) {
+        w->error = 1;
+        return;
+      }
+      *w->out++ = (uint8_t)w->bits;
+      w->bits >>= 8;
+      w->count -= 8;
+    }
   }
 }
 
@@ -1687,6 +1741,12 @@ FIO_IFUNC void fio___brotli_bw_flush(fio___brotli_bw_s *w) {
 FIO_IFUNC void fio___brotli_bw_put(fio___brotli_bw_s *w,
                                    uint64_t val,
                                    uint32_t nbits) {
+  if (w->error || !nbits)
+    return;
+  if (nbits > 56 || w->count > 63 - nbits) {
+    w->error = 1;
+    return;
+  }
   w->bits |= val << w->count;
   w->count += nbits;
   fio___brotli_bw_flush(w);
@@ -1706,7 +1766,7 @@ FIO_IFUNC size_t fio___brotli_bw_finish(fio___brotli_bw_s *w, void *out_start) {
     w->bits >>= 8;
     w->count = (w->count >= 8) ? (w->count - 8) : 0;
   }
-  return (size_t)(w->out - (uint8_t *)out_start);
+  return (w->error || w->count) ? 0 : (size_t)(w->out - (uint8_t *)out_start);
 }
 
 /* *****************************************************************************
@@ -2764,6 +2824,7 @@ typedef struct {
 static fio___brotli_dict_entry_s
     fio___brotli_dict_ht[FIO___BROTLI_DICT_HASH_SIZE * 2];
 static int fio___brotli_dict_ht_ready = 0;
+static fio_lock_i fio___brotli_dict_ht_lock = FIO_LOCK_INIT;
 
 FIO_IFUNC uint32_t fio___brotli_dict_hash4(const uint8_t *p) {
   uint32_t h = fio_buf2u32_le(p);
@@ -2772,8 +2833,16 @@ FIO_IFUNC uint32_t fio___brotli_dict_hash4(const uint8_t *p) {
 
 /** Build the static dictionary hash table (called once). */
 FIO_SFUNC void fio___brotli_dict_ht_build(void) {
-  if (fio___brotli_dict_ht_ready)
+  /* Acquire publication of the dictionary when bypassing the build lock. */
+  int ready;
+  fio_atomic_load(ready, &fio___brotli_dict_ht_ready);
+  if (ready)
     return;
+  fio_lock(&fio___brotli_dict_ht_lock);
+  if (fio___brotli_dict_ht_ready) {
+    fio_unlock(&fio___brotli_dict_ht_lock);
+    return;
+  }
   FIO_MEMSET(fio___brotli_dict_ht, 0, sizeof(fio___brotli_dict_ht));
   for (uint32_t wlen = 4; wlen <= 24; ++wlen) {
     if (!fio___brotli_ndbits[wlen])
@@ -2798,7 +2867,8 @@ FIO_SFUNC void fio___brotli_dict_ht_build(void) {
       }
     }
   }
-  fio___brotli_dict_ht_ready = 1;
+  fio_atomic_or(&fio___brotli_dict_ht_ready, 1);
+  fio_unlock(&fio___brotli_dict_ht_lock);
 }
 
 /**
@@ -2828,13 +2898,15 @@ FIO_SFUNC uint32_t fio___brotli_dict_find(const uint8_t *src,
 
   for (uint32_t slot = 0; slot < 2; ++slot) {
     fio___brotli_dict_entry_s e = fio___brotli_dict_ht[base + slot];
-    if (e.len == 0)
+    if (e.len < 4 || e.len > 24)
       continue;
     uint32_t wlen = e.len;
     uint32_t wid = e.word_id;
     if (pos + wlen > src_len)
       continue;
     uint32_t nwords = 1U << fio___brotli_ndbits[wlen];
+    if (wid >= nwords)
+      continue;
     const uint8_t *word =
         fio___brotli_dict + fio___brotli_dict_offsets[wlen] + wid * wlen;
 
@@ -3213,7 +3285,7 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
                                           const void *in,
                                           size_t in_len,
                                           int quality) {
-  if (!out || !out_len)
+  if (!out || !out_len || (!in && in_len))
     return 0;
 
   /* Empty input: emit valid empty Brotli stream */
@@ -3343,7 +3415,7 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
     const uint8_t *src = in_bytes + chunk_off;
     const uint32_t src_len =
         (uint32_t)((in_len - chunk_off > chunk_cap) ? chunk_cap
-                                                     : (in_len - chunk_off));
+                                                    : (in_len - chunk_off));
     const int is_last_chunk = (chunk_off + chunk_cap >= in_len);
     /* Snapshot the stream ring buffer at chunk start (Pass 1 advances the
      * live state; Passes 2+3 replay from this snapshot). */
@@ -3354,317 +3426,357 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
     chunk_dist_rb[3] = dist_rb[3];
     const uint32_t chunk_dist_rb_idx = dist_rb_idx;
 
-  uint32_t token_count = 0;
+    uint32_t token_count = 0;
 
-  /* === Pass 1: LZ77 match finding === */
-  uint32_t pos = 0;
-  uint32_t insert_start = 0; /* start of current literal run */
-  uint32_t prev_match_len = 0;
-  uint32_t prev_match_dist = 0;
-  uint32_t prev_match_pos = 0;
-  int prev_was_match = 0;
-  int32_t prev_match_score = 0;
-  int prev_match_is_dict = 0;
+    /* === Pass 1: LZ77 match finding === */
+    uint32_t pos = 0;
+    uint32_t insert_start = 0; /* start of current literal run */
+    uint32_t prev_match_len = 0;
+    uint32_t prev_match_dist = 0;
+    uint32_t prev_match_pos = 0;
+    int prev_was_match = 0;
+    int32_t prev_match_score = 0;
+    int prev_match_is_dict = 0;
 
-  if (quality >= 5 && !q5_small_data)
-    fio___brotli_hc_reset(hash_chain); /* per-chunk reset (generation bump) */
-  else
-    ++hash_generation; /* q1-4: invalidate previous chunk's hash entries */
+    if (quality >= 5 && !q5_small_data)
+      fio___brotli_hc_reset(hash_chain); /* per-chunk reset (generation bump) */
+    else
+      ++hash_generation; /* q1-4: invalidate previous chunk's hash entries */
 
-  if (quality >= 5 && !q5_small_data) {
-    /* ================================================================
-     * q5+ path: hash chain + distance cache + score-based lazy matching
-     * (only for data >= 8KB where hash chain depth provides benefit)
-     *
-     * Incompressibility detection: after ~1024 positions, if the match
-     * rate is below ~5%, the data is effectively random/incompressible.
-     * In that case, fall back to a simpler mode: depth-1 hash chain
-     * lookup only (no distance cache, no dict, no score-based lazy).
-     * This avoids walking 16 chain entries + 4 cache entries + dict
-     * lookup per position for zero benefit.
-     * ================================================================ */
-    uint32_t q5_probe_count = 0; /* positions checked during probe phase */
-    uint32_t q5_match_count = 0; /* matches found during probe phase */
-    int q5_fast_mode = 0;        /* 1 = incompressible, use fast path */
-    while (pos < src_len) {
-      uint32_t match_len = 0;
-      uint32_t match_dist = 0;
-      int32_t match_score = 0;
-      int match_is_dict = 0;
+    if (quality >= 5 && !q5_small_data) {
+      /* ================================================================
+       * q5+ path: hash chain + distance cache + score-based lazy matching
+       * (only for data >= 8KB where hash chain depth provides benefit)
+       *
+       * Incompressibility detection: after ~1024 positions, if the match
+       * rate is below ~5%, the data is effectively random/incompressible.
+       * In that case, fall back to a simpler mode: depth-1 hash chain
+       * lookup only (no distance cache, no dict, no score-based lazy).
+       * This avoids walking 16 chain entries + 4 cache entries + dict
+       * lookup per position for zero benefit.
+       * ================================================================ */
+      uint32_t q5_probe_count = 0; /* positions checked during probe phase */
+      uint32_t q5_match_count = 0; /* matches found during probe phase */
+      int q5_fast_mode = 0;        /* 1 = incompressible, use fast path */
+      while (pos < src_len) {
+        uint32_t match_len = 0;
+        uint32_t match_dist = 0;
+        int32_t match_score = 0;
+        int match_is_dict = 0;
 
-      if (pos + 3 < src_len) {
-        uint32_t max_len = src_len - pos;
-        if (max_len > (1U << 24) - 1)
-          max_len = (1U << 24) - 1;
+        if (pos + 3 < src_len) {
+          uint32_t max_len = src_len - pos;
+          if (max_len > (1U << 24) - 1)
+            max_len = (1U << 24) - 1;
 
-        if (q5_fast_mode) {
-          /* --- Fast mode: depth-1 hash chain only (no cache/dict/lazy) --- */
-          uint32_t hc_dist = 0;
-          uint32_t hc_len = fio___brotli_hc_find(hash_chain,
-                                                 src,
-                                                 src_len,
-                                                 pos,
-                                                 window_size,
-                                                 &hc_dist,
-                                                 1);
-          if (hc_len >= 4) {
-            match_len = hc_len;
-            match_dist = hc_dist;
-          }
-        } else {
-          /* --- Distance cache check --- */
-          for (int ci = 0; ci < 4; ++ci) {
-            int32_t d = dist_rb[(dist_rb_idx - 1 - ci) & 3];
-            if (d <= 0 || pos < (uint32_t)d)
-              continue;
-            /* Extend match from cache candidate — clamp to candidate's
-             * remaining bytes */
-            uint32_t cand = pos - (uint32_t)d;
-            uint32_t cand_max_c = src_len - cand;
-            uint32_t eff_max_c = max_len < cand_max_c ? max_len : cand_max_c;
-            uint32_t clen =
-                fio___brotli_extend_match(src, pos, cand, 0, eff_max_c);
-            if (clen >= 4) {
-              int32_t sc = fio___brotli_match_score(clen, (uint32_t)d, ci);
+          if (q5_fast_mode) {
+            /* --- Fast mode: depth-1 hash chain only (no cache/dict/lazy) ---
+             */
+            uint32_t hc_dist = 0;
+            uint32_t hc_len = fio___brotli_hc_find(hash_chain,
+                                                   src,
+                                                   src_len,
+                                                   pos,
+                                                   window_size,
+                                                   &hc_dist,
+                                                   1);
+            if (hc_len >= 4) {
+              match_len = hc_len;
+              match_dist = hc_dist;
+            }
+          } else {
+            /* --- Distance cache check --- */
+            for (int ci = 0; ci < 4; ++ci) {
+              int32_t d = dist_rb[(dist_rb_idx - 1 - ci) & 3];
+              if (d <= 0 || pos < (uint32_t)d)
+                continue;
+              /* Extend match from cache candidate — clamp to candidate's
+               * remaining bytes */
+              uint32_t cand = pos - (uint32_t)d;
+              uint32_t cand_max_c = src_len - cand;
+              uint32_t eff_max_c = max_len < cand_max_c ? max_len : cand_max_c;
+              uint32_t clen =
+                  fio___brotli_extend_match(src, pos, cand, 0, eff_max_c);
+              if (clen >= 4) {
+                int32_t sc = fio___brotli_match_score(clen, (uint32_t)d, ci);
+                if (sc > match_score) {
+                  match_len = clen;
+                  match_dist = (uint32_t)d;
+                  match_score = sc;
+                  match_is_dict = 0;
+                }
+              }
+            }
+
+            /* --- Hash chain lookup --- */
+            uint32_t hc_dist = 0;
+            uint32_t hc_len = fio___brotli_hc_find(hash_chain,
+                                                   src,
+                                                   src_len,
+                                                   pos,
+                                                   window_size,
+                                                   &hc_dist,
+                                                   0);
+            if (hc_len >= 4) {
+              int32_t sc = fio___brotli_match_score(hc_len, hc_dist, -1);
               if (sc > match_score) {
-                match_len = clen;
-                match_dist = (uint32_t)d;
+                match_len = hc_len;
+                match_dist = hc_dist;
                 match_score = sc;
                 match_is_dict = 0;
               }
             }
-          }
 
-          /* --- Hash chain lookup --- */
-          uint32_t hc_dist = 0;
-          uint32_t hc_len = fio___brotli_hc_find(hash_chain,
-                                                 src,
-                                                 src_len,
-                                                 pos,
-                                                 window_size,
-                                                 &hc_dist,
-                                                 0);
-          if (hc_len >= 4) {
-            int32_t sc = fio___brotli_match_score(hc_len, hc_dist, -1);
-            if (sc > match_score) {
-              match_len = hc_len;
-              match_dist = hc_dist;
-              match_score = sc;
-              match_is_dict = 0;
-            }
-          }
-
-          /* --- Static dictionary lookup (when LZ77 match is weak) --- */
-          if (match_len < 6) {
-            uint32_t dict_copy_len = 0, dict_dist = 0;
-            int32_t dict_score = 0;
-            uint32_t dict_len = fio___brotli_dict_find(src,
-                                                       src_len,
-                                                       pos,
-                                                       window_size,
-                                                       &dict_copy_len,
-                                                       &dict_dist,
-                                                       &dict_score);
-            if (dict_len > 0 && dict_score > match_score) {
-              match_len = dict_copy_len; /* word length = copy_len for IAC */
-              match_dist = dict_dist;
-              match_score = dict_score;
-              match_is_dict = 1;
+            /* --- Static dictionary lookup (when LZ77 match is weak) --- */
+            if (match_len < 6) {
+              uint32_t dict_copy_len = 0, dict_dist = 0;
+              int32_t dict_score = 0;
+              uint32_t dict_len = fio___brotli_dict_find(src,
+                                                         src_len,
+                                                         pos,
+                                                         window_size,
+                                                         &dict_copy_len,
+                                                         &dict_dist,
+                                                         &dict_score);
+              if (dict_len > 0 && dict_score > match_score) {
+                match_len = dict_copy_len; /* word length = copy_len for IAC */
+                match_dist = dict_dist;
+                match_score = dict_score;
+                match_is_dict = 1;
+              }
             }
           }
         }
-      }
 
-      /* Insert current position into hash chain (only when 4 bytes available)
-       */
-      if (pos + 3 < src_len)
-        fio___brotli_hc_insert(hash_chain,
-                               fio___brotli_hc_hash4(src + pos),
-                               pos);
+        /* Insert current position into hash chain (only when 4 bytes available)
+         */
+        if (pos + 3 < src_len)
+          fio___brotli_hc_insert(hash_chain,
+                                 fio___brotli_hc_hash4(src + pos),
+                                 pos);
 
-      /* --- Incompressibility probe: track match rate in first 1024 pos --- */
-      if (!q5_fast_mode) {
-        q5_probe_count++;
-        q5_match_count += (match_len >= 4);
-        if (q5_probe_count >= 1024) {
-          /* < 5% match rate => incompressible, switch to fast mode.
-           * On compressible data (HTML/JSON), match rate is typically 30-60%.
-           * On random data, match rate is ~0.4% (hash collisions only). */
-          q5_fast_mode = (q5_match_count < 51);
+        /* --- Incompressibility probe: track match rate in first 1024 pos ---
+         */
+        if (!q5_fast_mode) {
+          q5_probe_count++;
+          q5_match_count += (match_len >= 4);
+          if (q5_probe_count >= 1024) {
+            /* < 5% match rate => incompressible, switch to fast mode.
+             * On compressible data (HTML/JSON), match rate is typically 30-60%.
+             * On random data, match rate is ~0.4% (hash collisions only). */
+            q5_fast_mode = (q5_match_count < 51);
+          }
+        }
+
+        /* --- Lazy matching (score-based for normal mode, simple for fast) ---
+         */
+        if (q5_fast_mode) {
+          /* Fast mode: simple lazy matching (same as q3-q4 path).
+           * No score-based comparison — just check if current match is
+           * meaningfully longer than the deferred one. */
+          if (prev_was_match) {
+            if (match_len > prev_match_len + 1) {
+              /* Better match here: emit literal for previous position */
+              prev_was_match = 0;
+            } else {
+              /* Use previous match (may be a dict ref from normal mode at the
+               * transition point — preserve is_dict_ref for correctness). */
+              uint32_t il = prev_match_pos - insert_start;
+              int use_dz =
+                  (!prev_match_is_dict &&
+                   prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
+              tokens[token_count].insert_len = il;
+              tokens[token_count].copy_len = prev_match_len;
+              tokens[token_count].distance = prev_match_dist;
+              tokens[token_count].use_dist_zero = use_dz;
+              tokens[token_count].is_dict_ref = prev_match_is_dict;
+              token_count++;
+
+              if (!use_dz && !prev_match_is_dict) {
+                dist_rb[dist_rb_idx & 3] = (int32_t)prev_match_dist;
+                dist_rb_idx++;
+              }
+
+              /* Insert skipped positions into hash chain */
+              uint32_t skip_end = prev_match_pos + prev_match_len;
+              if (skip_end > src_len)
+                skip_end = src_len;
+              for (uint32_t j = prev_match_pos + 1;
+                   j < skip_end && j + 3 < src_len;
+                   ++j)
+                fio___brotli_hc_insert(hash_chain,
+                                       fio___brotli_hc_hash4(src + j),
+                                       j);
+
+              insert_start = skip_end;
+              if (pos < skip_end) {
+                pos = skip_end;
+                prev_was_match = 0;
+                continue;
+              }
+              prev_was_match = 0;
+              /* Fall through to evaluate current match */
+            }
+          }
+
+          if (match_len >= 4) {
+            /* Defer: check next position for better match */
+            prev_match_len = match_len;
+            prev_match_dist = match_dist;
+            prev_match_pos = pos;
+            prev_match_is_dict = 0;
+            prev_was_match = 1;
+            pos++;
+            continue;
+          }
+          pos++;
+        } else {
+          /* Normal mode: score-based lazy matching */
+          if (prev_was_match) {
+            /* Require meaningful improvement to override previous match.
+             * Deferring costs 1 literal byte (~8 bits). With 100 points per
+             * byte, the threshold should be ~80 points (slightly less than a
+             * full byte since the literal may compress well). */
+            if (match_score > prev_match_score + 80) {
+              /* Better match here: drop previous, emit literal for prev pos */
+              prev_was_match = 0;
+            } else {
+              /* Use previous match */
+              uint32_t il = prev_match_pos - insert_start;
+              int use_dz =
+                  (!prev_match_is_dict &&
+                   prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
+              tokens[token_count].insert_len = il;
+              tokens[token_count].copy_len = prev_match_len;
+              tokens[token_count].distance = prev_match_dist;
+              tokens[token_count].use_dist_zero = use_dz;
+              tokens[token_count].is_dict_ref = prev_match_is_dict;
+              token_count++;
+
+              /* Dict refs don't update ring buffer (RFC 7932 Section 4) */
+              if (!use_dz && !prev_match_is_dict) {
+                dist_rb[dist_rb_idx & 3] = (int32_t)prev_match_dist;
+                dist_rb_idx++;
+              }
+
+              /* Insert skipped positions into hash chain */
+              uint32_t skip_end = prev_match_pos + prev_match_len;
+              if (skip_end > src_len)
+                skip_end = src_len;
+              for (uint32_t j = prev_match_pos + 1;
+                   j < skip_end && j + 3 < src_len;
+                   ++j)
+                fio___brotli_hc_insert(hash_chain,
+                                       fio___brotli_hc_hash4(src + j),
+                                       j);
+
+              insert_start = skip_end;
+              if (pos < skip_end) {
+                pos = skip_end;
+                prev_was_match = 0;
+                continue;
+              }
+              prev_was_match = 0;
+              /* Fall through to evaluate current match */
+            }
+          }
+
+          if (match_len >= 4) {
+            /* Defer: check next position for better match */
+            prev_match_len = match_len;
+            prev_match_dist = match_dist;
+            prev_match_pos = pos;
+            prev_match_score = match_score;
+            prev_match_is_dict = match_is_dict;
+            prev_was_match = 1;
+            pos++;
+            continue;
+          }
+          pos++;
         }
       }
+    } else {
+      /* ================================================================
+       * q1-4 path: direct-mapped hash table + simple lazy matching.
+       * Also used by q5+ on small data (<8KB) where hash chain provides
+       * no benefit — most buckets have 0-1 entries at ~12% load factor,
+       * and the distance cache / score-based lazy matching add overhead
+       * that hurts compression ratio. No dict lookup for small data
+       * either — dict distances expand the Huffman tree too much.
+       * ================================================================ */
+      while (pos < src_len) {
+        uint32_t match_len = 0;
+        uint32_t match_dist = 0;
 
-      /* --- Lazy matching (score-based for normal mode, simple for fast) --- */
-      if (q5_fast_mode) {
-        /* Fast mode: simple lazy matching (same as q3-q4 path).
-         * No score-based comparison — just check if current match is
-         * meaningfully longer than the deferred one. */
-        if (prev_was_match) {
+        if (pos + 3 < src_len) {
+          uint32_t h = fio___brotli_hash4(src + pos);
+          uint32_t candidate = hash_table[h];
+          hash_table[h] = pos;
+
+          if (hash_gen[h] == hash_generation &&
+              pos - candidate <= window_size && pos - candidate > 0) {
+            /* Check if first 4 bytes match */
+            if (fio_buf2u32_le(src + pos) == fio_buf2u32_le(src + candidate)) {
+              uint32_t max_len = src_len - pos;
+              if (max_len > (1U << 24) - 1)
+                max_len = (1U << 24) - 1;
+              /* Clamp to candidate's remaining bytes to prevent OOB read */
+              uint32_t cand_rem = src_len - candidate;
+              if (cand_rem < max_len)
+                max_len = cand_rem;
+              match_len =
+                  fio___brotli_extend_match(src, pos, candidate, 4, max_len);
+              match_dist = pos - candidate;
+            }
+          }
+          hash_gen[h] = hash_generation;
+        }
+
+        /* Lazy matching for quality >= 3 */
+        if (quality >= 3 && prev_was_match && pos + 3 < src_len) {
           if (match_len > prev_match_len + 1) {
             /* Better match here: emit literal for previous position */
             prev_was_match = 0;
-          } else {
-            /* Use previous match (may be a dict ref from normal mode at the
-             * transition point — preserve is_dict_ref for correctness). */
-            uint32_t il = prev_match_pos - insert_start;
-            int use_dz =
-                (!prev_match_is_dict &&
-                 prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
-            tokens[token_count].insert_len = il;
-            tokens[token_count].copy_len = prev_match_len;
-            tokens[token_count].distance = prev_match_dist;
-            tokens[token_count].use_dist_zero = use_dz;
-            tokens[token_count].is_dict_ref = prev_match_is_dict;
-            token_count++;
-
-            if (!use_dz && !prev_match_is_dict) {
-              dist_rb[dist_rb_idx & 3] = (int32_t)prev_match_dist;
-              dist_rb_idx++;
-            }
-
-            /* Insert skipped positions into hash chain */
-            uint32_t skip_end = prev_match_pos + prev_match_len;
-            if (skip_end > src_len)
-              skip_end = src_len;
-            for (uint32_t j = prev_match_pos + 1;
-                 j < skip_end && j + 3 < src_len;
-                 ++j)
-              fio___brotli_hc_insert(hash_chain,
-                                     fio___brotli_hc_hash4(src + j),
-                                     j);
-
-            insert_start = skip_end;
-            if (pos < skip_end) {
-              pos = skip_end;
-              prev_was_match = 0;
-              continue;
-            }
-            prev_was_match = 0;
-            /* Fall through to evaluate current match */
-          }
-        }
-
-        if (match_len >= 4) {
-          /* Defer: check next position for better match */
-          prev_match_len = match_len;
-          prev_match_dist = match_dist;
-          prev_match_pos = pos;
-          prev_match_is_dict = 0;
-          prev_was_match = 1;
-          pos++;
-          continue;
-        }
-        pos++;
-      } else {
-        /* Normal mode: score-based lazy matching */
-        if (prev_was_match) {
-          /* Require meaningful improvement to override previous match.
-           * Deferring costs 1 literal byte (~8 bits). With 100 points per byte,
-           * the threshold should be ~80 points (slightly less than a full byte
-           * since the literal may compress well). */
-          if (match_score > prev_match_score + 80) {
-            /* Better match here: drop previous, emit literal for prev pos */
-            prev_was_match = 0;
+            /* The hash was already updated for prev position, continue */
           } else {
             /* Use previous match */
             uint32_t il = prev_match_pos - insert_start;
             int use_dz =
-                (!prev_match_is_dict &&
-                 prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
+                (prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
             tokens[token_count].insert_len = il;
             tokens[token_count].copy_len = prev_match_len;
             tokens[token_count].distance = prev_match_dist;
             tokens[token_count].use_dist_zero = use_dz;
-            tokens[token_count].is_dict_ref = prev_match_is_dict;
+            tokens[token_count].is_dict_ref = 0;
             token_count++;
 
-            /* Dict refs don't update ring buffer (RFC 7932 Section 4) */
-            if (!use_dz && !prev_match_is_dict) {
+            /* Update distance ring buffer */
+            if (!use_dz) {
               dist_rb[dist_rb_idx & 3] = (int32_t)prev_match_dist;
               dist_rb_idx++;
             }
 
-            /* Insert skipped positions into hash chain */
+            /* Update hash for skipped positions */
             uint32_t skip_end = prev_match_pos + prev_match_len;
             if (skip_end > src_len)
               skip_end = src_len;
             for (uint32_t j = prev_match_pos + 1;
                  j < skip_end && j + 3 < src_len;
-                 ++j)
-              fio___brotli_hc_insert(hash_chain,
-                                     fio___brotli_hc_hash4(src + j),
-                                     j);
+                 ++j) {
+              uint32_t hj = fio___brotli_hash4(src + j);
+              hash_table[hj] = j;
+              hash_gen[hj] = hash_generation;
+            }
 
             insert_start = skip_end;
-            if (pos < skip_end) {
-              pos = skip_end;
-              prev_was_match = 0;
-              continue;
-            }
+            pos = skip_end;
             prev_was_match = 0;
-            /* Fall through to evaluate current match */
+            continue;
           }
         }
 
-        if (match_len >= 4) {
-          /* Defer: check next position for better match */
-          prev_match_len = match_len;
-          prev_match_dist = match_dist;
-          prev_match_pos = pos;
-          prev_match_score = match_score;
-          prev_match_is_dict = match_is_dict;
-          prev_was_match = 1;
-          pos++;
-          continue;
-        }
-        pos++;
-      }
-    }
-  } else {
-    /* ================================================================
-     * q1-4 path: direct-mapped hash table + simple lazy matching.
-     * Also used by q5+ on small data (<8KB) where hash chain provides
-     * no benefit — most buckets have 0-1 entries at ~12% load factor,
-     * and the distance cache / score-based lazy matching add overhead
-     * that hurts compression ratio. No dict lookup for small data
-     * either — dict distances expand the Huffman tree too much.
-     * ================================================================ */
-    while (pos < src_len) {
-      uint32_t match_len = 0;
-      uint32_t match_dist = 0;
-
-      if (pos + 3 < src_len) {
-        uint32_t h = fio___brotli_hash4(src + pos);
-        uint32_t candidate = hash_table[h];
-        hash_table[h] = pos;
-
-        if (hash_gen[h] == hash_generation && pos - candidate <= window_size &&
-            pos - candidate > 0) {
-          /* Check if first 4 bytes match */
-          if (fio_buf2u32_le(src + pos) == fio_buf2u32_le(src + candidate)) {
-            uint32_t max_len = src_len - pos;
-            if (max_len > (1U << 24) - 1)
-              max_len = (1U << 24) - 1;
-            /* Clamp to candidate's remaining bytes to prevent OOB read */
-            uint32_t cand_rem = src_len - candidate;
-            if (cand_rem < max_len)
-              max_len = cand_rem;
-            match_len =
-                fio___brotli_extend_match(src, pos, candidate, 4, max_len);
-            match_dist = pos - candidate;
-          }
-        }
-        hash_gen[h] = hash_generation;
-      }
-
-      /* Lazy matching for quality >= 3 */
-      if (quality >= 3 && prev_was_match && pos + 3 < src_len) {
-        if (match_len > prev_match_len + 1) {
-          /* Better match here: emit literal for previous position */
-          prev_was_match = 0;
-          /* The hash was already updated for prev position, continue */
-        } else {
-          /* Use previous match */
+        if (prev_was_match) {
+          /* Emit previous match (no better match found) */
           uint32_t il = prev_match_pos - insert_start;
           int use_dz =
               (prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
@@ -3675,13 +3787,11 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
           tokens[token_count].is_dict_ref = 0;
           token_count++;
 
-          /* Update distance ring buffer */
           if (!use_dz) {
             dist_rb[dist_rb_idx & 3] = (int32_t)prev_match_dist;
             dist_rb_idx++;
           }
 
-          /* Update hash for skipped positions */
           uint32_t skip_end = prev_match_pos + prev_match_len;
           if (skip_end > src_len)
             skip_end = src_len;
@@ -3693,729 +3803,702 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
           }
 
           insert_start = skip_end;
-          pos = skip_end;
-          prev_was_match = 0;
-          continue;
-        }
-      }
-
-      if (prev_was_match) {
-        /* Emit previous match (no better match found) */
-        uint32_t il = prev_match_pos - insert_start;
-        int use_dz =
-            (prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
-        tokens[token_count].insert_len = il;
-        tokens[token_count].copy_len = prev_match_len;
-        tokens[token_count].distance = prev_match_dist;
-        tokens[token_count].use_dist_zero = use_dz;
-        tokens[token_count].is_dict_ref = 0;
-        token_count++;
-
-        if (!use_dz) {
-          dist_rb[dist_rb_idx & 3] = (int32_t)prev_match_dist;
-          dist_rb_idx++;
-        }
-
-        uint32_t skip_end = prev_match_pos + prev_match_len;
-        if (skip_end > src_len)
-          skip_end = src_len;
-        for (uint32_t j = prev_match_pos + 1; j < skip_end && j + 3 < src_len;
-             ++j) {
-          uint32_t hj = fio___brotli_hash4(src + j);
-          hash_table[hj] = j;
-          hash_gen[hj] = hash_generation;
-        }
-
-        insert_start = skip_end;
-        /* If current pos is within the match we just emitted, skip ahead */
-        if (pos < skip_end) {
-          pos = skip_end;
-          prev_was_match = 0;
-          continue;
-        }
-        prev_was_match = 0;
-      }
-
-      if (match_len >= 4) {
-        if (quality >= 3) {
-          /* Defer: check next position for better match */
-          prev_match_len = match_len;
-          prev_match_dist = match_dist;
-          prev_match_pos = pos;
-          prev_was_match = 1;
-          pos++;
-          continue;
-        }
-
-        /* Greedy: emit match immediately */
-        uint32_t il = pos - insert_start;
-        int use_dz = (match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
-        tokens[token_count].insert_len = il;
-        tokens[token_count].copy_len = match_len;
-        tokens[token_count].distance = match_dist;
-        tokens[token_count].use_dist_zero = use_dz;
-        tokens[token_count].is_dict_ref = 0;
-        token_count++;
-
-        if (!use_dz) {
-          dist_rb[dist_rb_idx & 3] = (int32_t)match_dist;
-          dist_rb_idx++;
-        }
-
-        /* Update hash for match positions */
-        for (uint32_t j = pos + 1; j < pos + match_len && j + 3 < src_len;
-             ++j) {
-          uint32_t hj = fio___brotli_hash4(src + j);
-          hash_table[hj] = j;
-          hash_gen[hj] = hash_generation;
-        }
-
-        insert_start = pos + match_len;
-        pos += match_len;
-      } else {
-        pos++;
-      }
-    }
-  } /* end q1-4 vs q5+ */
-
-  /* Flush any pending lazy match */
-  if (prev_was_match) {
-    uint32_t il = prev_match_pos - insert_start;
-    int use_dz = (!prev_match_is_dict &&
-                  prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
-    tokens[token_count].insert_len = il;
-    tokens[token_count].copy_len = prev_match_len;
-    tokens[token_count].distance = prev_match_dist;
-    tokens[token_count].use_dist_zero = use_dz;
-    tokens[token_count].is_dict_ref = prev_match_is_dict;
-    token_count++;
-    insert_start = prev_match_pos + prev_match_len;
-  }
-
-  /* Final trailing literals: emit as insert-only command */
-  if (insert_start < src_len) {
-    tokens[token_count].insert_len = src_len - insert_start;
-    tokens[token_count].copy_len = 4; /* minimum copy_len for IAC encoding */
-    tokens[token_count].distance = 0; /* signals: no actual copy */
-    tokens[token_count].use_dist_zero = 0;
-    tokens[token_count].is_dict_ref = 0;
-    token_count++;
-  }
-
-  /* === Dictionary reference cost/benefit analysis ===
-   * Dictionary references use large distances that require high-numbered
-   * distance symbols, expanding the distance Huffman tree. If the total
-   * savings from dictionary matches don't exceed the tree overhead,
-   * convert all dict refs back to literals for better compression.
-   *
-   * True costs (often underestimated):
-   * 1. Distance Huffman tree expansion: dict distances use high symbols
-   *    (>= max_backward + 1), requiring the distance prefix code to describe
-   *    many more symbols. Each additional distance symbol costs ~8-15 bits
-   *    in the prefix code description.
-   * 2. IAC command fragmentation: each dict ref is a separate token,
-   *    increasing the IAC alphabet usage and Huffman tree size.
-   * 3. Per-ref distance encoding: symbol (~8-12 bits) + extra bits (~8-11).
-   *
-   * True savings:
-   * - copy_len bytes not emitted as literals. But on repetitive data,
-   *   literals compress well (~5-6 bits each), so savings are modest.
-   *
-   * Conservative approach: require substantial net savings to justify
-   * the overhead. The tree expansion cost scales with the number of
-   * distinct distance symbols used by dict refs. */
-  {
-    uint32_t dict_count = 0;
-    int32_t dict_net_bits = 0; /* positive = savings, negative = cost */
-    for (uint32_t t = 0; t < token_count; ++t) {
-      if (tokens[t].is_dict_ref)
-        dict_count++;
-    }
-    if (dict_count > 0) {
-      /* Each dict ref adds a distinct high-numbered distance symbol.
-       * The distance prefix code must describe all these symbols.
-       * Cost per distinct symbol in prefix code: ~10-15 bits.
-       * Plus the per-ref encoding cost. */
-      for (uint32_t t = 0; t < token_count; ++t) {
-        if (!tokens[t].is_dict_ref)
-          continue;
-        /* Savings: copy_len bytes not emitted as literals.
-         * Use 6 bits/literal (conservative — repetitive data compresses
-         * literals well). */
-        int32_t saved = (int32_t)tokens[t].copy_len * 6;
-        /* Cost: distance symbol + extra bits.
-         * Distance symbol Huffman code: ~10 bits (rare symbols get long codes).
-         * Distance extra bits: log2(distance). */
-        uint32_t d = tokens[t].distance;
-        int32_t dist_bits = 0;
-        while (d > 1) {
-          d >>= 1;
-          dist_bits++;
-        }
-        /* Total per-ref cost: Huffman code (~10) + extra bits + IAC overhead
-         * (~5 bits for the extra token vs merging into adjacent literal run) */
-        int32_t cost = 10 + dist_bits + 5;
-        dict_net_bits += saved - cost;
-      }
-      /* Tree overhead: distance prefix code must describe symbols up to
-       * the highest dict distance symbol. This costs ~10 bits per distinct
-       * symbol in the expanded range, plus ~40 bits base overhead. */
-      dict_net_bits -= (int32_t)(40 + dict_count * 10);
-    }
-
-    if (dict_count > 0 && dict_net_bits <= 0) {
-      /* Dictionary references cost more than they save — disable them.
-       * Convert each dict ref to literals by merging its copy_len bytes
-       * into the next token's insert_len. */
-      uint32_t tw = 0;
-      for (uint32_t t = 0; t < token_count; ++t) {
-        if (tokens[t].is_dict_ref) {
-          /* This token's insert_len literals + copy_len dict bytes
-           * all become literals for the next token. */
-          uint32_t extra_lits = tokens[t].insert_len + tokens[t].copy_len;
-          if (t + 1 < token_count) {
-            tokens[t + 1].insert_len += extra_lits;
-          } else {
-            /* Last token: emit as trailing literals */
-            tokens[tw].insert_len = extra_lits;
-            tokens[tw].copy_len = 4;
-            tokens[tw].distance = 0;
-            tokens[tw].use_dist_zero = 0;
-            tokens[tw].is_dict_ref = 0;
-            tw++;
+          /* If current pos is within the match we just emitted, skip ahead */
+          if (pos < skip_end) {
+            pos = skip_end;
+            prev_was_match = 0;
+            continue;
           }
-          continue;
+          prev_was_match = 0;
         }
-        if (tw != t)
-          tokens[tw] = tokens[t];
-        tw++;
+
+        if (match_len >= 4) {
+          if (quality >= 3) {
+            /* Defer: check next position for better match */
+            prev_match_len = match_len;
+            prev_match_dist = match_dist;
+            prev_match_pos = pos;
+            prev_was_match = 1;
+            pos++;
+            continue;
+          }
+
+          /* Greedy: emit match immediately */
+          uint32_t il = pos - insert_start;
+          int use_dz = (match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
+          tokens[token_count].insert_len = il;
+          tokens[token_count].copy_len = match_len;
+          tokens[token_count].distance = match_dist;
+          tokens[token_count].use_dist_zero = use_dz;
+          tokens[token_count].is_dict_ref = 0;
+          token_count++;
+
+          if (!use_dz) {
+            dist_rb[dist_rb_idx & 3] = (int32_t)match_dist;
+            dist_rb_idx++;
+          }
+
+          /* Update hash for match positions */
+          for (uint32_t j = pos + 1; j < pos + match_len && j + 3 < src_len;
+               ++j) {
+            uint32_t hj = fio___brotli_hash4(src + j);
+            hash_table[hj] = j;
+            hash_gen[hj] = hash_generation;
+          }
+
+          insert_start = pos + match_len;
+          pos += match_len;
+        } else {
+          pos++;
+        }
       }
-      token_count = tw;
+    } /* end q1-4 vs q5+ */
+
+    /* Flush any pending lazy match */
+    if (prev_was_match) {
+      uint32_t il = prev_match_pos - insert_start;
+      int use_dz =
+          (!prev_match_is_dict &&
+           prev_match_dist == (uint32_t)dist_rb[(dist_rb_idx - 1) & 3]);
+      tokens[token_count].insert_len = il;
+      tokens[token_count].copy_len = prev_match_len;
+      tokens[token_count].distance = prev_match_dist;
+      tokens[token_count].use_dist_zero = use_dz;
+      tokens[token_count].is_dict_ref = prev_match_is_dict;
+      token_count++;
+      insert_start = prev_match_pos + prev_match_len;
     }
-  }
 
-  /* === Verify token consistency === */
-
-  /* === Block splitting for q6 === */
-  fio___brotli_blksplit_s lit_splits[512]; /* max block split commands */
-  uint32_t lit_split_count = 1;
-  uint32_t nbltypesl = 1;
-
-  if (quality >= 6) {
-    lit_split_count =
-        fio___brotli_split_literals(src, tokens, token_count, lit_splits, 512);
-    /* Count distinct block types */
-    nbltypesl = 0;
-    for (uint32_t s = 0; s < lit_split_count; ++s) {
-      if (lit_splits[s].type >= nbltypesl)
-        nbltypesl = lit_splits[s].type + 1;
+    /* Final trailing literals: emit as insert-only command */
+    if (insert_start < src_len) {
+      tokens[token_count].insert_len = src_len - insert_start;
+      tokens[token_count].copy_len = 4; /* minimum copy_len for IAC encoding */
+      tokens[token_count].distance = 0; /* signals: no actual copy */
+      tokens[token_count].use_dist_zero = 0;
+      tokens[token_count].is_dict_ref = 0;
+      token_count++;
     }
-  }
-  if (nbltypesl < 1)
-    nbltypesl = 1;
 
-  /* === Pass 2: Build frequency histograms === */
+    /* === Dictionary reference cost/benefit analysis ===
+     * Dictionary references use large distances that require high-numbered
+     * distance symbols, expanding the distance Huffman tree. If the total
+     * savings from dictionary matches don't exceed the tree overhead,
+     * convert all dict refs back to literals for better compression.
+     *
+     * True costs (often underestimated):
+     * 1. Distance Huffman tree expansion: dict distances use high symbols
+     *    (>= max_backward + 1), requiring the distance prefix code to describe
+     *    many more symbols. Each additional distance symbol costs ~8-15 bits
+     *    in the prefix code description.
+     * 2. IAC command fragmentation: each dict ref is a separate token,
+     *    increasing the IAC alphabet usage and Huffman tree size.
+     * 3. Per-ref distance encoding: symbol (~8-12 bits) + extra bits (~8-11).
+     *
+     * True savings:
+     * - copy_len bytes not emitted as literals. But on repetitive data,
+     *   literals compress well (~5-6 bits each), so savings are modest.
+     *
+     * Conservative approach: require substantial net savings to justify
+     * the overhead. The tree expansion cost scales with the number of
+     * distinct distance symbols used by dict refs. */
+    {
+      uint32_t dict_count = 0;
+      int32_t dict_net_bits = 0; /* positive = savings, negative = cost */
+      for (uint32_t t = 0; t < token_count; ++t) {
+        if (tokens[t].is_dict_ref)
+          dict_count++;
+      }
+      if (dict_count > 0) {
+        /* Each dict ref adds a distinct high-numbered distance symbol.
+         * The distance prefix code must describe all these symbols.
+         * Cost per distinct symbol in prefix code: ~10-15 bits.
+         * Plus the per-ref encoding cost. */
+        for (uint32_t t = 0; t < token_count; ++t) {
+          if (!tokens[t].is_dict_ref)
+            continue;
+          /* Savings: copy_len bytes not emitted as literals.
+           * Use 6 bits/literal (conservative — repetitive data compresses
+           * literals well). */
+          int32_t saved = (int32_t)tokens[t].copy_len * 6;
+          /* Cost: distance symbol + extra bits.
+           * Distance symbol Huffman code: ~10 bits (rare symbols get long
+           * codes). Distance extra bits: log2(distance). */
+          uint32_t d = tokens[t].distance;
+          int32_t dist_bits = 0;
+          while (d > 1) {
+            d >>= 1;
+            dist_bits++;
+          }
+          /* Total per-ref cost: Huffman code (~10) + extra bits + IAC overhead
+           * (~5 bits for the extra token vs merging into adjacent literal run)
+           */
+          int32_t cost = 10 + dist_bits + 5;
+          dict_net_bits += saved - cost;
+        }
+        /* Tree overhead: distance prefix code must describe symbols up to
+         * the highest dict distance symbol. This costs ~10 bits per distinct
+         * symbol in the expanded range, plus ~40 bits base overhead. */
+        dict_net_bits -= (int32_t)(40 + dict_count * 10);
+      }
 
-  /* Context modeling for q5 (not q6 — q6 uses block splitting instead).
-   * Only enable when there are enough literals to amortize the overhead
-   * of encoding the context map + extra Huffman tree (~40-60 bytes). */
-  uint32_t cmode = FIO___BROTLI_CONTEXT_LSB6;
-  uint32_t ntreesl = 1;
-  const uint8_t *cmap = NULL;
-  int use_context_modeling = 0;
-
-  if (quality == 5 && src_len >= 32) {
-    uint32_t total_lits = 0;
-    for (uint32_t t = 0; t < token_count; ++t)
-      total_lits += tokens[t].insert_len;
-    /* Context modeling adds ~40-60 bytes overhead (context map + extra Huffman
-     * tree). Need enough literals to amortize: at 0.5 bits/literal savings,
-     * need ~640-960 literals just to break even. Use 8192 as threshold to
-     * ensure clear benefit. On small data (<8KB), the overhead dominates. */
-    if (total_lits >= 8192) {
-      cmode = fio___brotli_detect_context_mode(src, src_len);
-      ntreesl = 2;
-      cmap = (cmode == FIO___BROTLI_CONTEXT_UTF8) ? fio___brotli_cmap_utf8_2
-                                                  : fio___brotli_cmap_lsb6_2;
-      use_context_modeling = 1;
+      if (dict_count > 0 && dict_net_bits <= 0) {
+        /* Dictionary references cost more than they save — disable them.
+         * Convert each dict ref to literals by merging its copy_len bytes
+         * into the next token's insert_len. */
+        uint32_t tw = 0;
+        for (uint32_t t = 0; t < token_count; ++t) {
+          if (tokens[t].is_dict_ref) {
+            /* This token's insert_len literals + copy_len dict bytes
+             * all become literals for the next token. */
+            uint32_t extra_lits = tokens[t].insert_len + tokens[t].copy_len;
+            if (t + 1 < token_count) {
+              tokens[t + 1].insert_len += extra_lits;
+            } else {
+              /* Last token: emit as trailing literals */
+              tokens[tw].insert_len = extra_lits;
+              tokens[tw].copy_len = 4;
+              tokens[tw].distance = 0;
+              tokens[tw].use_dist_zero = 0;
+              tokens[tw].is_dict_ref = 0;
+              tw++;
+            }
+            continue;
+          }
+          if (tw != t)
+            tokens[tw] = tokens[t];
+          tw++;
+        }
+        token_count = tw;
+      }
     }
-  }
 
-  /* For q6 with block splitting: NTREESL = NBLTYPESL (one tree per block type,
-   * no context modeling). Each block type gets its own literal Huffman tree. */
-  if (nbltypesl > 1) {
-    ntreesl = nbltypesl;
-    cmap = NULL;
-    use_context_modeling = 0;
-    cmode = FIO___BROTLI_CONTEXT_LSB6;
-  }
+    /* === Verify token consistency === */
+
+    /* === Block splitting for q6 === */
+    fio___brotli_blksplit_s lit_splits[512]; /* max block split commands */
+    uint32_t lit_split_count = 1;
+    uint32_t nbltypesl = 1;
+
+    if (quality >= 6) {
+      lit_split_count = fio___brotli_split_literals(src,
+                                                    tokens,
+                                                    token_count,
+                                                    lit_splits,
+                                                    512);
+      /* Count distinct block types */
+      nbltypesl = 0;
+      for (uint32_t s = 0; s < lit_split_count; ++s) {
+        if (lit_splits[s].type >= nbltypesl)
+          nbltypesl = lit_splits[s].type + 1;
+      }
+    }
+    if (nbltypesl < 1)
+      nbltypesl = 1;
+
+    /* === Pass 2: Build frequency histograms === */
+
+    /* Context modeling for q5 (not q6 — q6 uses block splitting instead).
+     * Only enable when there are enough literals to amortize the overhead
+     * of encoding the context map + extra Huffman tree (~40-60 bytes). */
+    uint32_t cmode = FIO___BROTLI_CONTEXT_LSB6;
+    uint32_t ntreesl = 1;
+    const uint8_t *cmap = NULL;
+    int use_context_modeling = 0;
+
+    if (quality == 5 && src_len >= 32) {
+      uint32_t total_lits = 0;
+      for (uint32_t t = 0; t < token_count; ++t)
+        total_lits += tokens[t].insert_len;
+      /* Context modeling adds ~40-60 bytes overhead (context map + extra
+       * Huffman tree). Need enough literals to amortize: at 0.5 bits/literal
+       * savings, need ~640-960 literals just to break even. Use 8192 as
+       * threshold to ensure clear benefit. On small data (<8KB), the overhead
+       * dominates. */
+      if (total_lits >= 8192) {
+        cmode = fio___brotli_detect_context_mode(src, src_len);
+        ntreesl = 2;
+        cmap = (cmode == FIO___BROTLI_CONTEXT_UTF8) ? fio___brotli_cmap_utf8_2
+                                                    : fio___brotli_cmap_lsb6_2;
+        use_context_modeling = 1;
+      }
+    }
+
+    /* For q6 with block splitting: NTREESL = NBLTYPESL (one tree per block
+     * type, no context modeling). Each block type gets its own literal Huffman
+     * tree. */
+    if (nbltypesl > 1) {
+      ntreesl = nbltypesl;
+      cmap = NULL;
+      use_context_modeling = 0;
+      cmode = FIO___BROTLI_CONTEXT_LSB6;
+    }
 
 /* Literal frequency histograms: up to 32 trees (max block types) */
 #define FIO___BROTLI_MAX_LIT_TREES 32
-  uint32_t lit_freqs[FIO___BROTLI_MAX_LIT_TREES][256];
-  uint32_t iac_freqs[FIO___BROTLI_MAX_IACLEN];
-  uint32_t dist_freqs[64]; /* NPOSTFIX=0, NDIRECT=0 -> 64 symbols */
-  FIO_MEMSET(lit_freqs, 0, sizeof(lit_freqs));
-  FIO_MEMSET(iac_freqs, 0, sizeof(iac_freqs));
-  FIO_MEMSET(dist_freqs, 0, sizeof(dist_freqs));
+    uint32_t lit_freqs[FIO___BROTLI_MAX_LIT_TREES][256];
+    uint32_t iac_freqs[FIO___BROTLI_MAX_IACLEN];
+    uint32_t dist_freqs[64]; /* NPOSTFIX=0, NDIRECT=0 -> 64 symbols */
+    FIO_MEMSET(lit_freqs, 0, sizeof(lit_freqs));
+    FIO_MEMSET(iac_freqs, 0, sizeof(iac_freqs));
+    FIO_MEMSET(dist_freqs, 0, sizeof(dist_freqs));
 
-  /* Replay the distance ring buffer from this chunk's start state (the
-   * histogram pass must match the emission pass and the decompressor). */
-  dist_rb[0] = chunk_dist_rb[0];
-  dist_rb[1] = chunk_dist_rb[1];
-  dist_rb[2] = chunk_dist_rb[2];
-  dist_rb[3] = chunk_dist_rb[3];
-  dist_rb_idx = chunk_dist_rb_idx;
+    /* Replay the distance ring buffer from this chunk's start state (the
+     * histogram pass must match the emission pass and the decompressor). */
+    dist_rb[0] = chunk_dist_rb[0];
+    dist_rb[1] = chunk_dist_rb[1];
+    dist_rb[2] = chunk_dist_rb[2];
+    dist_rb[3] = chunk_dist_rb[3];
+    dist_rb_idx = chunk_dist_rb_idx;
 
-  uint32_t lit_pos = 0; /* tracks position in source for literal counting */
+    uint32_t lit_pos = 0; /* tracks position in source for literal counting */
 
-  /* For block splitting: track which split we're in and remaining count */
-  uint32_t bs_idx = 0;       /* current split index */
-  uint32_t bs_remaining = 0; /* literals remaining in current block */
-  uint32_t bs_cur_type = 0;  /* current block type */
-  if (nbltypesl > 1) {
-    bs_remaining = lit_splits[0].length;
-    bs_cur_type = lit_splits[0].type;
-  }
+    /* For block splitting: track which split we're in and remaining count */
+    uint32_t bs_idx = 0;       /* current split index */
+    uint32_t bs_remaining = 0; /* literals remaining in current block */
+    uint32_t bs_cur_type = 0;  /* current block type */
+    if (nbltypesl > 1) {
+      bs_remaining = lit_splits[0].length;
+      bs_cur_type = lit_splits[0].type;
+    }
 
-  for (uint32_t t = 0; t < token_count; ++t) {
-    /* Count literal frequencies per tree */
-    for (uint32_t i = 0; i < tokens[t].insert_len; ++i) {
-      uint32_t p = lit_pos + i;
-      if (nbltypesl > 1) {
-        /* Block splitting: tree index = current block type */
-        /* Advance block split if needed */
-        while (bs_remaining == 0 && bs_idx + 1 < lit_split_count) {
-          bs_idx++;
-          bs_remaining = lit_splits[bs_idx].length;
-          bs_cur_type = lit_splits[bs_idx].type;
+    for (uint32_t t = 0; t < token_count; ++t) {
+      /* Count literal frequencies per tree */
+      for (uint32_t i = 0; i < tokens[t].insert_len; ++i) {
+        uint32_t p = lit_pos + i;
+        if (nbltypesl > 1) {
+          /* Block splitting: tree index = current block type */
+          /* Advance block split if needed */
+          while (bs_remaining == 0 && bs_idx + 1 < lit_split_count) {
+            bs_idx++;
+            bs_remaining = lit_splits[bs_idx].length;
+            bs_cur_type = lit_splits[bs_idx].type;
+          }
+          lit_freqs[bs_cur_type][src[p]]++;
+          if (bs_remaining > 0)
+            bs_remaining--;
+        } else if (use_context_modeling) {
+          uint8_t p1 = p > 0 ? src[p - 1] : 0;
+          uint8_t p2 = p > 1 ? src[p - 2] : 0;
+          uint32_t ctx =
+              (uint32_t)fio___brotli_context_lut[cmode * 512 + p1] |
+              (uint32_t)fio___brotli_context_lut[cmode * 512 + 256 + p2];
+          uint32_t tree_idx = cmap[ctx];
+          lit_freqs[tree_idx][src[p]]++;
+        } else {
+          lit_freqs[0][src[p]]++;
         }
-        lit_freqs[bs_cur_type][src[p]]++;
-        if (bs_remaining > 0)
-          bs_remaining--;
-      } else if (use_context_modeling) {
-        uint8_t p1 = p > 0 ? src[p - 1] : 0;
-        uint8_t p2 = p > 1 ? src[p - 2] : 0;
-        uint32_t ctx =
-            (uint32_t)fio___brotli_context_lut[cmode * 512 + p1] |
-            (uint32_t)fio___brotli_context_lut[cmode * 512 + 256 + p2];
-        uint32_t tree_idx = cmap[ctx];
-        lit_freqs[tree_idx][src[p]]++;
-      } else {
-        lit_freqs[0][src[p]]++;
       }
-    }
-    lit_pos += tokens[t].insert_len;
+      lit_pos += tokens[t].insert_len;
 
-    /* Encode IAC command to get the symbol */
-    uint32_t ieb, iev, ceb, cev;
-    uint32_t copy_len = tokens[t].copy_len;
-    int use_dz = tokens[t].use_dist_zero;
+      /* Encode IAC command to get the symbol */
+      uint32_t ieb, iev, ceb, cev;
+      uint32_t copy_len = tokens[t].copy_len;
+      int use_dz = tokens[t].use_dist_zero;
 
-    /* For trailing literals with no actual copy, use dist_zero path */
-    if (tokens[t].distance == 0 && t == token_count - 1) {
-      use_dz = 1;
-    }
-
-    uint32_t iac_sym = fio___brotli_encode_iac(tokens[t].insert_len,
-                                               copy_len,
-                                               &use_dz,
-                                               &ieb,
-                                               &iev,
-                                               &ceb,
-                                               &cev);
-    iac_freqs[iac_sym]++;
-
-    /* Count distance frequencies */
-    if (!use_dz && tokens[t].distance > 0) {
-      uint32_t deb, dev;
-      uint32_t dist_sym = fio___brotli_encode_distance(tokens[t].distance,
-                                                       dist_rb,
-                                                       dist_rb_idx,
-                                                       &deb,
-                                                       &dev);
-      dist_freqs[dist_sym]++;
-
-      /* Update ring buffer — RFC 7932 Section 4: push for dist_sym != 0.
-       * Dictionary references are NOT pushed (RFC 7932 Section 4). */
-      if (dist_sym != 0 && !tokens[t].is_dict_ref) {
-        dist_rb[dist_rb_idx & 3] = (int32_t)tokens[t].distance;
-        dist_rb_idx++;
+      /* For trailing literals with no actual copy, use dist_zero path */
+      if (tokens[t].distance == 0 && t == token_count - 1) {
+        use_dz = 1;
       }
-    }
 
-    if (tokens[t].distance > 0)
-      lit_pos += copy_len;
-  }
+      uint32_t iac_sym = fio___brotli_encode_iac(tokens[t].insert_len,
+                                                 copy_len,
+                                                 &use_dz,
+                                                 &ieb,
+                                                 &iev,
+                                                 &ceb,
+                                                 &cev);
+      iac_freqs[iac_sym]++;
 
-  /* Ensure at least one symbol in each literal tree */
-  for (uint32_t tr = 0; tr < ntreesl; ++tr) {
-    int has_any = 0;
-    for (uint32_t i = 0; i < 256; ++i) {
-      if (lit_freqs[tr][i]) {
-        has_any = 1;
-        break;
+      /* Count distance frequencies */
+      if (!use_dz && tokens[t].distance > 0) {
+        uint32_t deb, dev;
+        uint32_t dist_sym = fio___brotli_encode_distance(tokens[t].distance,
+                                                         dist_rb,
+                                                         dist_rb_idx,
+                                                         &deb,
+                                                         &dev);
+        dist_freqs[dist_sym]++;
+
+        /* Update ring buffer — RFC 7932 Section 4: push for dist_sym != 0.
+         * Dictionary references are NOT pushed (RFC 7932 Section 4). */
+        if (dist_sym != 0 && !tokens[t].is_dict_ref) {
+          dist_rb[dist_rb_idx & 3] = (int32_t)tokens[t].distance;
+          dist_rb_idx++;
+        }
       }
-    }
-    if (!has_any)
-      lit_freqs[tr][0] = 1;
-  }
 
-  /* Ensure at least one distance symbol */
-  {
-    int has_dist = 0;
-    for (uint32_t i = 0; i < 64; ++i) {
-      if (dist_freqs[i]) {
-        has_dist = 1;
-        break;
+      if (tokens[t].distance > 0)
+        lit_pos += copy_len;
+    }
+
+    /* Ensure at least one symbol in each literal tree */
+    for (uint32_t tr = 0; tr < ntreesl; ++tr) {
+      int has_any = 0;
+      for (uint32_t i = 0; i < 256; ++i) {
+        if (lit_freqs[tr][i]) {
+          has_any = 1;
+          break;
+        }
       }
-    }
-    if (!has_dist)
-      dist_freqs[0] = 1;
-  }
-
-  /* === Build Huffman codes === */
-  uint8_t lit_lens[FIO___BROTLI_MAX_LIT_TREES][256];
-  uint16_t lit_codes[FIO___BROTLI_MAX_LIT_TREES][256];
-  for (uint32_t tr = 0; tr < ntreesl; ++tr) {
-    fio___brotli_build_code_lengths(lit_lens[tr], lit_freqs[tr], 256, 15);
-    fio___brotli_build_codes(lit_codes[tr], lit_lens[tr], 256);
-  }
-
-  uint8_t iac_lens[FIO___BROTLI_MAX_IACLEN];
-  uint16_t iac_codes[FIO___BROTLI_MAX_IACLEN];
-  fio___brotli_build_code_lengths(iac_lens,
-                                  iac_freqs,
-                                  FIO___BROTLI_MAX_IACLEN,
-                                  15);
-  fio___brotli_build_codes(iac_codes, iac_lens, FIO___BROTLI_MAX_IACLEN);
-
-  uint8_t dist_lens[64];
-  uint16_t dist_codes[64];
-  fio___brotli_build_code_lengths(dist_lens, dist_freqs, 64, 15);
-  fio___brotli_build_codes(dist_codes, dist_lens, 64);
-
-  /* === Build block type/count Huffman codes (for block splitting) === */
-  uint32_t bt_alpha = nbltypesl + 2; /* block type alphabet size */
-  uint32_t bt_freqs[258];            /* max 256 + 2 */
-  uint8_t bt_lens[258];
-  uint16_t bt_codes[258];
-  uint32_t bc_freqs[26]; /* block count alphabet */
-  uint8_t bc_lens[26];
-  uint16_t bc_codes[26];
-
-  if (nbltypesl > 1) {
-    FIO_MEMSET(bt_freqs, 0, bt_alpha * sizeof(uint32_t));
-    FIO_MEMSET(bc_freqs, 0, sizeof(bc_freqs));
-
-    /* Count block type code frequencies from splits (skip first block) */
-    uint32_t bt_cur = lit_splits[0].type;
-    uint32_t bt_prev = 1; /* per RFC 7932 spec */
-    /* First block count */
-    uint32_t bc_sym, bc_eb, bc_ev;
-    fio___brotli_encode_block_count(lit_splits[0].length,
-                                    &bc_sym,
-                                    &bc_eb,
-                                    &bc_ev);
-    bc_freqs[bc_sym]++;
-
-    for (uint32_t s = 1; s < lit_split_count; ++s) {
-      uint32_t type_code = fio___brotli_encode_block_type(lit_splits[s].type,
-                                                          bt_cur,
-                                                          bt_prev,
-                                                          nbltypesl);
-      bt_freqs[type_code]++;
-      bt_prev = bt_cur;
-      bt_cur = lit_splits[s].type;
-
-      fio___brotli_encode_block_count(lit_splits[s].length,
-                                      &bc_sym,
-                                      &bc_eb,
-                                      &bc_ev);
-      bc_freqs[bc_sym]++;
+      if (!has_any)
+        lit_freqs[tr][0] = 1;
     }
 
-    /* Ensure at least one symbol in each */
+    /* Ensure at least one distance symbol */
     {
-      int has = 0;
-      for (uint32_t i = 0; i < bt_alpha; ++i)
-        has += (bt_freqs[i] > 0);
-      if (!has)
-        bt_freqs[0] = 1;
-    }
-    {
-      int has = 0;
-      for (uint32_t i = 0; i < 26; ++i)
-        has += (bc_freqs[i] > 0);
-      if (!has)
-        bc_freqs[0] = 1;
+      int has_dist = 0;
+      for (uint32_t i = 0; i < 64; ++i) {
+        if (dist_freqs[i]) {
+          has_dist = 1;
+          break;
+        }
+      }
+      if (!has_dist)
+        dist_freqs[0] = 1;
     }
 
-    fio___brotli_build_code_lengths(bt_lens, bt_freqs, bt_alpha, 15);
-    fio___brotli_build_codes(bt_codes, bt_lens, bt_alpha);
-    fio___brotli_build_code_lengths(bc_lens, bc_freqs, 26, 15);
-    fio___brotli_build_codes(bc_codes, bc_lens, 26);
-  }
-
-  /* === Pass 3: Write bitstream (meta-block header + tables + data) === */
-
-  /* Meta-block header (RFC 7932 Section 9.2) */
-  fio___brotli_bw_put(&w, (uint64_t)is_last_chunk, 1); /* ISLAST */
-  if (is_last_chunk) {
-    fio___brotli_bw_put(&w, 0, 1); /* ISLASTEMPTY = 0 (not empty) */
-  }
-  fio___brotli_write_mlen(&w, src_len); /* MLEN */
-  if (!is_last_chunk)
-    fio___brotli_bw_put(&w, 0, 1); /* ISUNCOMPRESSED = 0 (present iff !ISLAST) */
-
-  /* Block type counts: NBLTYPESL, NBLTYPESI=1, NBLTYPESD=1 */
-  if (nbltypesl > 1) {
-    /* NBLTYPESL encoded as VarLenUint8(nbltypesl - 1) with leading 1-bit */
-    fio___brotli_write_varlen_uint8(&w, nbltypesl - 1);
-
-    /* Write block type prefix code (alphabet = nbltypesl + 2) */
-    fio___brotli_write_prefix_code(&w, bt_lens, bt_codes, bt_alpha, bt_alpha);
-
-    /* Write block count prefix code (alphabet = 26) */
-    fio___brotli_write_prefix_code(&w, bc_lens, bc_codes, 26, 26);
-
-    /* Fix single-symbol code lengths for block type/count codes */
-    {
-      uint32_t n = 0;
-      for (uint32_t i = 0; i < bt_alpha; ++i)
-        n += (bt_lens[i] != 0);
-      if (n == 1)
-        for (uint32_t i = 0; i < bt_alpha; ++i)
-          bt_lens[i] = 0;
-    }
-    {
-      uint32_t n = 0;
-      for (uint32_t i = 0; i < 26; ++i)
-        n += (bc_lens[i] != 0);
-      if (n == 1)
-        for (uint32_t i = 0; i < 26; ++i)
-          bc_lens[i] = 0;
+    /* === Build Huffman codes === */
+    uint8_t lit_lens[FIO___BROTLI_MAX_LIT_TREES][256];
+    uint16_t lit_codes[FIO___BROTLI_MAX_LIT_TREES][256];
+    for (uint32_t tr = 0; tr < ntreesl; ++tr) {
+      fio___brotli_build_code_lengths(lit_lens[tr], lit_freqs[tr], 256, 15);
+      fio___brotli_build_codes(lit_codes[tr], lit_lens[tr], 256);
     }
 
-    /* Write first block count */
-    {
+    uint8_t iac_lens[FIO___BROTLI_MAX_IACLEN];
+    uint16_t iac_codes[FIO___BROTLI_MAX_IACLEN];
+    fio___brotli_build_code_lengths(iac_lens,
+                                    iac_freqs,
+                                    FIO___BROTLI_MAX_IACLEN,
+                                    15);
+    fio___brotli_build_codes(iac_codes, iac_lens, FIO___BROTLI_MAX_IACLEN);
+
+    uint8_t dist_lens[64];
+    uint16_t dist_codes[64];
+    fio___brotli_build_code_lengths(dist_lens, dist_freqs, 64, 15);
+    fio___brotli_build_codes(dist_codes, dist_lens, 64);
+
+    /* === Build block type/count Huffman codes (for block splitting) === */
+    uint32_t bt_alpha = nbltypesl + 2; /* block type alphabet size */
+    uint32_t bt_freqs[258];            /* max 256 + 2 */
+    uint8_t bt_lens[258];
+    uint16_t bt_codes[258];
+    uint32_t bc_freqs[26]; /* block count alphabet */
+    uint8_t bc_lens[26];
+    uint16_t bc_codes[26];
+
+    if (nbltypesl > 1) {
+      FIO_MEMSET(bt_freqs, 0, bt_alpha * sizeof(uint32_t));
+      FIO_MEMSET(bc_freqs, 0, sizeof(bc_freqs));
+
+      /* Count block type code frequencies from splits (skip first block) */
+      uint32_t bt_cur = lit_splits[0].type;
+      uint32_t bt_prev = 1; /* per RFC 7932 spec */
+      /* First block count */
       uint32_t bc_sym, bc_eb, bc_ev;
       fio___brotli_encode_block_count(lit_splits[0].length,
                                       &bc_sym,
                                       &bc_eb,
                                       &bc_ev);
-      fio___brotli_bw_put_huff(&w, bc_codes[bc_sym], bc_lens[bc_sym]);
-      if (bc_eb)
-        fio___brotli_bw_put(&w, bc_ev, bc_eb);
+      bc_freqs[bc_sym]++;
+
+      for (uint32_t s = 1; s < lit_split_count; ++s) {
+        uint32_t type_code = fio___brotli_encode_block_type(lit_splits[s].type,
+                                                            bt_cur,
+                                                            bt_prev,
+                                                            nbltypesl);
+        bt_freqs[type_code]++;
+        bt_prev = bt_cur;
+        bt_cur = lit_splits[s].type;
+
+        fio___brotli_encode_block_count(lit_splits[s].length,
+                                        &bc_sym,
+                                        &bc_eb,
+                                        &bc_ev);
+        bc_freqs[bc_sym]++;
+      }
+
+      /* Ensure at least one symbol in each */
+      {
+        int has = 0;
+        for (uint32_t i = 0; i < bt_alpha; ++i)
+          has += (bt_freqs[i] > 0);
+        if (!has)
+          bt_freqs[0] = 1;
+      }
+      {
+        int has = 0;
+        for (uint32_t i = 0; i < 26; ++i)
+          has += (bc_freqs[i] > 0);
+        if (!has)
+          bc_freqs[0] = 1;
+      }
+
+      fio___brotli_build_code_lengths(bt_lens, bt_freqs, bt_alpha, 15);
+      fio___brotli_build_codes(bt_codes, bt_lens, bt_alpha);
+      fio___brotli_build_code_lengths(bc_lens, bc_freqs, 26, 15);
+      fio___brotli_build_codes(bc_codes, bc_lens, 26);
     }
-  } else {
-    fio___brotli_bw_put(&w, 0, 1); /* NBLTYPESL = 1 */
-  }
-  fio___brotli_bw_put(&w, 0, 1); /* NBLTYPESI = 1 */
-  fio___brotli_bw_put(&w, 0, 1); /* NBLTYPESD = 1 */
 
-  /* NPOSTFIX and NDIRECT */
-  fio___brotli_bw_put(&w, 0, 2); /* NPOSTFIX = 0 */
-  fio___brotli_bw_put(&w, 0, 4); /* NDIRECT = 0 (NDIRECT >> NPOSTFIX = 0) */
+    /* === Pass 3: Write bitstream (meta-block header + tables + data) === */
 
-  /* Context modes for each literal block type */
-  for (uint32_t bt = 0; bt < nbltypesl; ++bt)
-    fio___brotli_bw_put(&w, cmode, 2); /* CMODE[bt] */
-
-  /* NTREESL — VarLenUint8 encoding of (ntreesl - 1) */
-  fio___brotli_write_varlen_uint8(&w, ntreesl - 1);
-
-  /* Context map for literals */
-  if (ntreesl >= 2) {
-    if (use_context_modeling) {
-      /* q5: 2 trees with context map */
-      fio___brotli_write_context_map(&w, cmap, 64 * nbltypesl, ntreesl);
-    } else if (nbltypesl > 1) {
-      /* q6 block splitting: identity context map.
-       * map_size = nbltypesl * 64. Entry [bt*64 + ctx] = bt.
-       * This maps all 64 contexts of block type bt to tree bt. */
-      uint8_t id_cmap[32 * 64]; /* max 32 block types * 64 contexts */
-      for (uint32_t bt = 0; bt < nbltypesl; ++bt)
-        FIO_MEMSET(id_cmap + bt * 64, (int)bt, 64);
-      fio___brotli_write_context_map(&w, id_cmap, nbltypesl * 64, ntreesl);
+    /* Meta-block header (RFC 7932 Section 9.2) */
+    fio___brotli_bw_put(&w, (uint64_t)is_last_chunk, 1); /* ISLAST */
+    if (is_last_chunk) {
+      fio___brotli_bw_put(&w, 0, 1); /* ISLASTEMPTY = 0 (not empty) */
     }
-  }
+    fio___brotli_write_mlen(&w, src_len); /* MLEN */
+    if (!is_last_chunk)
+      fio___brotli_bw_put(&w,
+                          0,
+                          1); /* ISUNCOMPRESSED = 0 (present iff !ISLAST) */
 
-  /* NTREESD = 1 (trivial context map for distances) */
-  fio___brotli_bw_put(&w, 0, 1); /* VarLenUint8 = 0 -> NTREESD = 1 */
+    /* Block type counts: NBLTYPESL, NBLTYPESI=1, NBLTYPESD=1 */
+    if (nbltypesl > 1) {
+      /* NBLTYPESL encoded as VarLenUint8(nbltypesl - 1) with leading 1-bit */
+      fio___brotli_write_varlen_uint8(&w, nbltypesl - 1);
 
-  /* Write prefix code tables */
-  /* Literal prefix codes (ntreesl trees, 256 symbols each) */
-  for (uint32_t tr = 0; tr < ntreesl; ++tr)
-    fio___brotli_write_prefix_code(&w, lit_lens[tr], lit_codes[tr], 256, 256);
+      /* Write block type prefix code (alphabet = nbltypesl + 2) */
+      fio___brotli_write_prefix_code(&w, bt_lens, bt_codes, bt_alpha, bt_alpha);
 
-  /* IAC prefix code (704 symbols) */
-  fio___brotli_write_prefix_code(&w,
-                                 iac_lens,
-                                 iac_codes,
-                                 FIO___BROTLI_MAX_IACLEN,
-                                 FIO___BROTLI_MAX_IACLEN);
+      /* Write block count prefix code (alphabet = 26) */
+      fio___brotli_write_prefix_code(&w, bc_lens, bc_codes, 26, 26);
 
-  /* Distance prefix code (64 symbols) */
-  fio___brotli_write_prefix_code(&w, dist_lens, dist_codes, 64, 64);
+      /* Fix single-symbol code lengths for block type/count codes */
+      {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < bt_alpha; ++i)
+          n += (bt_lens[i] != 0);
+        if (n == 1)
+          for (uint32_t i = 0; i < bt_alpha; ++i)
+            bt_lens[i] = 0;
+      }
+      {
+        uint32_t n = 0;
+        for (uint32_t i = 0; i < 26; ++i)
+          n += (bc_lens[i] != 0);
+        if (n == 1)
+          for (uint32_t i = 0; i < 26; ++i)
+            bc_lens[i] = 0;
+      }
 
-  /* Fix single-symbol code lengths: the decompressor's NSYM=1 simple prefix
-   * code uses code length 0 (0 bits per symbol), but build_code_lengths
-   * assigns length 1. Adjust to match what the decompressor reconstructs. */
-  {
-    uint32_t n;
-    for (uint32_t tr = 0; tr < ntreesl; ++tr) {
-      n = 0;
-      for (uint32_t i = 0; i < 256; ++i)
-        n += (lit_lens[tr][i] != 0);
-      if (n == 1)
+      /* Write first block count */
+      {
+        uint32_t bc_sym, bc_eb, bc_ev;
+        fio___brotli_encode_block_count(lit_splits[0].length,
+                                        &bc_sym,
+                                        &bc_eb,
+                                        &bc_ev);
+        fio___brotli_bw_put_huff(&w, bc_codes[bc_sym], bc_lens[bc_sym]);
+        if (bc_eb)
+          fio___brotli_bw_put(&w, bc_ev, bc_eb);
+      }
+    } else {
+      fio___brotli_bw_put(&w, 0, 1); /* NBLTYPESL = 1 */
+    }
+    fio___brotli_bw_put(&w, 0, 1); /* NBLTYPESI = 1 */
+    fio___brotli_bw_put(&w, 0, 1); /* NBLTYPESD = 1 */
+
+    /* NPOSTFIX and NDIRECT */
+    fio___brotli_bw_put(&w, 0, 2); /* NPOSTFIX = 0 */
+    fio___brotli_bw_put(&w, 0, 4); /* NDIRECT = 0 (NDIRECT >> NPOSTFIX = 0) */
+
+    /* Context modes for each literal block type */
+    for (uint32_t bt = 0; bt < nbltypesl; ++bt)
+      fio___brotli_bw_put(&w, cmode, 2); /* CMODE[bt] */
+
+    /* NTREESL — VarLenUint8 encoding of (ntreesl - 1) */
+    fio___brotli_write_varlen_uint8(&w, ntreesl - 1);
+
+    /* Context map for literals */
+    if (ntreesl >= 2) {
+      if (use_context_modeling) {
+        /* q5: 2 trees with context map */
+        fio___brotli_write_context_map(&w, cmap, 64 * nbltypesl, ntreesl);
+      } else if (nbltypesl > 1) {
+        /* q6 block splitting: identity context map.
+         * map_size = nbltypesl * 64. Entry [bt*64 + ctx] = bt.
+         * This maps all 64 contexts of block type bt to tree bt. */
+        uint8_t id_cmap[32 * 64]; /* max 32 block types * 64 contexts */
+        for (uint32_t bt = 0; bt < nbltypesl; ++bt)
+          FIO_MEMSET(id_cmap + bt * 64, (int)bt, 64);
+        fio___brotli_write_context_map(&w, id_cmap, nbltypesl * 64, ntreesl);
+      }
+    }
+
+    /* NTREESD = 1 (trivial context map for distances) */
+    fio___brotli_bw_put(&w, 0, 1); /* VarLenUint8 = 0 -> NTREESD = 1 */
+
+    /* Write prefix code tables */
+    /* Literal prefix codes (ntreesl trees, 256 symbols each) */
+    for (uint32_t tr = 0; tr < ntreesl; ++tr)
+      fio___brotli_write_prefix_code(&w, lit_lens[tr], lit_codes[tr], 256, 256);
+
+    /* IAC prefix code (704 symbols) */
+    fio___brotli_write_prefix_code(&w,
+                                   iac_lens,
+                                   iac_codes,
+                                   FIO___BROTLI_MAX_IACLEN,
+                                   FIO___BROTLI_MAX_IACLEN);
+
+    /* Distance prefix code (64 symbols) */
+    fio___brotli_write_prefix_code(&w, dist_lens, dist_codes, 64, 64);
+
+    /* Fix single-symbol code lengths: the decompressor's NSYM=1 simple prefix
+     * code uses code length 0 (0 bits per symbol), but build_code_lengths
+     * assigns length 1. Adjust to match what the decompressor reconstructs. */
+    {
+      uint32_t n;
+      for (uint32_t tr = 0; tr < ntreesl; ++tr) {
+        n = 0;
         for (uint32_t i = 0; i < 256; ++i)
-          lit_lens[tr][i] = 0;
-    }
-    n = 0;
-    for (uint32_t i = 0; i < FIO___BROTLI_MAX_IACLEN; ++i)
-      n += (iac_lens[i] != 0);
-    if (n == 1)
+          n += (lit_lens[tr][i] != 0);
+        if (n == 1)
+          for (uint32_t i = 0; i < 256; ++i)
+            lit_lens[tr][i] = 0;
+      }
+      n = 0;
       for (uint32_t i = 0; i < FIO___BROTLI_MAX_IACLEN; ++i)
-        iac_lens[i] = 0;
-    n = 0;
-    for (uint32_t i = 0; i < 64; ++i)
-      n += (dist_lens[i] != 0);
-    if (n == 1)
+        n += (iac_lens[i] != 0);
+      if (n == 1)
+        for (uint32_t i = 0; i < FIO___BROTLI_MAX_IACLEN; ++i)
+          iac_lens[i] = 0;
+      n = 0;
       for (uint32_t i = 0; i < 64; ++i)
-        dist_lens[i] = 0;
-  }
+        n += (dist_lens[i] != 0);
+      if (n == 1)
+        for (uint32_t i = 0; i < 64; ++i)
+          dist_lens[i] = 0;
+    }
 
-  /* === Write compressed data === */
-  /* Replay the distance ring buffer from this chunk's start state (the
-   * emission pass leaves the end state in dist_rb for the next chunk). */
-  dist_rb[0] = chunk_dist_rb[0];
-  dist_rb[1] = chunk_dist_rb[1];
-  dist_rb[2] = chunk_dist_rb[2];
-  dist_rb[3] = chunk_dist_rb[3];
-  dist_rb_idx = chunk_dist_rb_idx;
-  lit_pos = 0;
+    /* === Write compressed data === */
+    /* Replay the distance ring buffer from this chunk's start state (the
+     * emission pass leaves the end state in dist_rb for the next chunk). */
+    dist_rb[0] = chunk_dist_rb[0];
+    dist_rb[1] = chunk_dist_rb[1];
+    dist_rb[2] = chunk_dist_rb[2];
+    dist_rb[3] = chunk_dist_rb[3];
+    dist_rb_idx = chunk_dist_rb_idx;
+    lit_pos = 0;
 
-  /* Block splitting state for literal emission */
-  bs_idx = 0;
-  bs_remaining = (nbltypesl > 1) ? lit_splits[0].length : 0;
-  bs_cur_type = (nbltypesl > 1) ? lit_splits[0].type : 0;
-  uint32_t bs_prev_type = 1; /* per RFC 7932 spec */
+    /* Block splitting state for literal emission */
+    bs_idx = 0;
+    bs_remaining = (nbltypesl > 1) ? lit_splits[0].length : 0;
+    bs_cur_type = (nbltypesl > 1) ? lit_splits[0].type : 0;
+    uint32_t bs_prev_type = 1; /* per RFC 7932 spec */
 
-  for (uint32_t t = 0; t < token_count; ++t) {
-    uint32_t ieb, iev, ceb, cev;
-    uint32_t copy_len = tokens[t].copy_len;
-    int use_dz = tokens[t].use_dist_zero;
+    for (uint32_t t = 0; t < token_count; ++t) {
+      uint32_t ieb, iev, ceb, cev;
+      uint32_t copy_len = tokens[t].copy_len;
+      int use_dz = tokens[t].use_dist_zero;
 
-    if (tokens[t].distance == 0 && t == token_count - 1)
-      use_dz = 1;
+      if (tokens[t].distance == 0 && t == token_count - 1)
+        use_dz = 1;
 
-    uint32_t iac_sym = fio___brotli_encode_iac(tokens[t].insert_len,
-                                               copy_len,
-                                               &use_dz,
-                                               &ieb,
-                                               &iev,
-                                               &ceb,
-                                               &cev);
+      uint32_t iac_sym = fio___brotli_encode_iac(tokens[t].insert_len,
+                                                 copy_len,
+                                                 &use_dz,
+                                                 &ieb,
+                                                 &iev,
+                                                 &ceb,
+                                                 &cev);
 
-    /* Write IAC command */
-    fio___brotli_bw_put_huff(&w, iac_codes[iac_sym], iac_lens[iac_sym]);
+      /* Write IAC command */
+      fio___brotli_bw_put_huff(&w, iac_codes[iac_sym], iac_lens[iac_sym]);
 
-    /* Write insert extra bits */
-    if (ieb)
-      fio___brotli_bw_put(&w, iev, ieb);
+      /* Write insert extra bits */
+      if (ieb)
+        fio___brotli_bw_put(&w, iev, ieb);
 
-    /* Write copy extra bits */
-    if (ceb)
-      fio___brotli_bw_put(&w, cev, ceb);
+      /* Write copy extra bits */
+      if (ceb)
+        fio___brotli_bw_put(&w, cev, ceb);
 
-    /* Write literal bytes */
-    for (uint32_t i = 0; i < tokens[t].insert_len; ++i) {
-      uint32_t p = lit_pos + i;
-      uint8_t lit = src[p];
+      /* Write literal bytes */
+      for (uint32_t i = 0; i < tokens[t].insert_len; ++i) {
+        uint32_t p = lit_pos + i;
+        uint8_t lit = src[p];
 
-      if (nbltypesl > 1) {
-        /* Check for block switch */
-        while (bs_remaining == 0 && bs_idx + 1 < lit_split_count) {
-          bs_idx++;
-          uint32_t new_type = lit_splits[bs_idx].type;
-          /* Write block switch command */
-          uint32_t type_code = fio___brotli_encode_block_type(new_type,
-                                                              bs_cur_type,
-                                                              bs_prev_type,
-                                                              nbltypesl);
-          fio___brotli_bw_put_huff(&w, bt_codes[type_code], bt_lens[type_code]);
-          /* Write new block count */
-          uint32_t bc_sym, bc_eb, bc_ev;
-          fio___brotli_encode_block_count(lit_splits[bs_idx].length,
-                                          &bc_sym,
-                                          &bc_eb,
-                                          &bc_ev);
-          fio___brotli_bw_put_huff(&w, bc_codes[bc_sym], bc_lens[bc_sym]);
-          if (bc_eb)
-            fio___brotli_bw_put(&w, bc_ev, bc_eb);
+        if (nbltypesl > 1) {
+          /* Check for block switch */
+          while (bs_remaining == 0 && bs_idx + 1 < lit_split_count) {
+            bs_idx++;
+            uint32_t new_type = lit_splits[bs_idx].type;
+            /* Write block switch command */
+            uint32_t type_code = fio___brotli_encode_block_type(new_type,
+                                                                bs_cur_type,
+                                                                bs_prev_type,
+                                                                nbltypesl);
+            fio___brotli_bw_put_huff(&w,
+                                     bt_codes[type_code],
+                                     bt_lens[type_code]);
+            /* Write new block count */
+            uint32_t bc_sym, bc_eb, bc_ev;
+            fio___brotli_encode_block_count(lit_splits[bs_idx].length,
+                                            &bc_sym,
+                                            &bc_eb,
+                                            &bc_ev);
+            fio___brotli_bw_put_huff(&w, bc_codes[bc_sym], bc_lens[bc_sym]);
+            if (bc_eb)
+              fio___brotli_bw_put(&w, bc_ev, bc_eb);
 
-          bs_prev_type = bs_cur_type;
-          bs_cur_type = new_type;
-          bs_remaining = lit_splits[bs_idx].length;
+            bs_prev_type = bs_cur_type;
+            bs_cur_type = new_type;
+            bs_remaining = lit_splits[bs_idx].length;
+          }
+          /* Use block type's tree */
+          uint32_t tree_idx = bs_cur_type;
+          fio___brotli_bw_put_huff(&w,
+                                   lit_codes[tree_idx][lit],
+                                   lit_lens[tree_idx][lit]);
+          if (bs_remaining > 0)
+            bs_remaining--;
+        } else if (use_context_modeling) {
+          uint8_t p1 = p > 0 ? src[p - 1] : 0;
+          uint8_t p2 = p > 1 ? src[p - 2] : 0;
+          uint32_t ctx =
+              (uint32_t)fio___brotli_context_lut[cmode * 512 + p1] |
+              (uint32_t)fio___brotli_context_lut[cmode * 512 + 256 + p2];
+          uint32_t tree_idx = cmap[ctx];
+          fio___brotli_bw_put_huff(&w,
+                                   lit_codes[tree_idx][lit],
+                                   lit_lens[tree_idx][lit]);
+        } else {
+          fio___brotli_bw_put_huff(&w, lit_codes[0][lit], lit_lens[0][lit]);
         }
-        /* Use block type's tree */
-        uint32_t tree_idx = bs_cur_type;
-        fio___brotli_bw_put_huff(&w,
-                                 lit_codes[tree_idx][lit],
-                                 lit_lens[tree_idx][lit]);
-        if (bs_remaining > 0)
-          bs_remaining--;
-      } else if (use_context_modeling) {
-        uint8_t p1 = p > 0 ? src[p - 1] : 0;
-        uint8_t p2 = p > 1 ? src[p - 2] : 0;
-        uint32_t ctx =
-            (uint32_t)fio___brotli_context_lut[cmode * 512 + p1] |
-            (uint32_t)fio___brotli_context_lut[cmode * 512 + 256 + p2];
-        uint32_t tree_idx = cmap[ctx];
-        fio___brotli_bw_put_huff(&w,
-                                 lit_codes[tree_idx][lit],
-                                 lit_lens[tree_idx][lit]);
-      } else {
-        fio___brotli_bw_put_huff(&w, lit_codes[0][lit], lit_lens[0][lit]);
       }
-    }
-    lit_pos += tokens[t].insert_len;
+      lit_pos += tokens[t].insert_len;
 
-    /* Write distance */
-    if (!use_dz && tokens[t].distance > 0) {
-      uint32_t deb, dev;
-      uint32_t dist_sym = fio___brotli_encode_distance(tokens[t].distance,
-                                                       dist_rb,
-                                                       dist_rb_idx,
-                                                       &deb,
-                                                       &dev);
+      /* Write distance */
+      if (!use_dz && tokens[t].distance > 0) {
+        uint32_t deb, dev;
+        uint32_t dist_sym = fio___brotli_encode_distance(tokens[t].distance,
+                                                         dist_rb,
+                                                         dist_rb_idx,
+                                                         &deb,
+                                                         &dev);
 
-      fio___brotli_bw_put_huff(&w, dist_codes[dist_sym], dist_lens[dist_sym]);
-      if (deb)
-        fio___brotli_bw_put(&w, dev, deb);
+        fio___brotli_bw_put_huff(&w, dist_codes[dist_sym], dist_lens[dist_sym]);
+        if (deb)
+          fio___brotli_bw_put(&w, dev, deb);
 
-      /* Update ring buffer — RFC 7932 Section 4: push for dist_sym != 0.
-       * Dictionary references are NOT pushed (RFC 7932 Section 4). */
-      if (dist_sym != 0 && !tokens[t].is_dict_ref) {
-        dist_rb[dist_rb_idx & 3] = (int32_t)tokens[t].distance;
-        dist_rb_idx++;
+        /* Update ring buffer — RFC 7932 Section 4: push for dist_sym != 0.
+         * Dictionary references are NOT pushed (RFC 7932 Section 4). */
+        if (dist_sym != 0 && !tokens[t].is_dict_ref) {
+          dist_rb[dist_rb_idx & 3] = (int32_t)tokens[t].distance;
+          dist_rb_idx++;
+        }
       }
-    }
 
-    if (tokens[t].distance > 0)
-      lit_pos += copy_len;
-  }
+      if (tokens[t].distance > 0)
+        lit_pos += copy_len;
+    }
 
   } /* end meta-block chunk loop */
 #undef FIO___BROTLI_MAX_LIT_TREES
 
-  /* Write 8 trailing zero bits so the decompressor's bit reader always has
-   * at least root_bits (8) bits available when decoding the last symbol.
-   * The decompressor stops at meta_remaining=0 and never reads past the
-   * data, so these bits are harmless padding. */
-  fio___brotli_bw_put(&w, 0, 8);
-
+  /* Finalization pads only the final partial byte. Extra complete padding
+   * bytes are trailing data and are rejected by RFC-conforming decoders. */
   size_t result = fio___brotli_bw_finish(&w, out);
 
   FIO_MEM_FREE(tokens, token_alloc);

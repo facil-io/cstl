@@ -49,6 +49,12 @@ SFUNC int fio_rand_bytes_secure(void *target, size_t len);
 /** Reseeds the random engine using system state (rusage / jitter). */
 SFUNC void fio_rand_reseed(void);
 
+/** Reseeds the random engine (call in forked children). */
+SFUNC void fio_rand_on_fork(void *is_null);
+
+/** Resets the random engine state to its default seed (testing only). */
+SFUNC void fio_rand_reset(void);
+
 /* *****************************************************************************
 Risky / Stable Hash - API
 ***************************************************************************** */
@@ -74,33 +80,64 @@ SFUNC void fio_stable_hash128(void *restrict dest,
 /**
  * Computes a 256-bit non-cryptographic hash (RiskyHash 256).
  *
- * Based on the A3 (Zero-Copy ILP) design: 2-state multiply-fold with
- * cross-lane mixing, 128 bytes/iteration, zero-copy XOR from input.
+ * 2-lane multiply-fold with cross-lane mixing and per-block feed-forward,
+ * 128 bytes/iteration, single pass, constant time where 64x64 multiply is.
  *
- * Returns a `fio_u256` (32 bytes). Passes strict avalanche (50.0%),
- * collision, differential, and length independence tests.
+ * Unseeded: anyone can compute it, so it offers no protection against chosen
+ * inputs (e.g., hash flooding). Use fio_risky256_keyed with a secret key for
+ * attacker-influenced data.
+ *
+ * Returns a `fio_u256` (32 bytes). Outputs may change between versions.
  */
 SFUNC fio_u256 fio_risky256(const void *data, uint64_t len);
 
 /**
  * Computes a 512-bit non-cryptographic hash (RiskyHash 512).
  *
- * SHAKE-style extension of fio_risky256: the first 256 bits of the 512-bit
- * output are identical to fio_risky256 (truncation-safe). The second 256 bits
- * come from an additional squeeze round.
+ * The first 256 bits are identical to fio_risky256 (truncation-safe). The
+ * second 256 bits come from an additional squeeze round.
  *
  * Returns a `fio_u512` (64 bytes).
  */
 SFUNC fio_u512 fio_risky512(const void *data, uint64_t len);
 
 /**
- * Computes HMAC-RiskyHash-256 (RFC 2104 construction, 32-byte digest).
+ * Computes a keyed 256-bit RiskyHash (fast keyed hash / KDF).
  *
- * Uses fio_risky256 as the underlying hash with a 64-byte block size.
- * If `key_len > 64`, the key is hashed first with fio_risky256.
+ * All 16 state words (both lanes) are seeded from the key, its length and the
+ * data length. Keys of up to 64 bytes are used as-is (zero padded, length
+ * separated); longer keys are first hashed with fio_risky512. Single pass,
+ * costs about one fio_risky256 call plus one (parallel) round.
  *
- * NOTE: The underlying hash is non-cryptographic, so standard HMAC
- * security proofs do not apply. For cryptographic HMAC, use blake2.
+ * The key should hold at least 128 bits of secret entropy. Not a vetted
+ * cryptographic primitive.
+ */
+SFUNC fio_u256 fio_risky256_keyed(const void *key,
+                                  uint64_t key_len,
+                                  const void *data,
+                                  uint64_t len);
+
+/**
+ * Computes a keyed 512-bit RiskyHash.
+ *
+ * The first 256 bits are identical to fio_risky256_keyed (same key / data).
+ */
+SFUNC fio_u512 fio_risky512_keyed(const void *key,
+                                  uint64_t key_len,
+                                  const void *data,
+                                  uint64_t len);
+
+/**
+ * Computes HMAC-RiskyHash-256 (nested keyed hash, 32-byte digest).
+ *
+ *     tag = Keyed(key, outer, Keyed(key, inner, msg))
+ *
+ * `inner` / `outer` are domain separation tweaks, so the tag differs from
+ * fio_risky256_keyed. Not RFC 2104 (both lanes are keyed instead of padding a
+ * key block); the inner digest is never exposed.
+ *
+ * NOTE: The underlying hash is non-cryptographic and unvetted. For
+ * cryptographic MACs use blake2 or Poly1305.
  */
 SFUNC fio_u256 fio_risky256_hmac(const void *key,
                                  uint64_t key_len,
@@ -108,13 +145,9 @@ SFUNC fio_u256 fio_risky256_hmac(const void *key,
                                  uint64_t msg_len);
 
 /**
- * Computes HMAC-RiskyHash-512 (RFC 2104 construction, 64-byte digest).
+ * Computes HMAC-RiskyHash-512 (nested keyed hash, 64-byte digest).
  *
- * Uses fio_risky512 as the underlying hash with a 64-byte block size.
- * If `key_len > 64`, the key is hashed first with fio_risky512.
- *
- * NOTE: The underlying hash is non-cryptographic, so standard HMAC
- * security proofs do not apply. For cryptographic HMAC, use blake2.
+ * Same construction as fio_risky256_hmac with 512-bit inner and outer digests.
  */
 SFUNC fio_u512 fio_risky512_hmac(const void *key,
                                  uint64_t key_len,
@@ -151,24 +184,30 @@ FIO_IFUNC uint64_t fio_risky_ptr(void *ptr) {
 /* *****************************************************************************
 Risky Hash 256/512 - Internal Helpers (always-inline)
 
-Design: A3 (Zero-Copy ILP) — 2-state multiply-fold with cross-lane mixing.
-Each state is 8 x uint64_t (512 bits). Two states (v0, v1) process 128 bytes
-per iteration for instruction-level parallelism. Cross-lane mixing after each
-round ensures full diffusion across all 8 multiply-fold pairs.
+Design: 2-lane multiply-fold with cross-lane mixing. Each lane (v0, v1) is
+8 x uint64_t (512 bits); 128-byte pairs feed both lanes for instruction-level
+parallelism, the lanes merge only at finalization.
 
-Streaming-Compatible Absorption Order:
-1. Main loop (128-byte pairs) → v0, v1 alternating — processed FIRST
-2. Odd block (64 bytes if total_len & 64) → v1 — processed SECOND
-3. Partial block (0-63 bytes at END) → v0 — processed LAST
+Per 64-byte block (Davies-Meyer style feed-forward):
 
-This order enables streaming: data is processed in forward order, with the
-partial block coming from the logical END of the message.
+    v = round(v ^ block) + v
 
-Streaming API for HMAC:
-- fio___risky256_init(v0, v1, total_len) — init with TOTAL message length
-- fio___risky256_consume(state, data, len) — absorb streaming chunks
-- fio___risky256_finish(state) — finalize and return fio_u256
-- fio___risky512_finish(state) — finalize and return fio_u512
+The feed-forward keeps the previous state in the result, so a chosen block
+can't erase earlier input (no "set the state, forget the history" collisions).
+
+Round = 4 multiply-fold pairs + rotate-XOR cross mix. Per-word round constants
+are added to words 0..3 alongside the fold (`a = a + c + lo(a * b)`, computed
+in parallel with the multiply, so no extra latency): `round(0) != 0`, so there
+is no all-zero fixed point. Every round uses the same constants (block
+position is covered by the length seed and the feed-forward).
+
+Absorption order (one pass, forward order):
+1. Main loop (128-byte pairs) → v0, v1
+2. Odd block (64 bytes if len & 64) → v1
+3. Partial block (1-63 bytes at END, zero padded, length byte) → v0
+
+Keyed variants seed all 16 state words from the key (see
+fio___risky256_init_keyed); the unkeyed hash is seeded from the length only.
 ***************************************************************************** */
 
 /**
@@ -188,30 +227,37 @@ FIO_IFUNC void fio___risky256_cross(uint64_t v[8]) {
   v[7] ^= fio_lrot64(s4, 3) ^ fio_lrot64(s1, 31);
 }
 
-/** Multiply-fold round: 4 multiply-fold pairs + cross-lane mixing. */
+/** Round: round constants, 4 multiply-fold pairs, cross-lane mixing. */
 FIO_IFUNC void fio___risky256_round(uint64_t v[8]) {
+  static const uint64_t c[4] = {
+      FIO_U64_HASH_PRIME1,
+      FIO_U64_HASH_PRIME2,
+      FIO_U64_HASH_PRIME3,
+      FIO_U64_HASH_PRIME4,
+  };
   uint64_t t[4];
   for (size_t i = 0; i < 4; ++i) {
-    v[i] += fio_math_mulc64(v[i], v[i + 4], t + i);
+    uint64_t lo = fio_math_mulc64(v[i], v[i + 4], t + i);
+    v[i] += c[i]; /* parallel to the multiply (off the critical path) */
+    v[i] += lo;
     v[i + 4] += t[i];
   }
   fio___risky256_cross(v);
 }
 
-/**
- * Streaming state for RiskyHash 256/512.
- * Allows incremental absorption of data chunks.
- */
-typedef struct {
-  uint64_t v0[8];     /* First state vector */
-  uint64_t v1[8];     /* Second state vector */
-  uint64_t total_len; /* Total message length (must be known upfront) */
-  uint64_t absorbed;  /* Bytes absorbed so far */
-  uint8_t buf[128];   /* Buffer for partial data (up to 127 bytes) */
-  uint8_t buf_len;    /* Bytes in buffer */
-} fio___risky256_stream_s;
+/** Absorbs one 64-byte block: `v = round(v ^ block) + v`. */
+FIO_IFUNC void fio___risky256_block(uint64_t v[8], const uint8_t *data) {
+  uint64_t s[8];
+  for (size_t i = 0; i < 8; ++i) {
+    s[i] = v[i];
+    v[i] ^= fio_buf2u64_le(data + (i << 3));
+  }
+  fio___risky256_round(v);
+  for (size_t i = 0; i < 8; ++i)
+    v[i] += s[i];
+}
 
-/** Initialize state with total message length (does seed expansion). */
+/** Initializes both lanes from the message length (unkeyed seed). */
 FIO_IFUNC void fio___risky256_init(uint64_t v0[8],
                                    uint64_t v1[8],
                                    uint64_t len) {
@@ -242,15 +288,6 @@ FIO_IFUNC void fio___risky256_init(uint64_t v0[8],
     v0[i] = seed + p[i];
     v1[i] = seed + q[i];
   }
-}
-
-/** Initialize streaming state with total message length. */
-FIO_IFUNC void fio___risky256_stream_init(fio___risky256_stream_s *s,
-                                          uint64_t total_len) {
-  fio___risky256_init(s->v0, s->v1, total_len);
-  s->total_len = total_len;
-  s->absorbed = 0;
-  s->buf_len = 0;
 }
 
 /* *****************************************************************************
@@ -329,17 +366,7 @@ SFUNC uint64_t fio_risky_hash(const void *data_, size_t len, uint64_t seed) {
 Risky Hash 256 / 512 — Constants
 ***************************************************************************** */
 
-/** Prime constants shared by absorption and finalization. */
-static const uint64_t fio___risky256_primes[8] = {
-    FIO_U64_HASH_PRIME1,
-    FIO_U64_HASH_PRIME2,
-    FIO_U64_HASH_PRIME3,
-    FIO_U64_HASH_PRIME4,
-    FIO_U64_HASH_PRIME5,
-    FIO_U64_HASH_PRIME6,
-    FIO_U64_HASH_PRIME7,
-    FIO_U64_HASH_PRIME0,
-};
+/** Finalization constants for lane v0. */
 static const uint64_t fio___risky256_fin_primes[8] = {
     FIO_U64_HASH_PRIME8,
     FIO_U64_HASH_PRIME9,
@@ -350,6 +377,7 @@ static const uint64_t fio___risky256_fin_primes[8] = {
     FIO_U64_HASH_PRIME14,
     FIO_U64_HASH_PRIME15,
 };
+/** Finalization constants for lane v1 (lanes never finalize alike). */
 static const uint64_t fio___risky256_extra0[8] = {
     FIO_U64_HASH_PRIME16,
     FIO_U64_HASH_PRIME17,
@@ -360,6 +388,7 @@ static const uint64_t fio___risky256_extra0[8] = {
     FIO_U64_HASH_PRIME22,
     FIO_U64_HASH_PRIME23,
 };
+/** Second squeeze constants (512-bit output). */
 static const uint64_t fio___risky256_extra1[8] = {
     FIO_U64_HASH_PRIME24,
     FIO_U64_HASH_PRIME25,
@@ -371,304 +400,128 @@ static const uint64_t fio___risky256_extra1[8] = {
     FIO_U64_HASH_PRIME31,
 };
 
+/* Domain separation tweaks for the keyed seed. */
+#define FIO___RISKY256_TWEAK_KEYED      0ULL
+#define FIO___RISKY256_TWEAK_HMAC_INNER 0x3636363636363636ULL
+#define FIO___RISKY256_TWEAK_HMAC_OUTER 0x5C5C5C5C5C5C5C5CULL
+
 /* *****************************************************************************
-Risky Hash 256 / 512 — Streaming Absorb (internal)
-
-Absorption order (streaming-compatible):
-1. Main loop (128-byte pairs) → v0, v1 alternating — FIRST
-2. Odd block (64 bytes if total_len & 64) → v1 — SECOND
-3. Partial block (0-63 bytes at END) → v0 — LAST
-
-This order processes data in forward order, enabling true streaming.
-The partial block contains the TAIL bytes of the message.
+Risky Hash 256 / 512 — Absorb / Finalize (internal)
 ***************************************************************************** */
 
-/** Absorb a 128-byte pair into v0 and v1. */
-FIO_IFUNC void fio___risky256_absorb_pair(uint64_t v0[8],
-                                          uint64_t v1[8],
-                                          const uint8_t *data) {
-  for (size_t i = 0; i < 4; ++i)
-    v0[i] += fio___risky256_primes[i];
-  for (size_t i = 0; i < 4; ++i)
-    v1[i] += fio___risky256_primes[i];
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= fio_buf2u64_le(data + (i << 3));
-  for (size_t i = 0; i < 8; ++i)
-    v1[i] ^= fio_buf2u64_le(data + 64 + (i << 3));
-  fio___risky256_round(v0);
-  fio___risky256_round(v1);
-}
-
-/** Absorb a 64-byte odd block into v1. */
-FIO_IFUNC void fio___risky256_absorb_odd(uint64_t v1[8], const uint8_t *data) {
-  for (size_t i = 0; i < 4; ++i)
-    v1[i] += fio___risky256_primes[i];
-  for (size_t i = 0; i < 8; ++i)
-    v1[i] ^= fio_buf2u64_le(data + (i << 3));
-  fio___risky256_round(v1);
-}
-
-/** Absorb a partial block (0-63 bytes) into v0. */
-FIO_IFUNC void fio___risky256_absorb_partial(uint64_t v0[8],
-                                             const uint8_t *data,
-                                             uint64_t partial_len) {
-  uint64_t w[8] FIO_ALIGN(16);
-  FIO_MEMSET(w, 0, 64);
-  fio_memcpy63x(w, data, partial_len);
-  ((uint8_t *)w)[63] = (uint8_t)partial_len;
-  for (size_t i = 0; i < 8; ++i)
-    w[i] = fio_ltole64(w[i]);
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= w[i];
-  fio___risky256_round(v0);
-}
-
-/**
- * Streaming consume: absorb data chunks in forward order.
- * Call multiple times with consecutive chunks, then call finish.
- */
-FIO_SFUNC void fio___risky256_consume(fio___risky256_stream_s *s,
-                                      const void *data_,
-                                      uint64_t len) {
-  const uint8_t *data = (const uint8_t *)data_;
-  uint64_t total = s->total_len;
-  uint64_t main_end = (total >> 7) << 7; /* End of 128-byte pairs region */
-  uint64_t odd_end = main_end + ((total & 64) ? 64 : 0); /* End of odd block */
-
-  /* If we have buffered data, try to complete a block */
-  if (s->buf_len > 0) {
-    uint64_t need = 0;
-    if (s->absorbed < main_end) {
-      /* In main loop region: need 128 bytes total */
-      need = 128 - s->buf_len;
-      if (s->absorbed + 128 > main_end)
-        need = main_end - s->absorbed - s->buf_len;
-    } else if (s->absorbed < odd_end) {
-      /* In odd block region: need 64 bytes total */
-      need = 64 - s->buf_len;
-    }
-    /* Partial region: buffer until finish */
-
-    if (need > 0 && len >= need) {
-      FIO_MEMCPY(s->buf + s->buf_len, data, (size_t)need);
-      data += need;
-      len -= need;
-
-      if (s->absorbed < main_end && s->buf_len + need == 128) {
-        fio___risky256_absorb_pair(s->v0, s->v1, s->buf);
-        s->absorbed += 128;
-        s->buf_len = 0;
-      } else if (s->absorbed >= main_end && s->absorbed < odd_end &&
-                 s->buf_len + need == 64) {
-        fio___risky256_absorb_odd(s->v1, s->buf);
-        s->absorbed += 64;
-        s->buf_len = 0;
-      } else {
-        s->buf_len += (uint8_t)need;
-      }
-    } else if (need > 0) {
-      /* Not enough data to complete block, buffer it */
-      FIO_MEMCPY(s->buf + s->buf_len, data, (size_t)len);
-      s->buf_len += (uint8_t)len;
-      return;
-    }
-  }
-
-  /* Process full 128-byte pairs directly from input */
-  while (s->absorbed + 128 <= main_end && len >= 128) {
-    fio___risky256_absorb_pair(s->v0, s->v1, data);
-    data += 128;
-    len -= 128;
-    s->absorbed += 128;
-  }
-
-  /* Process odd block if we're at that boundary */
-  if (s->absorbed == main_end && (total & 64) && len >= 64) {
-    fio___risky256_absorb_odd(s->v1, data);
-    data += 64;
-    len -= 64;
-    s->absorbed += 64;
-  }
-
-  /* Buffer remaining data for partial block or incomplete block */
-  if (len > 0) {
-    FIO_MEMCPY(s->buf + s->buf_len, data, (size_t)len);
-    s->buf_len += (uint8_t)len;
-  }
-}
-
-/**
- * Streaming finish: absorb any remaining buffered data and finalize.
- * Returns 256-bit hash.
- */
-FIO_SFUNC fio_u256 fio___risky256_finish(fio___risky256_stream_s *s);
-
-/**
- * Streaming finish: absorb any remaining buffered data and finalize.
- * Returns 512-bit hash.
- */
-FIO_SFUNC fio_u512 fio___risky512_finish(fio___risky256_stream_s *s);
-
-/**
- * One-shot absorb: absorbs entire message into state.
- * Uses the new streaming-compatible order (main → odd → partial).
- */
+/** Absorbs the whole message (main pairs → odd block → partial block). */
 FIO_SFUNC void fio___risky256_absorb(uint64_t v0[8],
                                      uint64_t v1[8],
                                      const void *data_,
                                      uint64_t len) {
   const uint8_t *data = (const uint8_t *)data_;
-  uint64_t main_pairs = len >> 7; /* Number of 128-byte pairs */
-
-  /* 1. Main loop: 128-byte pairs */
-  for (uint64_t i = 0; i < main_pairs; ++i) {
-    fio___risky256_absorb_pair(v0, v1, data);
+  for (uint64_t i = len >> 7; i; --i) { /* 1. 128-byte pairs */
+    fio___risky256_block(v0, data);
+    fio___risky256_block(v1, data + 64);
     data += 128;
   }
-
-  /* 2. Odd block: 64 bytes if (len & 64) */
-  if (len & 64) {
-    fio___risky256_absorb_odd(v1, data);
+  if (len & 64) { /* 2. odd 64-byte block */
+    fio___risky256_block(v1, data);
     data += 64;
   }
-
-  /* 3. Partial block: 0-63 bytes at END */
-  if (len & 63) {
-    fio___risky256_absorb_partial(v0, data, len & 63);
+  if (len & 63) { /* 3. partial block: zero padded, length in last byte */
+    uint64_t w[8] FIO_ALIGN(16) = {0};
+    fio_memcpy63x(w, data, len & 63);
+    ((uint8_t *)w)[63] = (uint8_t)(len & 63);
+    fio___risky256_block(v0, (const uint8_t *)w);
+    fio_secure_zero(w, sizeof(w));
   }
 }
 
-/**
- * Finalize state and return 256-bit hash.
- * Merges v1 into v0, applies finalization rounds, and squeezes output.
- */
-FIO_SFUNC fio_u256 fio___risky256_finalize(uint64_t v0[8], uint64_t v1[8]) {
-  /* Finalization: merge v1 into v0 */
+/** Merges both lanes into v0 (4 rounds, lanes use distinct constants). */
+FIO_IFUNC void fio___risky256_merge(uint64_t v0[8], uint64_t v1[8]) {
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_fin_primes[i];
-  fio___risky256_round(v0);
   for (size_t i = 0; i < 8; ++i)
-    v1[i] ^= fio___risky256_fin_primes[i];
+    v1[i] ^= fio___risky256_extra0[i];
+  fio___risky256_round(v0);
   fio___risky256_round(v1);
   for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= v1[i];
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= fio___risky256_extra0[i];
+    v0[i] += v1[i];
   fio___risky256_round(v0);
-  /* Squeeze: XOR-fold 8 lanes into 4 */
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= fio___risky256_primes[i];
   fio___risky256_round(v0);
-  fio_u256 r = {0};
+}
+
+/** Finalizes to 256 bits (XOR-fold 8 words into 4) and wipes the state. */
+FIO_IFUNC fio_u256 fio___risky256_finalize(uint64_t v0[8], uint64_t v1[8]) {
+  fio_u256 r;
+  fio___risky256_merge(v0, v1);
   for (size_t i = 0; i < 4; ++i)
     r.u64[i] = v0[i] ^ v0[i + 4];
+  fio_secure_zero(v0, 64);
+  fio_secure_zero(v1, 64);
   return r;
 }
 
-/**
- * Finalize state and return 512-bit hash.
- * Same as fio___risky256_finalize but does 2 squeezes for 512 bits.
- */
-FIO_SFUNC fio_u512 fio___risky512_finalize(uint64_t v0[8], uint64_t v1[8]) {
-  /* Finalization: merge v1 into v0 */
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= fio___risky256_fin_primes[i];
-  fio___risky256_round(v0);
-  for (size_t i = 0; i < 8; ++i)
-    v1[i] ^= fio___risky256_fin_primes[i];
-  fio___risky256_round(v1);
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= v1[i];
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= fio___risky256_extra0[i];
-  fio___risky256_round(v0);
-  /* First squeeze: 256 bits */
-  fio_u512 r = {0};
-  for (size_t i = 0; i < 8; ++i)
-    v0[i] ^= fio___risky256_primes[i];
-  fio___risky256_round(v0);
+/** Finalizes to 512 bits (first 256 bits match the 256-bit finalization). */
+FIO_IFUNC fio_u512 fio___risky512_finalize(uint64_t v0[8], uint64_t v1[8]) {
+  fio_u512 r;
+  fio___risky256_merge(v0, v1);
   for (size_t i = 0; i < 4; ++i)
     r.u64[i] = v0[i] ^ v0[i + 4];
-  /* Second squeeze: additional 256 bits */
   for (size_t i = 0; i < 8; ++i)
     v0[i] ^= fio___risky256_extra1[i];
   fio___risky256_round(v0);
   for (size_t i = 0; i < 4; ++i)
     r.u64[i + 4] = v0[i] ^ v0[i + 4];
+  fio_secure_zero(v0, 64);
+  fio_secure_zero(v1, 64);
   return r;
 }
 
-/* *****************************************************************************
-Risky Hash 256 / 512 — Streaming Finish (implementations)
-***************************************************************************** */
-
-/** Streaming finish: process buffered data and finalize to 256 bits. */
-FIO_SFUNC fio_u256 fio___risky256_finish(fio___risky256_stream_s *s) {
-  uint64_t total = s->total_len;
-  uint64_t main_end = (total >> 7) << 7;
-  uint64_t odd_end = main_end + ((total & 64) ? 64 : 0);
-
-  /* Process any remaining buffered data */
-  if (s->buf_len > 0) {
-    if (s->absorbed < main_end) {
-      /* Incomplete 128-byte pair — should not happen if total_len is correct */
-      /* Pad with zeros and absorb as pair */
-      FIO_MEMSET(s->buf + s->buf_len, 0, 128 - s->buf_len);
-      fio___risky256_absorb_pair(s->v0, s->v1, s->buf);
-      s->absorbed = main_end;
-      s->buf_len = 0;
-    }
-    if (s->absorbed < odd_end && s->absorbed >= main_end) {
-      /* Incomplete odd block — pad and absorb */
-      if (s->buf_len < 64) {
-        FIO_MEMSET(s->buf + s->buf_len, 0, 64 - s->buf_len);
-      }
-      fio___risky256_absorb_odd(s->v1, s->buf);
-      s->absorbed = odd_end;
-      s->buf_len = 0;
-    }
-    if (s->absorbed >= odd_end && s->buf_len > 0) {
-      /* Partial block at end */
-      fio___risky256_absorb_partial(s->v0, s->buf, s->buf_len);
-      s->buf_len = 0;
-    }
+/**
+ * Key schedule, step 1: key words `k` (keys up to 64 bytes are zero padded,
+ * longer keys are replaced by their fio_risky512 digest).
+ */
+FIO_SFUNC void fio___risky256_key(uint64_t k[8],
+                                  const void *key,
+                                  uint64_t key_len) {
+  for (size_t i = 0; i < 8; ++i)
+    k[i] = 0;
+  if (key_len > 64) {
+    fio_u512 h = fio_risky512(key, key_len);
+    for (size_t i = 0; i < 8; ++i)
+      k[i] = h.u64[i];
+    fio_secure_zero(&h, sizeof(h));
+    return;
   }
-
-  return fio___risky256_finalize(s->v0, s->v1);
+  if (key_len)
+    FIO_MEMCPY(k, key, (size_t)key_len);
+  for (size_t i = 0; i < 8; ++i)
+    k[i] = fio_ltole64(k[i]);
 }
 
-/** Streaming finish: process buffered data and finalize to 512 bits. */
-FIO_SFUNC fio_u512 fio___risky512_finish(fio___risky256_stream_s *s) {
-  uint64_t total = s->total_len;
-  uint64_t main_end = (total >> 7) << 7;
-  uint64_t odd_end = main_end + ((total & 64) ? 64 : 0);
-
-  /* Process any remaining buffered data */
-  if (s->buf_len > 0) {
-    if (s->absorbed < main_end) {
-      /* Incomplete 128-byte pair — pad and absorb */
-      FIO_MEMSET(s->buf + s->buf_len, 0, 128 - s->buf_len);
-      fio___risky256_absorb_pair(s->v0, s->v1, s->buf);
-      s->absorbed = main_end;
-      s->buf_len = 0;
-    }
-    if (s->absorbed < odd_end && s->absorbed >= main_end) {
-      /* Incomplete odd block — pad and absorb */
-      if (s->buf_len < 64) {
-        FIO_MEMSET(s->buf + s->buf_len, 0, 64 - s->buf_len);
-      }
-      fio___risky256_absorb_odd(s->v1, s->buf);
-      s->absorbed = odd_end;
-      s->buf_len = 0;
-    }
-    if (s->absorbed >= odd_end && s->buf_len > 0) {
-      /* Partial block at end */
-      fio___risky256_absorb_partial(s->v0, s->buf, s->buf_len);
-      s->buf_len = 0;
-    }
+/**
+ * Key schedule, step 2: seeds all 16 state words.
+ *
+ *     v0[i] = init0(len)[i] ^ k[i]
+ *     v1[i] = (init1(len)[i] + {key_len, tweak, 0...}[i]) ^ k[i ^ 4]
+ *     v1 = round(v1)
+ *
+ * Before the v1 round, (k, key_len, tweak) map injectively to the state (v0
+ * fixes k, then v1 fixes key_len and tweak), so keys are length separated.
+ * The v1 round makes the lanes nonlinearly related; it runs in parallel with
+ * v0's first block, so keying adds little latency.
+ */
+FIO_IFUNC void fio___risky256_init_keyed(uint64_t v0[8],
+                                         uint64_t v1[8],
+                                         const uint64_t k[8],
+                                         uint64_t key_len,
+                                         uint64_t len,
+                                         uint64_t tweak) {
+  fio___risky256_init(v0, v1, len);
+  v1[0] += key_len;
+  v1[1] += tweak;
+  for (size_t i = 0; i < 8; ++i) {
+    v0[i] ^= k[i];
+    v1[i] ^= k[i ^ 4];
   }
-
-  return fio___risky512_finalize(s->v0, s->v1);
+  fio___risky256_round(v1);
 }
 
 /* *****************************************************************************
@@ -691,113 +544,110 @@ SFUNC fio_u512 fio_risky512(const void *data_, uint64_t len) {
   return fio___risky512_finalize(v0, v1);
 }
 
+/** Computes a keyed 256-bit RiskyHash (all 16 state words key-seeded). */
+SFUNC fio_u256 fio_risky256_keyed(const void *key,
+                                  uint64_t key_len,
+                                  const void *data,
+                                  uint64_t len) {
+  uint64_t k[8] FIO_ALIGN(16), v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16);
+  fio___risky256_key(k, key, key_len);
+  fio___risky256_init_keyed(v0,
+                            v1,
+                            k,
+                            key_len,
+                            len,
+                            FIO___RISKY256_TWEAK_KEYED);
+  fio_secure_zero(k, sizeof(k));
+  fio___risky256_absorb(v0, v1, data, len);
+  return fio___risky256_finalize(v0, v1);
+}
+
+/** Computes a keyed 512-bit RiskyHash (all 16 state words key-seeded). */
+SFUNC fio_u512 fio_risky512_keyed(const void *key,
+                                  uint64_t key_len,
+                                  const void *data,
+                                  uint64_t len) {
+  uint64_t k[8] FIO_ALIGN(16), v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16);
+  fio___risky256_key(k, key, key_len);
+  fio___risky256_init_keyed(v0,
+                            v1,
+                            k,
+                            key_len,
+                            len,
+                            FIO___RISKY256_TWEAK_KEYED);
+  fio_secure_zero(k, sizeof(k));
+  fio___risky256_absorb(v0, v1, data, len);
+  return fio___risky512_finalize(v0, v1);
+}
+
 /* *****************************************************************************
-Risky Hash 256 / 512 — HMAC (RFC 2104 compliant, allocation-free)
+Risky Hash 256 / 512 — HMAC (nested keyed hash, allocation-free)
 
-Uses streaming API for the inner hash:
-  Inner: H(K ^ ipad || msg) — streaming: feed k_ipad, then msg
-  Outer: H(K ^ opad || inner_hash) — fixed 96/128 bytes on stack
+    inner = Keyed(K, tweak = 0x36.., msg)
+    tag   = Keyed(K, tweak = 0x5C.., inner)
 
-Block size is 64 bytes. Keys > 64 bytes are hashed first.
+Both lanes are keyed in both passes; the inner digest is never exposed.
 ***************************************************************************** */
 
-/** HMAC-RiskyHash-256 (RFC 2104 compliant, 32-byte digest, allocation-free).
- *
- * Memory layout uses fio_u1024 (128 bytes) for zero-copy outer hash:
- *   buf.u64[0..7]  = k_padded (64 bytes) - key XOR'd with ipad/opad
- *   buf.u64[8..11] = inner hash result (32 bytes)
- * This gives contiguous k_opad||inner_hash for outer hash input.
- */
+/** HMAC-RiskyHash-256 (nested keyed RiskyHash, 32-byte digest). */
 SFUNC fio_u256 fio_risky256_hmac(const void *key,
                                  uint64_t key_len,
                                  const void *msg,
                                  uint64_t msg_len) {
-  fio_u1024 buf = {0};
-  uint64_t *k_padded = buf.u64;       /* bytes 0-63 */
-  fio_u256 *inner_ptr = buf.u256 + 2; /* bytes 64-95 (buf.u64[8..11]) */
-
-  /* Key preparation: truncate or hash if > 64 bytes */
-  if (key_len > 64) {
-    fio_u256 hk = fio_risky256(key, key_len);
-    FIO_MEMCPY(k_padded, hk.u64, 32);
-    fio_secure_zero(hk.u8, sizeof(hk));
-  } else if (key_len) {
-    FIO_MEMCPY(k_padded, key, (size_t)key_len);
-  }
-
-  /* Inner hash: H(K ^ ipad || msg) using streaming API */
-  for (size_t i = 0; i < 8; ++i)
-    k_padded[i] ^= 0x3636363636363636ULL;
-
-  fio___risky256_stream_s state;
-  fio___risky256_stream_init(&state, 64 + msg_len);
-  fio___risky256_consume(&state, k_padded, 64);
-  if (msg_len)
-    fio___risky256_consume(&state, msg, msg_len);
-  *inner_ptr =
-      fio___risky256_finish(&state); /* write directly to buf[64..95] */
-
-  /* Toggle ipad→opad: XOR with 0x6A (0x36 ^ 0x5C) */
-  for (size_t i = 0; i < 8; ++i)
-    k_padded[i] ^= 0x6A6A6A6A6A6A6A6AULL;
-
-  /* Outer hash: H(K ^ opad || inner_hash) — contiguous 96 bytes in buf */
-  fio_u256 result = fio_risky256(buf.u8, 96);
-
-  /* Secure cleanup */
-  fio_secure_zero(&state, sizeof(state));
-  fio_secure_zero(buf.u8, 96);
-  return result;
+  uint64_t k[8] FIO_ALIGN(16), v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16);
+  fio_u256 inner;
+  fio___risky256_key(k, key, key_len);
+  fio___risky256_init_keyed(v0,
+                            v1,
+                            k,
+                            key_len,
+                            msg_len,
+                            FIO___RISKY256_TWEAK_HMAC_INNER);
+  fio___risky256_absorb(v0, v1, msg, msg_len);
+  inner = fio___risky256_finalize(v0, v1);
+  fio___risky256_init_keyed(v0,
+                            v1,
+                            k,
+                            key_len,
+                            sizeof(inner),
+                            FIO___RISKY256_TWEAK_HMAC_OUTER);
+  fio_secure_zero(k, sizeof(k));
+  fio___risky256_absorb(v0, v1, inner.u8, sizeof(inner));
+  fio_secure_zero(&inner, sizeof(inner));
+  return fio___risky256_finalize(v0, v1);
 }
 
-/** HMAC-RiskyHash-512 (RFC 2104 compliant, 64-byte digest, allocation-free).
- *
- * Memory layout uses fio_u1024 (128 bytes) for zero-copy outer hash:
- *   buf.u64[0..7]  = k_padded (64 bytes) - key XOR'd with ipad/opad
- *   buf.u64[8..15] = inner hash result (64 bytes)
- * This gives contiguous k_opad||inner_hash for outer hash input.
- */
+/** HMAC-RiskyHash-512 (nested keyed RiskyHash, 64-byte digest). */
 SFUNC fio_u512 fio_risky512_hmac(const void *key,
                                  uint64_t key_len,
                                  const void *msg,
                                  uint64_t msg_len) {
-  fio_u1024 buf = {0};
-  uint64_t *k_padded = buf.u64;       /* bytes 0-63 */
-  fio_u512 *inner_ptr = buf.u512 + 1; /* bytes 64-127 (buf.u64[8..15]) */
-
-  /* Key preparation: truncate or hash if > 64 bytes */
-  if (key_len > 64) {
-    fio_u512 hk = fio_risky512(key, key_len);
-    FIO_MEMCPY(k_padded, hk.u64, 64);
-    fio_secure_zero(hk.u8, sizeof(hk));
-  } else if (key_len) {
-    FIO_MEMCPY(k_padded, key, (size_t)key_len);
-  }
-
-  /* Inner hash: H(K ^ ipad || msg) using streaming API */
-  for (size_t i = 0; i < 8; ++i)
-    k_padded[i] ^= 0x3636363636363636ULL;
-
-  fio___risky256_stream_s state;
-  fio___risky256_stream_init(&state, 64 + msg_len);
-  fio___risky256_consume(&state, k_padded, 64);
-  if (msg_len)
-    fio___risky256_consume(&state, msg, msg_len);
-  *inner_ptr =
-      fio___risky512_finish(&state); /* write directly to buf[64..127] */
-
-  /* Toggle ipad→opad: XOR with 0x6A (0x36 ^ 0x5C) */
-  for (size_t i = 0; i < 8; ++i)
-    k_padded[i] ^= 0x6A6A6A6A6A6A6A6AULL;
-
-  /* Outer hash: H(K ^ opad || inner_hash) — contiguous 128 bytes in buf */
-  fio_u512 result = fio_risky512(buf.u8, 128);
-
-  /* Secure cleanup */
-  fio_secure_zero(&state, sizeof(state));
-  fio_secure_zero(buf.u8, 128);
-  return result;
+  uint64_t k[8] FIO_ALIGN(16), v0[8] FIO_ALIGN(16), v1[8] FIO_ALIGN(16);
+  fio_u512 inner;
+  fio___risky256_key(k, key, key_len);
+  fio___risky256_init_keyed(v0,
+                            v1,
+                            k,
+                            key_len,
+                            msg_len,
+                            FIO___RISKY256_TWEAK_HMAC_INNER);
+  fio___risky256_absorb(v0, v1, msg, msg_len);
+  inner = fio___risky512_finalize(v0, v1);
+  fio___risky256_init_keyed(v0,
+                            v1,
+                            k,
+                            key_len,
+                            sizeof(inner),
+                            FIO___RISKY256_TWEAK_HMAC_OUTER);
+  fio_secure_zero(k, sizeof(k));
+  fio___risky256_absorb(v0, v1, inner.u8, sizeof(inner));
+  fio_secure_zero(&inner, sizeof(inner));
+  return fio___risky512_finalize(v0, v1);
 }
+
+#undef FIO___RISKY256_TWEAK_KEYED
+#undef FIO___RISKY256_TWEAK_HMAC_INNER
+#undef FIO___RISKY256_TWEAK_HMAC_OUTER
 
 /* *****************************************************************************
 Stable Hash (unlike Risky Hash, this can be used for non-ephemeral hashing)

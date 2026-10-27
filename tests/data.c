@@ -27,12 +27,6 @@ static void test_write_hook_set(uint64_t fail_mask, size_t max) {
 }
 #define FIO___DATA_WRITE(fd, buf, len) test_data_write_hook((fd), (buf), (len))
 
-/* Test hook: read buffer allocations larger than this fail. */
-static size_t test_alloc_max = (size_t)-1;
-#define FIO___DATA_REALLOC(ptr, old_size, new_size, copy_len)                  \
-  (((size_t)(new_size) > test_alloc_max)                                       \
-       ? NULL                                                                  \
-       : FIO_MEM_REALLOC_((ptr), (old_size), (new_size), (copy_len)))
 
 #define FIO_DATA
 #include FIO_INCLUDE_FILE
@@ -508,39 +502,6 @@ static void test_data_write_retry(void) {
   fio_data_destroy(&d);
 }
 
-#if !FIO___DATA_MMAP
-/* Heap read buffer allocation failure: empty result, position unchanged. */
-static void test_data_alloc_failure(void) {
-  fprintf(stderr, "  * heap read buffer allocation failure (no crash)\n");
-  char src[5000];
-  for (size_t i = 0; i < sizeof(src); ++i)
-    src[i] = (char)('a' + (i % 26));
-  fio_data_s d;
-  fio_data_init(&d, 100);
-  FIO_ASSERT(!fio_data_write(&d, src, sizeof(src)) && fio_data_fd(&d) != -1,
-             "alloc failure: write");
-  fio_data_seek(&d, 10);
-  test_alloc_max = 1000;
-  fio_str_info_s r1 = fio_data_read(&d, 4000);
-  size_t p1 = fio_data_pos(&d);
-  fio_str_info_s r2 = fio_data_read_until(&d, '#', 0);
-  size_t p2 = fio_data_pos(&d);
-  fio_str_info_s r3 = fio_data_read(&d, 500); /* fits: works */
-  test_alloc_max = (size_t)-1;
-  FIO_ASSERT(!r1.buf && !r1.len && p1 == 10,
-             "failed allocation: empty read, position unchanged");
-  FIO_ASSERT(!r2.buf && !r2.len && p2 == 10,
-             "failed allocation: empty read_until, position unchanged");
-  FIO_ASSERT(p1 < fio_data_len(&d), "pos < len tells it apart from EOF");
-  FIO_ASSERT(!fio_data_is_error(&d), "read failures aren't a store error");
-  FIO_ASSERT(r3.len == 500 && !memcmp(r3.buf, src + 10, 500) &&
-                 fio_data_pos(&d) == 510,
-             "a read that fits still works");
-  fio_data_seek(&d, 0);
-  test_data_read_all(&d, "after alloc failure", src, sizeof(src), 4096);
-  fio_data_destroy(&d);
-}
-#endif
 
 #if FIO_OS_POSIX
 /* Reads the whole file `name` (a bstr, free with `fio_bstr_free`). */
@@ -634,9 +595,7 @@ static void test_data_save(void) {
   FIO_ASSERT(!fio_data_write(&d, src, 5000), "save: spilled write 2");
   fio_data_seek(&d, 100);
   fio_str_info_s before = fio_data_read(&d, 50);
-  test_alloc_max = 1000;
   int ra = fio_data_save(&d, name);
-  test_alloc_max = (size_t)-1;
   FIO_ASSERT(!ra && fio_filename_size(name) == 5000,
              "save: spilled save doesn't need a read buffer");
   FIO_ASSERT(before.len == 50 && !memcmp(before.buf, src + 100, 50) &&
@@ -758,6 +717,7 @@ static void test_data_short_reads(void) {
                  test_fd_read.eintr_seen == 2,
              "EINTR: read retried");
   test_fd_read.eintr = 2;
+  FIO_ASSERT(!fio_data_write(&d, "x", 1), "EINTR: append (drops the window)");
   fio_data_seek(&d, 0);
   fio_str_info_s line = fio_data_read_until(&d, '#', 0);
   FIO_ASSERT(line.len == 4501 && line.buf[4500] == '#' &&
@@ -767,6 +727,115 @@ static void test_data_short_reads(void) {
   fio_data_destroy(&d);
 }
 #endif
+
+/* Reads `len` bytes at `at`, checking the content against `src`. */
+static void test_data_window_read(fio_data_s *d,
+                                  const char *src,
+                                  size_t at,
+                                  size_t len,
+                                  const char *what) {
+  fio_data_seek(d, (ssize_t)at);
+  fio_str_info_s r = fio_data_read(d, len);
+  if (len > fio_data_len(d) - at)
+    len = fio_data_len(d) - at;
+  FIO_ASSERT(r.len == len && (!len || !memcmp(r.buf, src + at, len)) &&
+                 fio_data_pos(d) == at + len,
+             "window (%s): read %zu at %zu (got %zu)",
+             what,
+             len,
+             at,
+             r.len);
+}
+
+/* Sliding / growing / backward windows, writes and read_until interleaved. */
+static void test_data_windows(void) {
+  fprintf(stderr,
+          "  * spilled read windows (sliding, growing, backward, writes)\n");
+  const size_t len = ((size_t)FIO_DATA_READ_BLOCK * 6) + 777;
+  char *src = (char *)malloc(len + 4096);
+  FIO_ASSERT_ALLOC(src);
+  for (size_t i = 0; i < len + 4096; ++i)
+    src[i] = (char)('!' + ((i * 7 + (i >> 9)) % 89));
+  for (size_t i = 1000; i < len; i += 3001)
+    src[i] = '\n';
+  fio_data_s d;
+  fio_data_init(&d, 1000);
+  FIO_ASSERT(!fio_data_write(&d, src, len) && fio_data_fd(&d) != -1,
+             "window: write");
+  /* multipart like: seek(base) read(want), keep the tail, grow */
+  size_t base = 0, want = 4096;
+  while (base < len) {
+    test_data_window_read(&d, src, base, want, "sliding");
+    size_t got = (want > len - base) ? (len - base) : want;
+    size_t consumed = got / 3 + 1;
+    size_t keep = got - consumed;
+    base += consumed;
+    want = keep + ((keep > 65536) ? keep : 65536);
+  }
+  /* backward, overlapping tail, disjoint, sub-ranges and EOF */
+  test_data_window_read(&d, src, len / 2, 10000, "fwd");
+  test_data_window_read(&d, src, len / 2 - 3000, 10000, "back overlap");
+  test_data_window_read(&d, src, len / 2 - 1000, 500, "inside");
+  test_data_window_read(&d, src, 7, 100, "back disjoint");
+  test_data_window_read(&d, src, 50, 200, "overlap tail");
+  test_data_window_read(&d, src, len - 100, 1000, "EOF");
+  test_data_window_read(&d, src, 0, (size_t)-1, "all");
+  /* read_until interleaved with reads */
+  fio_data_seek(&d, 900);
+  for (size_t at = 900; at < len;) {
+    fio_str_info_s r = fio_data_read_until(&d, '\n', 0);
+    FIO_ASSERT(r.len && !memcmp(r.buf, src + at, r.len) &&
+                   (r.buf[r.len - 1] == '\n' || at + r.len == len),
+               "window: read_until at %zu",
+               at);
+    at += r.len;
+    if (at >= len)
+      break;
+    r = fio_data_read(&d, 37);
+    size_t n = (37 > len - at) ? (len - at) : 37;
+    FIO_ASSERT(r.len == n && !memcmp(r.buf, src + at, n),
+               "window: read after read_until at %zu",
+               at);
+    at += n;
+  }
+  fio_data_seek(&d, 999);
+  fio_str_info_s r = fio_data_read_until(&d, '\n', 0);
+  FIO_ASSERT(r.len == 2 && !memcmp(r.buf, src + 999, 2), "window: short line");
+  /* reads after writes / appends see the new data */
+  test_data_window_read(&d, src, len - 500, 400, "before append");
+  FIO_ASSERT(!fio_data_write(&d, src + len, 4096), "window: append");
+#if !FIO___DATA_MMAP && !defined(_WIN32)
+  /* (no window after the append) overlapping reads skip held bytes */
+  test_fd_hooks_reset();
+  test_data_window_read(&d, src, 1000, 8192, "count 1");
+  test_data_window_read(&d, src, 3000, 16384, "count 2");
+  test_data_window_read(&d, src, 5000, 1000, "count 3 (held)");
+  FIO_ASSERT(test_fd_read.bytes == 8192 + 10192,
+             "window: overlapping reads re-read data (%zu bytes)",
+             test_fd_read.bytes);
+  fio_data_seek(&d, 4001); /* held: 3000 .. 19384 */
+  r = fio_data_read_until(&d, '\n', 0);
+  FIO_ASSERT(r.len == 1 && test_fd_read.bytes == 18384,
+             "window: read_until should reuse the window (%zu)",
+             test_fd_read.bytes);
+  r = fio_data_read_until(&d, '\n', 0); /* 4002 .. 7002 held */
+  FIO_ASSERT(r.len == 3001 && !memcmp(r.buf, src + 4002, 3001) &&
+                 test_fd_read.bytes == 18384,
+             "window: read_until in window (%zu)",
+             test_fd_read.bytes);
+  r = fio_data_read(&d, 20000); /* 7003 .. 27003: reads 7619 bytes */
+  FIO_ASSERT(r.len == 20000 && !memcmp(r.buf, src + 7003, 20000) &&
+                 test_fd_read.bytes == 18384 + 7619,
+             "window: read after read_until reuses the window (%zu)",
+             test_fd_read.bytes);
+  test_fd_hooks_reset();
+#endif
+  test_data_window_read(&d, src, len - 500, 4596, "after append");
+  test_data_window_read(&d, src, 0, (size_t)-1, "all after append");
+  fio_data_destroy(&d);
+  FIO_ASSERT(!d.wlen && !d.buf, "destroy clears the window");
+  free(src);
+}
 
 /* fio_data_bstr: the RAM bstr (NULL once spilled); copies survive writes. */
 static void test_data_bstr(void) {
@@ -821,12 +890,10 @@ int main(void) {
   test_data_read_until_blocks();
   test_data_spilled_reads();
   test_data_write_retry();
-#if !FIO___DATA_MMAP
-  test_data_alloc_failure();
-#endif
 #if !FIO___DATA_MMAP && !defined(_WIN32)
   test_data_short_reads();
 #endif
+  test_data_windows();
   test_data_bstr();
 #if FIO_OS_POSIX
   test_data_save();

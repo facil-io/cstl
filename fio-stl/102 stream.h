@@ -23,6 +23,10 @@ Copyright and License: see header file (000 copyright.h) or top of file
 /** Break apart large memory blocks into smaller pieces. by default 96Kb */
 #define FIO_STREAM_COPY_PER_PACKET 98304
 #endif
+#if (FIO_STREAM_COPY_PER_PACKET) < 1 ||                                        \
+    (FIO_STREAM_COPY_PER_PACKET) > 0x3FFFFFFF
+#error FIO_STREAM_COPY_PER_PACKET must be in the range [1, 0x3FFFFFFF]
+#endif
 
 #ifndef FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN
 /** If the data added is less than said bytes, copy is preferred (locality). */
@@ -162,7 +166,7 @@ Stream Implementation - inlined static functions
 
 /* do we have a constructor? */
 #ifndef FIO_REF_CONSTRUCTOR_ONLY
-FIO_LEAK_COUNTER_DEF(fio_stream)
+FIO_LEAK_COUNTER_DEC(fio_stream)
 /* Allocates a new object on the heap and initializes it's memory. */
 FIO_IFUNC fio_stream_s *fio_stream_new(void) {
   fio_stream_s *s = (fio_stream_s *)FIO_MEM_REALLOC_(NULL, 0, sizeof(*s), 0);
@@ -191,6 +195,8 @@ FIO_IFUNC size_t fio_stream_length(fio_stream_s *s) { return s->length; }
 Stream Implementation - possibly externed functions.
 ***************************************************************************** */
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
+FIO_LEAK_COUNTER_DEF(fio_stream)
 
 FIO_IFUNC void fio_stream_packet_free_all(fio_stream_packet_s *p);
 /* Frees any internal data AND the object's container! */
@@ -306,7 +312,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
                                                 uint8_t copy_buffer,
                                                 void (*dealloc_func)(void *)) {
   fio_stream_packet_s *p = NULL;
-  if (!len || !buf || (len & ((~(0UL)) << (32 - FIO_STREAM___TYPE_BITS))))
+  if (!len || !buf || (len >> (32 - FIO_STREAM___TYPE_BITS)))
     goto error;
   if (copy_buffer || len < FIO_STREAM_ALWAYS_COPY_IF_LESS_THAN) {
     while (len) {
@@ -343,7 +349,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_data(void *buf,
     ext = (fio_stream_packet_extrn_s *)(p + 1);
     *ext = (fio_stream_packet_extrn_s){
         .type = FIO_PACKET_TYPE_EXTERNAL,
-        .length = (uint32_t)len,
+        .length = len,
         .buf = (char *)buf,
         .offset = offset,
         .dealloc = dealloc_func,
@@ -355,7 +361,7 @@ error:
   if (dealloc_func)
     dealloc_func(buf);
   fio_stream_packet_free_all(p);
-  return p;
+  return NULL;
 }
 
 /** Packs a file descriptor into a fio_stream_packet_s container. */
@@ -365,7 +371,7 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
                                               uint8_t keep_open) {
   fio_stream_packet_s *p = NULL;
   fio_stream_packet_fd_s *f;
-  if ((unsigned)(fd + 1) < 2)
+  if (fd < 0)
     goto no_file;
 
   if (!len) {
@@ -374,6 +380,11 @@ SFUNC fio_stream_packet_s *fio_stream_pack_fd(int fd,
     if (!len || offset >= len || len >= 0x7FFFFFFF)
       goto error;
     len -= offset;
+  }
+  { /* the file range must be representable by (signed) `off_t` */
+    const uint64_t max_off = ((uint64_t)1 << ((sizeof(off_t) << 3) - 1)) - 1;
+    if ((uint64_t)len > max_off || (uint64_t)offset > max_off - (uint64_t)len)
+      goto error;
   }
 
   p = (fio_stream_packet_s *)
@@ -433,109 +444,77 @@ SFUNC void fio_stream_pack_free(fio_stream_packet_s *p) {
 Stream API - Consuming the stream
 ***************************************************************************** */
 
-FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
+/* Reads up to `len[0]` bytes, starting `offset` bytes into packet `p`. */
+FIO_SFUNC void fio___stream_read_internal(fio_stream_s *s,
+                                          fio_stream_packet_s *p,
                                           char **buf,
                                           size_t *len,
-                                          size_t buf_offset,
-                                          size_t offset,
-                                          size_t must_copy) {
-  if (!p || !len[0]) {
-    len[0] = 0;
-    return;
-  }
-  union {
-    fio_stream_packet_embd_s *em;
-    fio_stream_packet_extrn_s *ext;
-    fio_stream_packet_fd_s *f;
-  } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
-  size_t written = 0;
-
-  switch (u.em->type) {
-  case FIO_PACKET_TYPE_EMBEDDED:
-    if (!buf[0] || !len[0] ||
-        (!must_copy && (!p->next || u.em->length >= len[0] + offset))) {
-      buf[0] = u.em->buf + offset;
-      len[0] = (size_t)u.em->length - offset;
-      return;
-    }
-    written = u.em->length - offset;
-    if (written > len[0])
-      written = len[0];
-    if (written) {
-      FIO_MEMCPY(buf[0] + buf_offset, u.em->buf + offset, written);
-      len[0] -= written;
-    }
-    if (len[0]) {
-      fio___stream_read_internal(p->next, buf, len, written + buf_offset, 0, 1);
-    }
-    len[0] += written;
-    return;
-  case FIO_PACKET_TYPE_EXTERNAL:
-    if (!buf[0] || !len[0] ||
-        (!must_copy && (!p->next || u.ext->length >= len[0] + offset))) {
-      buf[0] = u.ext->buf + u.ext->offset + offset;
-      len[0] = (size_t)(u.ext->length) - offset;
-      return;
-    }
-    written = u.ext->length - offset;
-    if (written > len[0])
-      written = len[0];
-    if (written) {
-      FIO_MEMCPY(buf[0] + buf_offset,
-                 u.ext->buf + u.ext->offset + offset,
-                 written);
-      len[0] -= written;
-    }
-    if (len[0]) {
-      fio___stream_read_internal(p->next, buf, len, written + buf_offset, 0, 1);
-    }
-    len[0] += written;
-    return;
-    break;
-  case FIO_PACKET_TYPE_FILE: /* fall through */
-  case FIO_PACKET_TYPE_FILE_NO_CLOSE:
-    if (!buf[0] || !len[0]) {
-      len[0] = 0;
-      return;
-    }
-    {
-      uint8_t possible_eof_surprise = 0;
-      written = u.f->length - offset; /* written here == to be read & written */
-      if (written > len[0])
-        written = len[0];
-      if (written) {
-        ssize_t act;
-      retry_on_signal:
-        act = fio_fd_read(u.f->fd,
-                          buf[0] + buf_offset,
-                          written,
-                          u.f->offset + offset);
-        if (act <= 0) {
-          /* no more data in the file? */
-          FIO_LOG_DEBUG("file read error for %d: %s", u.f->fd, strerror(errno));
-          if (errno == EINTR)
-            goto retry_on_signal;
-          // u.f->length = offset; /* mark EOF */
-        } else if ((size_t)act != written) {
-          /* a surprising EOF? */
-          written = act;
-          possible_eof_surprise = 1;
-          // u.f->length = offset + act; /* mark EOF? */
-        }
-        len[0] -= written;
+                                          size_t offset) {
+  size_t want = len[0];
+  size_t got = 0;
+  for (; p && want; p = p->next, offset = 0) {
+    union {
+      fio_stream_packet_embd_s *em;
+      fio_stream_packet_extrn_s *ext;
+      fio_stream_packet_fd_s *f;
+    } const u = {.em = (fio_stream_packet_embd_s *)(p + 1)};
+    const char *src;
+    size_t plen;
+    switch (u.em->type) {
+    case FIO_PACKET_TYPE_EMBEDDED:
+      src = u.em->buf + offset;
+      plen = (size_t)u.em->length - offset;
+      break;
+    case FIO_PACKET_TYPE_EXTERNAL:
+      src = u.ext->buf + u.ext->offset + offset;
+      plen = u.ext->length - offset;
+      break;
+    case FIO_PACKET_TYPE_FILE: /* fall through */
+    case FIO_PACKET_TYPE_FILE_NO_CLOSE: {
+      size_t act;
+      if (!buf[0]) /* no scratch buffer (`got` is zero here) */
+        goto done;
+      plen = u.f->length - offset;
+      if (plen > want)
+        plen = want;
+      act = fio_fd_read(u.f->fd,
+                        buf[0] + got,
+                        plen,
+                        (off_t)(u.f->offset + offset));
+      got += act;
+      if (act == plen) {
+        want -= act;
+        continue;
       }
-      if (!possible_eof_surprise && len[0]) {
-        fio___stream_read_internal(p->next,
-                                   buf,
-                                   len,
-                                   written + buf_offset,
-                                   0,
-                                   1);
-      }
-      len[0] += written;
+      /* EOF or error: truncate the packet and discard its queued tail.
+       * A non-consuming read reduces the recorded length in this case, so
+       * consumers can detect an incomplete declared file range. */
+      FIO_LOG_DEBUG("file packet (fd %d) EOF or read error", u.f->fd);
+      s->length -= u.f->length - (offset + act);
+      u.f->length = offset + act;
+      for (fio_stream_packet_s *n = p->next; n; n = n->next)
+        s->length -= fio___stream_p2len(n);
+      fio_stream_packet_free_all(p->next);
+      p->next = NULL;
+      s->pos = &p->next;
+      goto done;
     }
-    return;
+    default: goto done;
+    }
+    if (!got && (!buf[0] || !p->next || plen >= want)) {
+      /* zero-copy: point directly at the packet's data */
+      buf[0] = (char *)src;
+      len[0] = plen;
+      return;
+    }
+    if (plen > want)
+      plen = want;
+    FIO_MEMCPY(buf[0] + got, src, plen);
+    got += plen;
+    want -= plen;
   }
+done:
+  len[0] = got;
 }
 
 /**
@@ -556,10 +535,26 @@ FIO_SFUNC void fio___stream_read_internal(fio_stream_packet_s *p,
  * Note: this isn't thread safe.
  */
 SFUNC void fio_stream_read(fio_stream_s *s, char **buf, size_t *len) {
-  if (!s || !s->next)
+  const size_t want = *len;
+  if (!s)
     goto none;
-  fio___stream_read_internal(s->next, buf, len, 0, s->consumed, 0);
-  return;
+  for (;;) {
+    /* drop exhausted head packets (truncated by a failed file read) */
+    while (s->next && fio___stream_p2len(s->next) <= s->consumed) {
+      fio_stream_packet_s *p = s->next;
+      s->next = p->next;
+      s->consumed = 0;
+      fio_stream_packet_free(p);
+    }
+    if (!s->next)
+      break;
+    fio___stream_read_internal(s, s->next, buf, len, s->consumed);
+    if (*len || !want || !*buf)
+      return;
+    *len = want; /* the head file packet failed and was truncated, retry */
+  }
+  s->pos = &s->next;
+  s->length = 0;
 none:
   *buf = NULL;
   *len = 0;
@@ -573,27 +568,27 @@ none:
 SFUNC void fio_stream_advance(fio_stream_s *s, size_t len) {
   if (!s || !s->next)
     return;
+  if (len >= s->length) /* consume everything (also prevents wrapping) */
+    goto drain;
   s->length -= len;
   len += s->consumed;
-  while (len) {
+  while (s->next) {
     size_t p_len = fio___stream_p2len(s->next);
-    if (len >= p_len) {
-      fio_stream_packet_s *p = s->next;
-      s->next = p->next;
-      fio_stream_packet_free(p);
-      len -= p_len;
-      if (!s->next) {
-        s->pos = &s->next;
-        s->consumed = 0;
-        s->length = 0;
-        return;
-      }
-    } else {
+    if (len < p_len) {
       s->consumed = len;
       return;
     }
+    fio_stream_packet_s *p = s->next;
+    s->next = p->next;
+    fio_stream_packet_free(p);
+    len -= p_len;
   }
-  s->consumed = len;
+drain:
+  fio_stream_packet_free_all(s->next);
+  s->next = NULL;
+  s->pos = &s->next;
+  s->consumed = 0;
+  s->length = 0;
 }
 
 /* *****************************************************************************

@@ -40,6 +40,12 @@ typedef union {
  */
 SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len);
 
+/** HMAC-SHA1, resulting in a 20 byte authentication code. */
+SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
+                               uint64_t key_len,
+                               const void *msg,
+                               uint64_t msg_len);
+
 /** Returns the digest length of SHA1 in bytes (20 bytes) */
 FIO_IFUNC size_t fio_sha1_len(void);
 
@@ -272,11 +278,13 @@ FIO_IFUNC void fio___sha1_round512(uint32_t *old, /* state */
   w1 = vld1q_u32(w + 4);
   w2 = vld1q_u32(w + 8);
   w3 = vld1q_u32(w + 12);
-  /* make little endian */
+#if !__BIG_ENDIAN__
+  /* SHA-1 message words are Big Endian - convert to local byte order */
   w0 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w0)));
   w1 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w1)));
   w2 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w2)));
   w3 = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(w3)));
+#endif
 
   t0 = vaddq_u32(w0, vdupq_n_u32(0x5A827999));
   t1 = vaddq_u32(w1, vdupq_n_u32(0x5A827999));
@@ -447,10 +455,8 @@ SFUNC fio_sha1_s fio_sha1(const void *data, uint64_t len) {
       vec[i] = 0;
     }
   }
-  len <<= 3;
-  len = fio_lton64(len);
-  vec[14] = (uint32_t)(len & 0xFFFFFFFF);
-  vec[15] = (uint32_t)(len >> 32);
+  /* message bit length, Big Endian, last 8 bytes of the final block */
+  fio_u2buf64_be((uint8_t *)vec + 56, (len << 3));
   fio___sha1_round512(s.v, vec);
   for (size_t i = 0; i < 5; ++i) {
     s.v[i] = fio_ntol32(s.v[i]);
@@ -514,10 +520,7 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
     v = fio_u512_init64(0);
   }
   msg_len += 64; /* add the 64 byte inner key to the length count */
-  msg_len <<= 3;
-  msg_len = fio_lton64(msg_len);
-  v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFFUL);
-  v.u32[15] = (uint32_t)(msg_len >> 32);
+  fio_u2buf64_be(v.u8 + 56, (msg_len << 3));
   fio_memcpy64(tmp, v.u32);
   fio___sha1_round512(inner.v, tmp);
   for (size_t i = 0; i < 5; ++i)
@@ -536,20 +539,24 @@ SFUNC fio_sha1_s fio_sha1_hmac(const void *key,
   for (size_t i = 0; i < 5; ++i)
     v.u32[i] = inner.v[i];
   v.u8[20] = 0x80;
-  msg_len = ((64U + 20U) << 3);
-  msg_len = fio_lton64(msg_len);
-  v.u32[14] = (uint32_t)(msg_len & 0xFFFFFFFF);
-  v.u32[15] = (uint32_t)(msg_len >> 32);
+  fio_u2buf64_be(v.u8 + 56, (uint64_t)((64U + 20U) << 3));
   fio_memcpy64(tmp, v.u32);
   fio___sha1_round512(outer.v, tmp);
   for (size_t i = 0; i < 5; ++i)
     outer.v[i] = fio_ntol32(outer.v[i]);
 
+  /* clear key material and key derived state */
+  fio_secure_zero(&k, sizeof(k));
+  fio_secure_zero(&v, sizeof(v));
+  fio_secure_zero(tmp, sizeof(tmp));
+  fio_secure_zero(&inner, sizeof(inner));
   return outer;
 
 key_too_long:
   inner = fio_sha1(key, key_len);
-  return fio_sha1_hmac(inner.digest, 20, msg, msg_len);
+  outer = fio_sha1_hmac(inner.digest, 20, msg, msg_len);
+  fio_secure_zero(&inner, sizeof(inner));
+  return outer;
 }
 
 /* *****************************************************************************

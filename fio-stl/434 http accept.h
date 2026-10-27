@@ -39,6 +39,41 @@ FIO_SFUNC void fio___http_perform_user_callback(void *cb_, void *h_) {
   fio_http_free(h);
 }
 
+/* No memory to queue a server request task (IO thread, `h` owned and still
+ * unanswered): answer 503 - finishing `h` balances the completion-time IO
+ * reference and suspension - and close. User code never runs here. */
+FIO_SFUNC void fio___http_dispatch_failed(fio___http_connection_s *c,
+                                          fio_http_s *h) {
+  fio_io_s *io = c->io; /* `c` (and `io`) outlive `h`: IO udata reference */
+  FIO_LOG_ERROR("(%d) HTTP couldn't queue request handling for fd %d"
+                " - closing connection.",
+                fio_io_pid(),
+                (int)fio_io_fd(io));
+  fio_http_send_error_response(h, 503);
+  fio_io_close(io);
+  fio_http_free(h);
+}
+
+/* Queues `task(udata1, h)` on the connection's queue (IO thread caller).
+ *
+ * On queue failure (no memory) a task bound for the IO queue runs inline -
+ * same thread, same callback semantics. Tasks bound for another (worker)
+ * queue are never run on the IO thread: `on_fail` cleans up instead. */
+FIO_IFUNC void fio___http_dispatch(fio___http_connection_s *c,
+                                   void (*task)(void *, void *),
+                                   void *udata1,
+                                   fio_http_s *h,
+                                   void (*on_fail)(fio___http_connection_s *,
+                                                   fio_http_s *)) {
+  if (FIO_LIKELY(!fio_queue_push(c->queue, task, udata1, (void *)h)))
+    return;
+  if (c->queue == fio_io_queue()) {
+    task(udata1, (void *)h);
+    return;
+  }
+  on_fail(c, h);
+}
+
 FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
                                               fio___http_connection_s *c,
                                               fio_http_settings_s *s) {
@@ -54,18 +89,20 @@ FIO_IFUNC int fio___http_on_http_test4upgrade(fio_http_s *h,
 
 websocket_requested:
   cb.fn = s->on_authenticate_websocket;
-  fio_queue_push(c->queue,
-                 fio___http_perform_user_upgrade_callback_websocket,
-                 cb.ptr,
-                 (void *)h);
+  fio___http_dispatch(c,
+                      fio___http_perform_user_upgrade_callback_websocket,
+                      cb.ptr,
+                      h,
+                      fio___http_dispatch_failed);
   return -1;
 
 sse_requested:
   cb.fn = s->on_authenticate_sse;
-  fio_queue_push(c->queue,
-                 fio___http_perform_user_upgrade_callback_sse,
-                 cb.ptr,
-                 (void *)h);
+  fio___http_dispatch(c,
+                      fio___http_perform_user_upgrade_callback_sse,
+                      cb.ptr,
+                      h,
+                      fio___http_dispatch_failed);
   return -1;
 
 #if 0
@@ -88,7 +125,11 @@ FIO_SFUNC void fio___http_on_http_direct(void *h_, void *ignr) {
     void (*fn)(fio_http_s *);
     void *ptr;
   } cb = {.fn = s->on_http};
-  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
+  fio___http_dispatch(c,
+                      fio___http_perform_user_callback,
+                      cb.ptr,
+                      h,
+                      fio___http_dispatch_failed);
   (void)ignr;
 }
 
@@ -101,10 +142,12 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
     return;
   /* The automatic static service answers GET / HEAD requests only (RFC
    * 9110 §9.3); any other method falls through to the application's
-   * `on_http` callback, which may serve files explicitly (if desired). */
+   * `on_http` callback, which may serve files explicitly (if desired).
+   * An empty root (listener without a public folder, inherited by routes
+   * without one) is never served: it would expose absolute paths. */
   fio_str_info_s m = fio_http_method(h);
   const uint32_t m4 = (m.len >= 3) ? (fio_buf2u32u(m.buf) | 0x20202020UL) : 0UL;
-  if (s->public_folder.buf &&
+  if (s->public_folder.len &&
       ((m.len == 3 && m4 == fio_buf2u32u("get\x20")) ||
        (m.len == 4 && m4 == fio_buf2u32u("head"))) &&
       !fio_http_static_file_response(
@@ -121,7 +164,11 @@ FIO_SFUNC void fio___http_on_http_with_public_folder(void *h_, void *ignr) {
     void (*fn)(fio_http_s *);
     void *ptr;
   } cb = {.fn = s->on_http};
-  fio_queue_push(c->queue, fio___http_perform_user_callback, cb.ptr, (void *)h);
+  fio___http_dispatch(c,
+                      fio___http_perform_user_callback,
+                      cb.ptr,
+                      h,
+                      fio___http_dispatch_failed);
   (void)ignr;
 }
 
@@ -138,6 +185,20 @@ FIO_SFUNC void fio___http_perform_user_callback_client(void *cb_, void *h_) {
   fio_io_free(c->io);
 }
 
+/* No memory to queue a client response task (IO thread, `h` owned): drop the
+ * response without user code, release the completion-time IO reference. */
+FIO_SFUNC void fio___http_dispatch_failed_client(fio___http_connection_s *c,
+                                                 fio_http_s *h) {
+  fio_io_s *io = c->io; /* `c` (and `io`) outlive `h`: IO udata reference */
+  FIO_LOG_ERROR("(%d) HTTP client couldn't queue response handling for fd %d"
+                " - closing connection.",
+                fio_io_pid(),
+                (int)fio_io_fd(io));
+  fio_io_close(io);
+  fio_http_free(h);
+  fio_io_free(io);
+}
+
 FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr) {
   fio_http_s *h = (fio_http_s *)h_;
   fio___http_connection_s *c = (fio___http_connection_s *)fio_http_cdata(h);
@@ -152,10 +213,11 @@ FIO_SFUNC void fio___http_on_http_client(void *h_, void *ignr) {
     goto websocket_accepted;
   if (fio_http_sse_accepted(h))
     goto sse_accepted;
-  fio_queue_push(c->queue,
-                 fio___http_perform_user_callback_client,
-                 cb.ptr,
-                 (void *)h);
+  fio___http_dispatch(c,
+                      fio___http_perform_user_callback_client,
+                      cb.ptr,
+                      h,
+                      fio___http_dispatch_failed_client);
   return;
   (void)ignr;
 
@@ -201,7 +263,14 @@ FIO_SFUNC void fio___http_on_attach_accept(fio_io_s *io) {
 
   const uint32_t capa = p->settings.max_line_len;
   fio___http_connection_s *c = fio___http_connection_new(capa);
-  FIO_ASSERT_ALLOC(c);
+  if (FIO_UNLIKELY(!c)) { /* refuse this connection, not the process */
+    FIO_LOG_ERROR("(%d) HTTP no memory for accepted connection (fd %d)",
+                  fio_io_pid(),
+                  (int)fio_io_fd(io));
+    fio___http_protocol_free(p);
+    fio_io_close_now(io); /* udata stays NULL: on_close / on_data skip it */
+    return;
+  }
   *c = (fio___http_connection_s){
       .io = io,
       .settings = &(p->settings),
@@ -221,7 +290,7 @@ FIO_SFUNC void fio___http_on_attach_accept(fio_io_s *io) {
   fio_io_udata_set(io, (void *)c);
   FIO_LOG_DDEBUG2("(%d) HTTP accepted a new connection (%p)",
                   (int)fio_thread_getpid(),
-                  c->io);
+                  (void *)c->io);
 #if 0 /* skip pre-knowledge test? */
   fio_io_protocol_set(
       io,
@@ -239,6 +308,8 @@ FIO_SFUNC void fio___http1_accept_on_data(fio_io_s *io) {
       24);
   fio___http_connection_s *c = (fio___http_connection_s *)fio_io_udata(io);
   fio_io_protocol_s *phttp_new;
+  if (FIO_UNLIKELY(!c)) /* connection allocation failed in on_attach */
+    return;
   size_t r = fio_io_read(io, c->buf + c->len, c->capa - c->len);
   if (!r) /* nothing happened */
     return;
@@ -276,6 +347,8 @@ FIO_SFUNC void fio___http_on_close(void *buf, void *udata) {
                   (int)fio_thread_getpid(),
                   udata);
   fio___http_connection_s *c = (fio___http_connection_s *)udata;
+  if (FIO_UNLIKELY(!c)) /* attach failed before a connection existed */
+    return;
   c->io = NULL;
   fio_http_free(c->h);
   fio___http_connection_free(c);

@@ -1044,6 +1044,125 @@ FIO_SFUNC int fio___test_risky256_hmac(void) {
       ++failures;
   }
 
+  /* 5j. Keyed: deterministic, 512 prefix == 256, differs from unkeyed/HMAC */
+  {
+    const char *key = "keyed test key";
+    const char *msg = "keyed message";
+    fio_u256 k1 = fio_risky256_keyed(key, 14, msg, 13);
+    fio_u256 k2 = fio_risky256_keyed(key, 14, msg, 13);
+    fio_u512 k512 = fio_risky512_keyed(key, 14, msg, 13);
+    fio_u256 h = fio_risky256(msg, 13);
+    fio_u256 m = fio_risky256_hmac(key, 14, msg, 13);
+    int pass = !fio___u256_cmp(k1, k2) && !FIO_MEMCMP(k1.u8, k512.u8, 32) &&
+               fio___u256_cmp(k1, h) && fio___u256_cmp(k1, m);
+    fprintf(stderr,
+            "    5j. Keyed basic (512 prefix, != unkeyed, != HMAC): %s\n",
+            pass ? "PASS" : "* FAIL *");
+    failures += !pass;
+  }
+
+  /* 5k. Keyed: key length separation (zero padding is not ambiguous) */
+  {
+    const uint8_t key[65] = {'a', 'b'}; /* rest zero */
+    const char *msg = "length separated";
+    fio_u256 r[5];
+    r[0] = fio_risky256_keyed(key, 2, msg, 16);
+    r[1] = fio_risky256_keyed(key, 3, msg, 16);
+    r[2] = fio_risky256_keyed(key, 64, msg, 16);
+    r[3] = fio_risky256_keyed(key, 65, msg, 16);
+    r[4] = fio_risky256_keyed(NULL, 0, msg, 16);
+    int pass = 1;
+    for (int i = 0; i < 5; ++i)
+      for (int j = i + 1; j < 5; ++j)
+        pass &= !!fio___u256_cmp(r[i], r[j]);
+    fprintf(stderr,
+            "    5k. Keyed key length separation: %s\n",
+            pass ? "PASS" : "* FAIL *");
+    failures += !pass;
+  }
+
+  /* 5l. Keyed: every key byte matters (short and hashed long keys) */
+  {
+    uint8_t key[100];
+    const char *msg = "key byte sensitivity";
+    for (size_t i = 0; i < sizeof(key); ++i)
+      key[i] = (uint8_t)(i * 7 + 1);
+    int pass = 1;
+    const size_t klens[] = {16, 32, 64, 100};
+    for (size_t li = 0; li < 4; ++li) {
+      size_t kl = klens[li];
+      fio_u256 base = fio_risky256_keyed(key, kl, msg, 20);
+      for (size_t i = 0; i < kl; ++i) {
+        key[i] ^= 0x80;
+        fio_u256 f = fio_risky256_keyed(key, kl, msg, 20);
+        key[i] ^= 0x80;
+        pass &= !!fio___u256_cmp(base, f);
+      }
+    }
+    fprintf(stderr,
+            "    5l. Keyed key byte sensitivity (16/32/64/100 byte keys): %s\n",
+            pass ? "PASS" : "* FAIL *");
+    failures += !pass;
+  }
+
+  /* 5m. Keyed: avalanche over key bits (32 byte key, 64 byte message) */
+  {
+    uint8_t key[32], msg[64];
+    uint64_t flips = 0, total = 0;
+    for (int t = 0; t < 64; ++t) {
+      fio_rand_bytes(key, 32);
+      fio_rand_bytes(msg, 64);
+      fio_u256 base = fio_risky256_keyed(key, 32, msg, 64);
+      for (int b = 0; b < 256; ++b) {
+        key[b >> 3] ^= (uint8_t)(1U << (b & 7));
+        fio_u256 f = fio_risky256_keyed(key, 32, msg, 64);
+        key[b >> 3] ^= (uint8_t)(1U << (b & 7));
+        for (int w = 0; w < 4; ++w)
+          flips += fio_popcount(base.u64[w] ^ f.u64[w]);
+        total += 256;
+      }
+    }
+    double pct = (double)flips * 100.0 / (double)total;
+    int pass = pct > 49.0 && pct < 51.0;
+    fprintf(stderr,
+            "    5m. Keyed key avalanche: %.3f%% (target 49-51%%): %s\n",
+            pct,
+            pass ? "PASS" : "* FAIL *");
+    failures += !pass;
+  }
+
+  /* 5n. Regression: a block equal to a (public-seeded) lane state used to
+   *     erase earlier input (round(0) == 0, unkeyed HMAC lane). */
+  {
+    int hits = 0;
+    for (int t = 0; t < 64; ++t) {
+      uint8_t key[32], m1[256], m2[256];
+      fio_rand_bytes(key, 32);
+      for (int k = 0; k < 2; ++k) {
+        uint8_t *m = k ? m2 : m1;
+        uint64_t v0[8], v1[8];
+        fio_rand_bytes(m, 256);
+        if (k) { /* same lane-1 input, different block 0 */
+          FIO_MEMCPY(m + 64, m1 + 64, 64);
+          FIO_MEMCPY(m + 192, m1 + 192, 64);
+        }
+        fio___risky256_init(v0, v1, 256);
+        fio___risky256_block(v0, m);
+        for (size_t i = 0; i < 8; ++i) /* pre-round state of block 2 -> 0 */
+          fio_u2buf64_le(m + 128 + (i << 3), v0[i]);
+      }
+      fio_u256 a = fio_risky256(m1, 256), b = fio_risky256(m2, 256);
+      fio_u256 c = fio_risky256_hmac(key, 32, m1, 256);
+      fio_u256 d = fio_risky256_hmac(key, 32, m2, 256);
+      hits += !fio___u256_cmp(a, b) || !fio___u256_cmp(c, d);
+    }
+    fprintf(stderr,
+            "    5n. State erasure collisions (64 tries): %d: %s\n",
+            hits,
+            hits ? "* FAIL *" : "PASS");
+    failures += !!hits;
+  }
+
   return failures;
 }
 
@@ -1110,6 +1229,34 @@ FIO_SFUNC int fio___test_risky256_length_extension(void) {
 7. Known Answer Tests (KATs)
 ***************************************************************************** */
 
+/* Computes one KAT (see `kind` in fio___test_risky256_kats). */
+FIO_SFUNC void fio___test_risky256_kat_run(int kind,
+                                           const char *str,
+                                           size_t len,
+                                           fio_u256 *r256,
+                                           fio_u512 *r512) {
+  static uint8_t long_key[100];
+  for (size_t i = 0; i < sizeof(long_key); ++i)
+    long_key[i] = (uint8_t)(i * 3 + 7);
+  switch (kind) {
+  case 1:
+    *r256 = fio_risky256_hmac("HMAC test key", 13, str, len);
+    *r512 = fio_risky512_hmac("HMAC test key", 13, str, len);
+    return;
+  case 2:
+    *r256 = fio_risky256_keyed("Keyed test key", 14, str, len);
+    *r512 = fio_risky512_keyed("Keyed test key", 14, str, len);
+    return;
+  case 3:
+    *r256 = fio_risky256_keyed(long_key, sizeof(long_key), str, len);
+    *r512 = fio_risky512_keyed(long_key, sizeof(long_key), str, len);
+    return;
+  default:
+    *r256 = fio_risky256(str, len);
+    *r512 = fio_risky512(str, len);
+  }
+}
+
 FIO_SFUNC int fio___test_risky256_kats(void) {
   int failures = 0;
 
@@ -1141,55 +1288,64 @@ FIO_SFUNC int fio___test_risky256_kats(void) {
     fio_u512 e512;
     fio_u256 r256;
     fio_u512 r512;
-    bool is_hmac;
+    int kind; /* 0: plain, 1: HMAC, 2: keyed, 3: keyed (long key) */
   } KATS[] = {
       {
           "(\"\", 0)",
           "",
           0,
-          "41c89d5519ed1e2f81308c41080dcd3247a8a4a0c80ac29c86933e9ff8d7c3d0",
-          "41c89d5519ed1e2f81308c41080dcd3247a8a4a0c80ac29c86933e9ff8d7c3d016a5"
-          "1e71fd5c4df73f106e360b3b632dd9939a62fe09202f2284e4333d347315",
+          "55feb1234e3f342a594a3fd6834bafcc56a7c649c338b546078b9bbdb2ddee66",
+          .e512_str =
+              "55feb1234e3f342a594a3fd6834bafcc56a7c649c338b546078b9bbdb2ddee66f8ed"
+              "77899ec02c7f8f994159e3d634aee062771de13aed002e9ee0236c24c2f6",
       },
       {"(\"abc\", 3)",
        "abc",
        3,
-       "854db944644cc0415a9c98fbacfd0b144882953e0f7360289af523efbbb743c8",
-       "854db944644cc0415a9c98fbacfd0b144882953e0f7360289af523efbbb743c895250d3"
-       "211746ee8221adeed195f02cd6b6918e326368fd8a9e5b6f723b0e2aa"},
+       "7ebba00c973e4ded806eeea16c613ac5c713b3a6bf26d1591ba79bfd04490d38",
+       .e512_str =
+           "7ebba00c973e4ded806eeea16c613ac5c713b3a6bf26d1591ba79bfd04490d38246b9cb"
+           "cef69000eaba7248fab727058f1f422df7be3ac9ff963110046631061"},
       {"(\"seq_0_255\", 1024)",
        seq_0_255,
        1024,
-       "e9e90d2219dfbb155c360ed4e5fc7aa0e517f56d032c7ebec1d2c75844f173fe",
-       "e9e90d2219dfbb155c360ed4e5fc7aa0e517f56d032c7ebec1d2c75844f173fe77e2357"
-       "3d4e8a65c1589fccd9c2381fb58346637ab020fe09fcb0a98555f94a4"},
+       "eb52fb10754fd158cd00ca51e8c58ebf8c217a69395c1cca169ec00cfbbeae7e",
+       .e512_str =
+           "eb52fb10754fd158cd00ca51e8c58ebf8c217a69395c1cca169ec00cfbbeae7e7df29e6"
+           "7a262ac5832133939744cfd75f081bf4756f6d737d199d83d76a462f7"},
       {"0xAB*64K",
        seq_ab_64k,
        65536,
-       "7fa1eabeea186b7f1b2c17bc059b595c234b0038d090c4bacc6b2911ed0c163f",
-       "7fa1eabeea186b7f1b2c17bc059b595c234b0038d090c4bacc6b2911ed0c163f8618bdc"
-       "7cecd8a19bc6b1999880c062b08eec7f407a5b52aaaa44c51b5e32bf5"},
+       "329182870c569e2f15c0b7c694bf381720124dfbdaf10fbcc83dc53ece470798",
+       .e512_str =
+           "329182870c569e2f15c0b7c694bf381720124dfbdaf10fbcc83dc53ece470798bcc02b9"
+           "8220cbace2f3731404cf551877dbfb723db30c08c3fc7a3657d94204f"},
       {"HMAC",
        "HMAC test message",
        17,
-       "b7e3e2e979361227c2deabf42e693767c7ae7d330dfc5b96d1f81a10391f9f5c",
-       "a6a194aa6dca490e448fabdfe0dee0319a700bd947defe65cc82126ae692ba2255cdcdb"
-       "5b7bbcb1610be209bb72d40c938b75af9d6bf4b63e09fab7a6305511e",
-       .is_hmac = 1},
+       "e52f854e864b3f6f863ab6b0f185a5ca341d24914960caa52fd9f5e610d3f93a",
+       "d9dd4dcf6e632e510e502412b50448af2d36d1d0538606287feed1b59371952d61bfecd"
+       "83ea16d3d648b71ec7c483ef4221e19f09ec4e52bf2872aac4f2c0b51",
+       .kind = 1},
+      {"Keyed", "Keyed test message", 18,
+       "875e2244319a60afa9a30a253522c02a076038088756b35669fb5abeff358ae1",
+       "875e2244319a60afa9a30a253522c02a076038088756b35669fb5abeff358ae1"
+       "a06aff3211da0c95cb5f0ded4bbfb5f8ee3ece9c967f13bcad39532467f8edea",
+       .kind = 2},
+      {"Keyed (long key)", seq_0_255, 200,
+       "009d71a0181a5e78fb4da5858aa3f0523e12f2257bbf6aea940ffe5fdc0fe59d",
+       "009d71a0181a5e78fb4da5858aa3f0523e12f2257bbf6aea940ffe5fdc0fe59d"
+       "2ab9978eeb54d41feb1cf09fd4c7de5f49aa97b64d054fd2fa09a8afd109afbf",
+       .kind = 3},
       {0},
   };
   /* compute reference hashes once */
-  for (size_t i = 0; KATS[i].name; ++i) {
-    if (KATS[i].is_hmac) {
-      KATS[i].r256 =
-          fio_risky256_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
-      KATS[i].r512 =
-          fio_risky512_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
-    } else {
-      KATS[i].r256 = fio_risky256(KATS[i].str, KATS[i].len);
-      KATS[i].r512 = fio_risky512(KATS[i].str, KATS[i].len);
-    }
-  }
+  for (size_t i = 0; KATS[i].name; ++i)
+    fio___test_risky256_kat_run(KATS[i].kind,
+                                KATS[i].str,
+                                KATS[i].len,
+                                &KATS[i].r256,
+                                &KATS[i].r512);
   /* parse and test expectations */
   for (size_t i = 0; KATS[i].name; ++i) {
     if (!KATS[i].e256_str || !KATS[i].e512_str) {
@@ -1229,13 +1385,11 @@ FIO_SFUNC int fio___test_risky256_kats(void) {
     bool pass;
     fio_u256 r256;
     fio_u512 r512;
-    if (KATS[i].is_hmac) {
-      r256 = fio_risky256_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
-      r512 = fio_risky512_hmac("HMAC test key", 13, KATS[i].str, KATS[i].len);
-    } else {
-      r256 = fio_risky256(KATS[i].str, KATS[i].len);
-      r512 = fio_risky512(KATS[i].str, KATS[i].len);
-    }
+    fio___test_risky256_kat_run(KATS[i].kind,
+                                KATS[i].str,
+                                KATS[i].len,
+                                &r256,
+                                &r512);
     pass = !FIO_MEMCMP(KATS[i].r256.u8, r256.u8, sizeof(KATS[i].r256));
     pass &= !FIO_MEMCMP(KATS[i].r512.u8, r512.u8, sizeof(KATS[i].r512));
     failures += !pass;

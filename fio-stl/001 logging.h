@@ -37,40 +37,45 @@ Copyright and License: see header file (000 copyright.h) or top of file
 
 #undef FIO_LOG2STDERR
 
-FIO_SFUNC FIO___PRINTF_STYLE(1, 0) void FIO_LOG2STDERR(const char *format,
+#include <limits.h>
+#if FIO_LOG_LENGTH_LIMIT < 3 || FIO_LOG_LENGTH_LIMIT > (INT_MAX - 66)
+#error "FIO_LOG_LENGTH_LIMIT must be between 3 and INT_MAX - 66"
+#endif
+
+FIO_SFUNC FIO___PRINTF_STYLE(1, 2) void FIO_LOG2STDERR(const char *format,
                                                        ...) {
 #if FIO_LOG_LENGTH_LIMIT > 128
 #define FIO_LOG____LENGTH_ON_STACK FIO_LOG_LENGTH_LIMIT
 #define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 34)
 #else
 #define FIO_LOG____LENGTH_ON_STACK (FIO_LOG_LENGTH_LIMIT + 34)
-#define FIO_LOG____LENGTH_BORDER   FIO_LOG_LENGTH_LIMIT
+#define FIO_LOG____LENGTH_BORDER   (FIO_LOG_LENGTH_LIMIT - 3)
 #endif
+  const int saved_errno = errno;
   va_list argv;
   char tmp___log[FIO_LOG____LENGTH_ON_STACK + 32];
   va_start(argv, format);
   int len___log = vsnprintf(tmp___log, FIO_LOG_LENGTH_LIMIT - 2, format, argv);
   va_end(argv);
-  if (len___log > 0) {
+  if (len___log >= 0) {
     if (len___log >= FIO_LOG_LENGTH_LIMIT - 2) {
       fio_memcpy32(tmp___log + FIO_LOG____LENGTH_BORDER,
                    "...\n\t\x1B[2mWARNING:\x1B[0m TRUNCATED!");
       len___log = FIO_LOG____LENGTH_BORDER + 32;
     }
     tmp___log[len___log++] = '\n';
-    tmp___log[len___log] = '0';
-    fwrite(tmp___log, 1, (size_t)len___log, FIO_STDERR_FILE);
-    return;
+    /* Best effort: stdio retains the failure indicator for the stream owner. */
+    (void)fwrite(tmp___log, 1, (size_t)len___log, FIO_STDERR_FILE);
+  } else {
+    static const char error[] = "\x1B[1mERROR:\x1B[0m log formatting error.\n";
+    (void)fwrite(error, 1, sizeof(error) - 1, FIO_STDERR_FILE);
   }
-  fwrite("\x1B[1mERROR:\x1B[0m log output error (can't write).\n",
-         1,
-         47,
-         FIO_STDERR_FILE);
+  errno = saved_errno;
 #undef FIO_LOG____LENGTH_ON_STACK
 #undef FIO_LOG____LENGTH_BORDER
 }
 
-/** The logging level */
+/** The logging level. Set before starting threads, or synchronize changes. */
 #ifndef FIO_LOG_LEVEL_DEFAULT
 #if defined(DEBUG) && DEBUG
 #define FIO_LOG_LEVEL_DEFAULT FIO_LOG_LEVEL_DEBUG

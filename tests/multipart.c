@@ -7,1607 +7,570 @@ MIME Multipart Parser Tests
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* *****************************************************************************
-Test Callbacks
+Recording callbacks: every reported part is appended to a log, so the result
+of any feeding pattern can be compared to a single complete parse.
 ***************************************************************************** */
 
 typedef struct {
-  size_t field_count;
-  size_t file_count;
-  size_t file_data_bytes;
-  char last_field_name[256];
-  char last_field_value[256];
-  char last_filename[256];
-  const char *expected_headers;
-  size_t empty_filename_count;
-} test_multipart_ctx_s;
+  char *log;
+  size_t len;
+  size_t capa;
+  size_t strings;
+  size_t files;
+  int fail_on; /* return this from the n-th callback (`fail_at`), if set */
+  size_t fail_at;
+  size_t calls;
+  fio_buf_info_s headers; /* the last file's headers (copied) */
+  char headers_buf[512];
+} mp_ctx_s;
 
-static void *test_on_field(void *udata,
-                           fio_buf_info_s name,
-                           fio_buf_info_s value,
-                           fio_buf_info_s content_type) {
-  test_multipart_ctx_s *ctx = (test_multipart_ctx_s *)udata;
-  ++ctx->field_count;
-
-  /* Store last field for verification */
-  if (name.len < sizeof(ctx->last_field_name)) {
-    FIO_MEMCPY(ctx->last_field_name, name.buf, name.len);
-    ctx->last_field_name[name.len] = '\0';
+static void mp_log(mp_ctx_s *c, const char *buf, size_t len) {
+  if (c->len + len + 1 > c->capa) {
+    size_t capa = (c->len + len + 1) * 2;
+    c->log = (char *)realloc(c->log, capa);
+    FIO_ASSERT(c->log, "allocation failed");
+    c->capa = capa;
   }
-  if (value.len < sizeof(ctx->last_field_value)) {
-    FIO_MEMCPY(ctx->last_field_value, value.buf, value.len);
-    ctx->last_field_value[value.len] = '\0';
+  if (len)
+    memcpy(c->log + c->len, buf, len);
+  c->len += len;
+  c->log[c->len] = 0;
+}
+static void mp_log_buf(mp_ctx_s *c, fio_buf_info_s b) {
+  if (!b.buf) {
+    mp_log(c, "(null)", 6);
+    return;
   }
+  mp_log(c, b.buf, b.len);
+}
+static int mp_fail(mp_ctx_s *c) {
+  return (c->fail_on && ++c->calls == c->fail_at) ? c->fail_on : 0;
+}
+static int mp_on_string(void *udata,
+                        fio_buf_info_s key,
+                        fio_buf_info_s value,
+                        fio_buf_info_s content_type) {
+  mp_ctx_s *c = (mp_ctx_s *)udata;
+  ++c->strings;
+  mp_log(c, "s[", 2);
+  mp_log_buf(c, key);
+  mp_log(c, "][", 2);
+  mp_log_buf(c, content_type);
+  mp_log(c, "]=", 2);
+  mp_log_buf(c, value);
+  mp_log(c, "|", 1);
+  return mp_fail(c);
+}
+static int mp_on_file(void *udata,
+                      fio_buf_info_s key,
+                      fio_buf_info_s filename,
+                      fio_buf_info_s content_type,
+                      fio_buf_info_s headers,
+                      fio_buf_info_s data) {
+  mp_ctx_s *c = (mp_ctx_s *)udata;
+  ++c->files;
+  mp_log(c, "f[", 2);
+  mp_log_buf(c, key);
+  mp_log(c, "][", 2);
+  mp_log_buf(c, filename);
+  mp_log(c, "][", 2);
+  mp_log_buf(c, content_type);
+  mp_log(c, "]=", 2);
+  mp_log_buf(c, data);
+  mp_log(c, "|", 1);
+  if (headers.len < sizeof(c->headers_buf)) {
+    memcpy(c->headers_buf, headers.buf, headers.len);
+    c->headers = FIO_BUF_INFO2(c->headers_buf, headers.len);
+  }
+  return mp_fail(c);
+}
+static const fio_multipart_parser_callbacks_s MP_CB = {
+    .on_string = mp_on_string,
+    .on_file = mp_on_file,
+};
 
-  (void)content_type;
-  return NULL;
+static void mp_ctx_reset(mp_ctx_s *c) {
+  free(c->log);
+  *c = (mp_ctx_s){0};
 }
 
-static void *test_on_file_start(void *udata,
-                                fio_buf_info_s name,
-                                fio_buf_info_s filename,
-                                fio_buf_info_s content_type,
-                                fio_buf_info_s headers) {
-  test_multipart_ctx_s *ctx = (test_multipart_ctx_s *)udata;
-  ++ctx->file_count;
-  if (ctx->expected_headers) {
-    size_t len = FIO_STRLEN(ctx->expected_headers);
-    FIO_ASSERT(headers.len == len &&
-                   FIO_MEMCMP(headers.buf, ctx->expected_headers, len) == 0,
-               "Non-streaming raw part headers differ");
-  }
-  if (filename.buf && !filename.len)
-    ++ctx->empty_filename_count;
+#define MP_B FIO_BUF_INFO1((char *)"XyZ")
 
-  /* Store filename for verification */
-  if (filename.len < sizeof(ctx->last_filename)) {
-    FIO_MEMCPY(ctx->last_filename, filename.buf, filename.len);
-    ctx->last_filename[filename.len] = '\0';
-  }
-
-  (void)name;
-  (void)content_type;
-  return ctx; /* Return context for file data */
-}
-
-static int test_on_file_data(void *udata, void *file_ctx, fio_buf_info_s data) {
-  test_multipart_ctx_s *ctx = (test_multipart_ctx_s *)udata;
-  ctx->file_data_bytes += data.len;
-  (void)file_ctx;
+/** Returns the offset of `needle` in `hay` (binary safe); asserts it's found.
+ */
+static size_t mp_find(const char *hay, size_t len, const char *needle) {
+  size_t n = strlen(needle);
+  for (size_t i = 0; i + n <= len; ++i)
+    if (!memcmp(hay + i, needle, n))
+      return i;
+  FIO_ASSERT(0, "test bug: \"%s\" not found", needle);
   return 0;
 }
 
-static void test_on_file_end(void *udata, void *file_ctx) {
-  (void)udata;
-  (void)file_ctx;
-}
-
-static void test_on_error(void *udata) { (void)udata; }
-
-static const fio_multipart_parser_callbacks_s test_callbacks = {
-    .on_field = test_on_field,
-    .on_file_start = test_on_file_start,
-    .on_file_data = test_on_file_data,
-    .on_file_end = test_on_file_end,
-    .on_error = test_on_error,
-};
-
-/* *****************************************************************************
-Test Cases
-***************************************************************************** */
-
-FIO_SFUNC void fio___test_multipart_basic(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-  const char *data = "------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1\r\n"
-                     "------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n"
-                     "Content-Disposition: form-data; name=\"field2\"\r\n"
-                     "\r\n"
-                     "value2\r\n"
-                     "------WebKitFormBoundary7MA4YWxkTrZu0gW--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Basic multipart parse should succeed");
-  FIO_ASSERT(result.field_count == 2,
-             "Should have 2 fields, got %zu",
-             result.field_count);
-  FIO_ASSERT(result.file_count == 0,
-             "Should have 0 files, got %zu",
-             result.file_count);
-  FIO_ASSERT(ctx.field_count == 2, "Callback should see 2 fields");
-}
-
-FIO_SFUNC void fio___test_multipart_file_upload(void) {
-  test_multipart_ctx_s ctx = {0};
-  ctx.expected_headers =
-      "Content-Disposition: form-data; name=\"file1\"; "
-      "filename=\"test.txt\"\r\nContent-Type: text/plain";
-
-  const char *boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
-  const char *data = "------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1\r\n"
-                     "------WebKitFormBoundary7MA4YWxkTrZu0gW\r\n"
-                     "Content-Disposition: form-data; name=\"file1\"; "
-                     "filename=\"test.txt\"\r\n"
-                     "Content-Type: text/plain\r\n"
-                     "\r\n"
-                     "Hello, World!\r\n"
-                     "------WebKitFormBoundary7MA4YWxkTrZu0gW--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "File upload parse should succeed");
-  FIO_ASSERT(result.field_count == 1,
-             "Should have 1 field, got %zu",
-             result.field_count);
-  FIO_ASSERT(result.file_count == 1,
-             "Should have 1 file, got %zu",
-             result.file_count);
-  FIO_ASSERT(ctx.file_data_bytes == 13,
-             "File should have 13 bytes, got %zu",
-             ctx.file_data_bytes);
-  FIO_ASSERT(FIO_MEMCMP(ctx.last_filename, "test.txt", 8) == 0,
-             "Filename should be 'test.txt', got '%s'",
-             ctx.last_filename);
-}
-
-FIO_SFUNC void fio___test_multipart_empty_filename(void) {
-  test_multipart_ctx_s ctx = {0};
-  const char *data =
-      "--XyZ\r\n"
-      "Content-Disposition: form-data; name=\"upload\"; filename=\"\"\r\n"
-      "\r\n"
-      "ignored\r\n"
-      "--XyZ--\r\n";
-  fio_multipart_result_s result = fio_multipart_parse(
-      &test_callbacks, &ctx, FIO_BUF_INFO1("XyZ"), data, FIO_STRLEN(data));
-  FIO_ASSERT(result.err == 0, "Empty filename parse should succeed");
-  FIO_ASSERT(ctx.empty_filename_count == 1 && ctx.file_count == 1,
-             "Empty filename must trigger file callback with non-NULL buf");
-  FIO_ASSERT(ctx.field_count == 0 && result.field_count == 0,
-             "Empty filename must not trigger field callback");
-}
-
-FIO_SFUNC void fio___test_multipart_empty(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Empty multipart parse should succeed");
-  FIO_ASSERT(result.field_count == 0, "Should have 0 fields");
-  FIO_ASSERT(result.file_count == 0, "Should have 0 files");
-}
-
-FIO_SFUNC void fio___test_multipart_quoted_filename(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"file\"; "
-                     "filename=\"my file.txt\"\r\n"
-                     "Content-Type: text/plain\r\n"
-                     "\r\n"
-                     "content\r\n"
-                     "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Quoted filename parse should succeed");
-  FIO_ASSERT(result.file_count == 1, "Should have 1 file");
-  FIO_ASSERT(FIO_MEMCMP(ctx.last_filename, "my file.txt", 11) == 0,
-             "Filename should be 'my file.txt', got '%s'",
-             ctx.last_filename);
-}
-
-FIO_SFUNC void fio___test_multipart_need_more_data(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  /* Incomplete data - missing closing boundary */
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == -2, "Partial data should return -2 (need more)");
-}
-
-FIO_SFUNC void fio___test_multipart_multiple_files(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data =
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"file1\"; filename=\"a.txt\"\r\n"
-      "Content-Type: text/plain\r\n"
-      "\r\n"
-      "File A content\r\n"
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"file2\"; filename=\"b.txt\"\r\n"
-      "Content-Type: text/plain\r\n"
-      "\r\n"
-      "File B content\r\n"
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"file3\"; filename=\"c.txt\"\r\n"
-      "Content-Type: application/octet-stream\r\n"
-      "\r\n"
-      "File C content\r\n"
-      "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Multiple files parse should succeed");
-  FIO_ASSERT(result.file_count == 3,
-             "Should have 3 files, got %zu",
-             result.file_count);
-  FIO_ASSERT(result.field_count == 0, "Should have 0 fields");
-}
-
-FIO_SFUNC void fio___test_multipart_mixed_content(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data =
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"username\"\r\n"
-      "\r\n"
-      "john_doe\r\n"
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"avatar\"; "
-      "filename=\"photo.jpg\"\r\n"
-      "Content-Type: image/jpeg\r\n"
-      "\r\n"
-      "JPEG_DATA_HERE\r\n"
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"email\"\r\n"
-      "\r\n"
-      "john@example.com\r\n"
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"resume\"; filename=\"cv.pdf\"\r\n"
-      "Content-Type: application/pdf\r\n"
-      "\r\n"
-      "PDF_DATA_HERE\r\n"
-      "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Mixed content parse should succeed");
-  FIO_ASSERT(result.field_count == 2,
-             "Should have 2 fields, got %zu",
-             result.field_count);
-  FIO_ASSERT(result.file_count == 2,
-             "Should have 2 files, got %zu",
-             result.file_count);
-}
-
-FIO_SFUNC void fio___test_multipart_with_crlf_prefix(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  /* Some implementations send CRLF before the first boundary */
-  const char *data = "\r\n------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1\r\n"
-                     "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "CRLF prefix parse should succeed");
-  FIO_ASSERT(result.field_count == 1, "Should have 1 field");
-}
-
-/* *****************************************************************************
-Streaming Test Context - tracks multiple on_file_data calls
-***************************************************************************** */
-
-typedef struct {
-  size_t field_count;
-  size_t file_count;
-  size_t file_data_calls;      /* Number of on_file_data calls */
-  size_t file_data_bytes;      /* Total bytes received */
-  size_t file_start_calls;     /* Number of on_file_start calls */
-  size_t file_end_calls;       /* Number of on_file_end calls */
-  char accumulated_data[4096]; /* Accumulated file data */
-  size_t accumulated_len;
-  const char *expected_headers;
-} streaming_test_ctx_s;
-
-static void *streaming_on_field(void *udata,
-                                fio_buf_info_s name,
-                                fio_buf_info_s value,
-                                fio_buf_info_s content_type) {
-  streaming_test_ctx_s *ctx = (streaming_test_ctx_s *)udata;
-  ++ctx->field_count;
-  (void)name;
-  (void)value;
-  (void)content_type;
-  return NULL;
-}
-
-static void *streaming_on_file_start(void *udata,
-                                     fio_buf_info_s name,
-                                     fio_buf_info_s filename,
-                                     fio_buf_info_s content_type,
-                                     fio_buf_info_s headers) {
-  streaming_test_ctx_s *ctx = (streaming_test_ctx_s *)udata;
-  ++ctx->file_count;
-  ++ctx->file_start_calls;
-  if (ctx->expected_headers) {
-    size_t len = FIO_STRLEN(ctx->expected_headers);
-    FIO_ASSERT(headers.len == len &&
-                   FIO_MEMCMP(headers.buf, ctx->expected_headers, len) == 0,
-               "Streaming raw part headers differ");
-  }
-  (void)name;
-  (void)filename;
-  (void)content_type;
-  return ctx;
-}
-
-static int streaming_on_file_data(void *udata,
-                                  void *file_ctx,
-                                  fio_buf_info_s data) {
-  streaming_test_ctx_s *ctx = (streaming_test_ctx_s *)udata;
-  ++ctx->file_data_calls;
-  ctx->file_data_bytes += data.len;
-
-  /* Accumulate data for verification */
-  if (ctx->accumulated_len + data.len < sizeof(ctx->accumulated_data)) {
-    FIO_MEMCPY(ctx->accumulated_data + ctx->accumulated_len,
-               data.buf,
-               data.len);
-    ctx->accumulated_len += data.len;
-  }
-
-  (void)file_ctx;
-  return 0;
-}
-
-static void streaming_on_file_end(void *udata, void *file_ctx) {
-  streaming_test_ctx_s *ctx = (streaming_test_ctx_s *)udata;
-  ++ctx->file_end_calls;
-  (void)file_ctx;
-}
-
-static const fio_multipart_parser_callbacks_s streaming_callbacks = {
-    .on_field = streaming_on_field,
-    .on_file_start = streaming_on_file_start,
-    .on_file_data = streaming_on_file_data,
-    .on_file_end = streaming_on_file_end,
-    .on_error = test_on_error,
-};
-
-/* *****************************************************************************
-Streaming Tests
-***************************************************************************** */
-
-/**
- * Test: Parse complete multipart in multiple chunks
- *
- * This tests the basic streaming scenario where we receive data in chunks
- * and call fio_multipart_parse() multiple times, using result.consumed
- * to track progress.
- */
-FIO_SFUNC void fio___test_multipart_chunked_parsing(void) {
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *full_data = "------boundary\r\n"
-                          "Content-Disposition: form-data; name=\"field1\"\r\n"
-                          "\r\n"
-                          "value1\r\n"
-                          "------boundary\r\n"
-                          "Content-Disposition: form-data; name=\"file1\"; "
-                          "filename=\"test.txt\"\r\n"
-                          "Content-Type: text/plain\r\n"
-                          "\r\n"
-                          "Hello, World!\r\n"
-                          "------boundary--\r\n";
-
-  size_t full_len = FIO_STRLEN(full_data);
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  /* Simulate receiving data in chunks */
-  size_t chunk_sizes[] = {50, 30, 40, 50, 100}; /* Various chunk sizes */
-  size_t num_chunks = sizeof(chunk_sizes) / sizeof(chunk_sizes[0]);
-  size_t total_consumed = 0;
-  char buffer[1024];
-  size_t buffer_len = 0;
-
-  for (size_t i = 0; i < num_chunks && total_consumed < full_len; ++i) {
-    /* Add next chunk to buffer */
-    size_t chunk_size = chunk_sizes[i];
-    if (total_consumed + buffer_len + chunk_size > full_len) {
-      chunk_size = full_len - total_consumed - buffer_len;
-    }
-
-    FIO_MEMCPY(buffer + buffer_len,
-               full_data + total_consumed + buffer_len,
-               chunk_size);
-    buffer_len += chunk_size;
-
-    /* Parse available data */
-    fio_multipart_result_s result = fio_multipart_parse(&streaming_callbacks,
-                                                        &ctx,
-                                                        boundary_buf,
-                                                        buffer,
-                                                        buffer_len);
-
-    if (result.consumed > 0) {
-      /* Move unconsumed data to start of buffer */
-      size_t remaining = buffer_len - result.consumed;
-      if (remaining > 0) {
-        FIO_MEMMOVE(buffer, buffer + result.consumed, remaining);
-      }
-      total_consumed += result.consumed;
-      buffer_len = remaining;
-    }
-
-    if (result.err == 0) {
-      /* Parsing complete */
-      break;
-    }
-
-    FIO_ASSERT(result.err == -2 || result.err == 0,
-               "Chunked parse should return 0 or -2, got %d",
-               result.err);
-  }
-
-  FIO_ASSERT(ctx.field_count == 1,
-             "Should have 1 field, got %zu",
-             ctx.field_count);
-  FIO_ASSERT(ctx.file_count == 1,
-             "Should have 1 file, got %zu",
-             ctx.file_count);
-  FIO_ASSERT(ctx.file_data_bytes == 13,
-             "File should have 13 bytes, got %zu",
-             ctx.file_data_bytes);
+/** Parses all of `msg` in one call. */
+static int mp_whole(mp_ctx_s *c, const char *msg, size_t len) {
+  fio_multipart_s p;
+  FIO_ASSERT(!fio_multipart_init(&p, MP_B), "init failed");
+  fio_multipart_result_s r = fio_multipart_parse(&p, &MP_CB, c, msg, len, 1);
+  if (!r.err)
+    FIO_ASSERT(r.consumed == len, "eof success must consume everything");
+  return r.err;
 }
 
 /**
- * Test: Incremental parsing - first part complete, second part incomplete
- *
- * Verifies that when we have complete parts followed by incomplete data,
- * the parser correctly processes complete parts and returns consumed count.
+ * Feeds `msg` in blocks of `block` bytes, keeping only unconsumed bytes (a
+ * caller's buffer), with `eof` on the last call. Returns the error (0 = ok)
+ * and the peak number of bytes kept between calls in `*peak` (if set).
  */
-FIO_SFUNC void fio___test_multipart_incremental_parts(void) {
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-
-  /* First chunk: complete first part, incomplete second part */
-  const char *chunk1 = "------boundary\r\n"
-                       "Content-Disposition: form-data; name=\"field1\"\r\n"
-                       "\r\n"
-                       "value1\r\n"
-                       "------boundary\r\n"
-                       "Content-Disposition: form-data; name=\"field2\"\r\n"
-                       "\r\n"
-                       "partial_val"; /* Incomplete - no closing boundary */
-
-  /* Second chunk: rest of second part */
-  const char *chunk2 = "ue2\r\n"
-                       "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  /* Parse first chunk */
-  fio_multipart_result_s result1 = fio_multipart_parse(&streaming_callbacks,
-                                                       &ctx,
-                                                       boundary_buf,
-                                                       chunk1,
-                                                       FIO_STRLEN(chunk1));
-
-  FIO_ASSERT(result1.err == -2,
-             "First chunk should need more data, got err=%d",
-             result1.err);
-  FIO_ASSERT(result1.field_count == 1,
-             "First chunk should have parsed 1 field, got %zu",
-             result1.field_count);
-
-  /* Build complete buffer with unconsumed data + new chunk */
-  char buffer[1024];
-  size_t unconsumed_len = FIO_STRLEN(chunk1) - result1.consumed;
-  FIO_MEMCPY(buffer, chunk1 + result1.consumed, unconsumed_len);
-  FIO_MEMCPY(buffer + unconsumed_len, chunk2, FIO_STRLEN(chunk2));
-  size_t buffer_len = unconsumed_len + FIO_STRLEN(chunk2);
-
-  /* Parse remaining data */
-  fio_multipart_result_s result2 = fio_multipart_parse(&streaming_callbacks,
-                                                       &ctx,
-                                                       boundary_buf,
-                                                       buffer,
-                                                       buffer_len);
-
-  FIO_ASSERT(result2.err == 0,
-             "Second parse should succeed, got err=%d",
-             result2.err);
-  FIO_ASSERT(ctx.field_count == 2,
-             "Should have 2 fields total, got %zu",
-             ctx.field_count);
-}
-
-/**
- * Test: Large file streaming
- *
- * Tests that large file data is properly handled. Note: Current implementation
- * waits for complete part before calling on_file_data, so this tests that
- * large data is correctly passed through.
- */
-FIO_SFUNC void fio___test_multipart_large_file(void) {
-  streaming_test_ctx_s ctx = {0};
-  ctx.expected_headers =
-      "Content-Disposition: form-data; name=\"bigfile\"; "
-      "filename=\"large.bin\"\r\n"
-      "Content-Type: application/octet-stream";
-
-  const char *boundary = "----boundary";
-
-  /* Build a multipart with a larger file (1KB of data) */
-  char large_data[2048];
-  size_t pos = 0;
-
-  /* Header */
-  const char *header = "------boundary\r\n"
-                       "Content-Disposition: form-data; name=\"bigfile\"; "
-                       "filename=\"large.bin\"\r\n"
-                       "Content-Type: application/octet-stream\r\n"
-                       "\r\n";
-  size_t header_len = FIO_STRLEN(header);
-  FIO_MEMCPY(large_data + pos, header, header_len);
-  pos += header_len;
-
-  /* File content: 1KB of 'X' characters */
-  size_t file_size = 1024;
-  for (size_t i = 0; i < file_size; ++i) {
-    large_data[pos++] = 'X';
-  }
-
-  /* Footer */
-  const char *footer = "\r\n------boundary--\r\n";
-  size_t footer_len = FIO_STRLEN(footer);
-  FIO_MEMCPY(large_data + pos, footer, footer_len);
-  pos += footer_len;
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&streaming_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      large_data,
-                                                      pos);
-
-  FIO_ASSERT(result.err == 0, "Large file parse should succeed");
-  FIO_ASSERT(ctx.file_count == 1, "Should have 1 file");
-  FIO_ASSERT(ctx.file_data_bytes == file_size,
-             "File should have %zu bytes, got %zu",
-             file_size,
-             ctx.file_data_bytes);
-  FIO_ASSERT(ctx.file_data_calls == 1,
-             "Should have 1 file_data call (current impl), got %zu",
-             ctx.file_data_calls);
-}
-
-/**
- * Test: Boundary-like content in file data
- *
- * Tests that data containing boundary-like strings doesn't confuse the parser.
- * The actual boundary must be preceded by CRLF.
- */
-FIO_SFUNC void fio___test_multipart_boundary_in_content(void) {
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  /* File content contains something that looks like a boundary but isn't
-   * (not preceded by CRLF) */
-  const char *data =
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"file1\"; "
-      "filename=\"test.txt\"\r\n"
-      "Content-Type: text/plain\r\n"
-      "\r\n"
-      "This file contains ------boundary but not as a real boundary\r\n"
-      "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&streaming_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Parse should succeed");
-  FIO_ASSERT(ctx.file_count == 1, "Should have 1 file");
-
-  /* The file content should be:
-   * "This file contains ------boundary but not as a real boundary"
-   * (60 characters) */
-  FIO_ASSERT(ctx.file_data_bytes == 60,
-             "File should have 60 bytes, got %zu",
-             ctx.file_data_bytes);
-}
-
-/**
- * Test: Large form field value
- *
- * Tests handling of large form field values (not files).
- * Current implementation passes entire value to on_field callback.
- */
-FIO_SFUNC void fio___test_multipart_large_field_value(void) {
-  /* Use streaming callbacks to track field */
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-
-  /* Build multipart with large field value (2KB) */
-  char large_data[4096];
-  size_t pos = 0;
-
-  const char *header = "------boundary\r\n"
-                       "Content-Disposition: form-data; name=\"large_text\"\r\n"
-                       "\r\n";
-  size_t header_len = FIO_STRLEN(header);
-  FIO_MEMCPY(large_data + pos, header, header_len);
-  pos += header_len;
-
-  /* Field value: 2KB of 'A' characters */
-  size_t value_size = 2048;
-  for (size_t i = 0; i < value_size; ++i) {
-    large_data[pos++] = 'A';
-  }
-
-  const char *footer = "\r\n------boundary--\r\n";
-  size_t footer_len = FIO_STRLEN(footer);
-  FIO_MEMCPY(large_data + pos, footer, footer_len);
-  pos += footer_len;
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&streaming_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      large_data,
-                                                      pos);
-
-  FIO_ASSERT(result.err == 0, "Large field parse should succeed");
-  FIO_ASSERT(ctx.field_count == 1, "Should have 1 field");
-  FIO_ASSERT(result.field_count == 1, "Result should show 1 field");
-}
-
-/**
- * Test: Chunk split at boundary
- *
- * Tests what happens when a chunk split occurs right in the middle of
- * a boundary marker.
- */
-FIO_SFUNC void fio___test_multipart_chunk_split_at_boundary(void) {
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *full_data = "------boundary\r\n"
-                          "Content-Disposition: form-data; name=\"field1\"\r\n"
-                          "\r\n"
-                          "value1\r\n"
-                          "------boundary--\r\n";
-
-  size_t full_len = FIO_STRLEN(full_data);
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  /* Find position of second boundary and split there */
-  const char *p = full_data + 20;
-  size_t second_boundary_pos = 0;
-  while (p < full_data + full_len - 10) {
-    if (p[0] == '\r' && p[1] == '\n' && p[2] == '-' && p[3] == '-') {
-      second_boundary_pos = (size_t)(p + 2 - full_data); /* Point to "--" */
-      break;
-    }
-    ++p;
-  }
-
-  /* Split right in the middle of "------boundary" */
-  size_t split_pos = second_boundary_pos + 5; /* Mid-boundary */
-
-  /* First chunk: up to middle of boundary */
-  char buffer[256];
-  FIO_MEMCPY(buffer, full_data, split_pos);
-
-  fio_multipart_result_s result1 = fio_multipart_parse(&streaming_callbacks,
-                                                       &ctx,
-                                                       boundary_buf,
-                                                       buffer,
-                                                       split_pos);
-
-  /* Should need more data since boundary is incomplete */
-  FIO_ASSERT(result1.err == -2,
-             "Split at boundary should need more data, got err=%d",
-             result1.err);
-
-  /* Add rest of data */
-  size_t unconsumed = split_pos - result1.consumed;
-  FIO_MEMMOVE(buffer, buffer + result1.consumed, unconsumed);
-  FIO_MEMCPY(buffer + unconsumed, full_data + split_pos, full_len - split_pos);
-  size_t buffer_len = unconsumed + (full_len - split_pos);
-
-  fio_multipart_result_s result2 = fio_multipart_parse(&streaming_callbacks,
-                                                       &ctx,
-                                                       boundary_buf,
-                                                       buffer,
-                                                       buffer_len);
-
-  FIO_ASSERT(result2.err == 0,
-             "Final parse should succeed, got err=%d",
-             result2.err);
-  FIO_ASSERT(ctx.field_count == 1,
-             "Should have 1 field, got %zu",
-             ctx.field_count);
-}
-
-/**
- * Test: Empty file upload
- *
- * Tests handling of file upload with zero-length content.
- * Note: In multipart format, the body is between \r\n\r\n (end of headers)
- * and \r\n--boundary. For an empty file, there's no content between them.
- */
-FIO_SFUNC void fio___test_multipart_empty_file(void) {
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  /* Empty file: headers end with \r\n\r\n, then immediately \r\n--boundary */
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"file1\"; "
-                     "filename=\"empty.txt\"\r\n"
-                     "Content-Type: text/plain\r\n"
-                     "\r\n" /* End of headers, body starts here */
-                     /* Body is empty - next line is the boundary */
-                     "\r\n------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&streaming_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Empty file parse should succeed");
-  FIO_ASSERT(ctx.file_count == 1, "Should have 1 file");
-  FIO_ASSERT(ctx.file_data_bytes == 0,
-             "Empty file should have 0 bytes, got %zu",
-             ctx.file_data_bytes);
-  FIO_ASSERT(ctx.file_start_calls == 1, "Should have 1 file_start call");
-  FIO_ASSERT(ctx.file_end_calls == 1, "Should have 1 file_end call");
-}
-
-/**
- * Test: Verify consumed bytes tracking
- *
- * Verifies that result.consumed accurately reflects bytes processed.
- */
-FIO_SFUNC void fio___test_multipart_consumed_tracking(void) {
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1\r\n"
-                     "------boundary--\r\n";
-
-  size_t data_len = FIO_STRLEN(data);
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&streaming_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      data_len);
-
-  FIO_ASSERT(result.err == 0, "Parse should succeed");
-  FIO_ASSERT(result.consumed == data_len,
-             "Should consume all %zu bytes, consumed %zu",
-             data_len,
-             result.consumed);
-}
-
-/**
- * Test: Binary file content
- *
- * Tests that binary data (including NUL bytes) is handled correctly.
- */
-FIO_SFUNC void fio___test_multipart_binary_content(void) {
-  streaming_test_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-
-  /* Build multipart with binary content including NUL bytes */
-  char binary_data[512];
-  size_t pos = 0;
-
-  const char *header =
-      "------boundary\r\n"
-      "Content-Disposition: form-data; name=\"bin\"; filename=\"data.bin\"\r\n"
-      "Content-Type: application/octet-stream\r\n"
-      "\r\n";
-  size_t header_len = FIO_STRLEN(header);
-  FIO_MEMCPY(binary_data + pos, header, header_len);
-  pos += header_len;
-
-  /* Binary content with NUL bytes */
-  unsigned char bin_content[] =
-      {0x00, 0x01, 0x02, 0xFF, 0xFE, 0x00, 0x00, 0x42};
-  size_t bin_len = sizeof(bin_content);
-  FIO_MEMCPY(binary_data + pos, bin_content, bin_len);
-  pos += bin_len;
-
-  const char *footer = "\r\n------boundary--\r\n";
-  size_t footer_len = FIO_STRLEN(footer);
-  FIO_MEMCPY(binary_data + pos, footer, footer_len);
-  pos += footer_len;
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result = fio_multipart_parse(&streaming_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      binary_data,
-                                                      pos);
-
-  FIO_ASSERT(result.err == 0, "Binary content parse should succeed");
-  FIO_ASSERT(ctx.file_count == 1, "Should have 1 file");
-  FIO_ASSERT(ctx.file_data_bytes == bin_len,
-             "Binary file should have %zu bytes, got %zu",
-             bin_len,
-             ctx.file_data_bytes);
-
-  /* Verify binary content was preserved */
-  FIO_ASSERT(ctx.accumulated_len == bin_len, "Accumulated length mismatch");
-  FIO_ASSERT(FIO_MEMCMP(ctx.accumulated_data, bin_content, bin_len) == 0,
-             "Binary content should be preserved");
-}
-
-/* *****************************************************************************
-Streaming Field Callbacks Test Context
-***************************************************************************** */
-
-typedef struct {
-  size_t field_count;
-  size_t file_count;
-  size_t field_start_calls;
-  size_t field_data_calls;
-  size_t field_end_calls;
-  size_t field_data_bytes;
-  size_t file_data_bytes;
-  char accumulated_field_data[4096];
-  size_t accumulated_field_len;
-  char last_field_name[256];
-} streaming_field_ctx_s;
-
-static void *streaming_field_on_field_start(void *udata,
-                                            fio_buf_info_s name,
-                                            fio_buf_info_s content_type) {
-  streaming_field_ctx_s *ctx = (streaming_field_ctx_s *)udata;
-  ++ctx->field_count;
-  ++ctx->field_start_calls;
-
-  /* Store field name for verification */
-  if (name.len < sizeof(ctx->last_field_name)) {
-    FIO_MEMCPY(ctx->last_field_name, name.buf, name.len);
-    ctx->last_field_name[name.len] = '\0';
-  }
-
-  (void)content_type;
-  return ctx; /* Return context for field data */
-}
-
-static int streaming_field_on_field_data(void *udata,
-                                         void *field_ctx,
-                                         fio_buf_info_s data) {
-  streaming_field_ctx_s *ctx = (streaming_field_ctx_s *)udata;
-  ++ctx->field_data_calls;
-  ctx->field_data_bytes += data.len;
-
-  /* Accumulate data for verification */
-  if (ctx->accumulated_field_len + data.len <
-      sizeof(ctx->accumulated_field_data)) {
-    FIO_MEMCPY(ctx->accumulated_field_data + ctx->accumulated_field_len,
-               data.buf,
-               data.len);
-    ctx->accumulated_field_len += data.len;
-  }
-
-  (void)field_ctx;
-  return 0;
-}
-
-static void streaming_field_on_field_end(void *udata, void *field_ctx) {
-  streaming_field_ctx_s *ctx = (streaming_field_ctx_s *)udata;
-  ++ctx->field_end_calls;
-  (void)field_ctx;
-}
-
-static void *streaming_field_on_file_start(void *udata,
-                                           fio_buf_info_s name,
-                                           fio_buf_info_s filename,
-                                           fio_buf_info_s content_type,
-                                           fio_buf_info_s headers) {
-  streaming_field_ctx_s *ctx = (streaming_field_ctx_s *)udata;
-  ++ctx->file_count;
-  (void)name;
-  (void)filename;
-  (void)content_type;
-  (void)headers;
-  return ctx;
-}
-
-static int streaming_field_on_file_data(void *udata,
-                                        void *file_ctx,
-                                        fio_buf_info_s data) {
-  streaming_field_ctx_s *ctx = (streaming_field_ctx_s *)udata;
-  ctx->file_data_bytes += data.len;
-  (void)file_ctx;
-  return 0;
-}
-
-static void streaming_field_on_file_end(void *udata, void *file_ctx) {
-  (void)udata;
-  (void)file_ctx;
-}
-
-static const fio_multipart_parser_callbacks_s streaming_field_callbacks = {
-    .on_field = NULL, /* Not used when streaming callbacks are provided */
-    .on_field_start = streaming_field_on_field_start,
-    .on_field_data = streaming_field_on_field_data,
-    .on_field_end = streaming_field_on_field_end,
-    .on_file_start = streaming_field_on_file_start,
-    .on_file_data = streaming_field_on_file_data,
-    .on_file_end = streaming_field_on_file_end,
-    .on_error = test_on_error,
-};
-
-/* *****************************************************************************
-Streaming Field Callback Tests
-***************************************************************************** */
-
-/**
- * Test: Streaming field callbacks with small field
- *
- * Verifies that streaming field callbacks work correctly for small fields.
- */
-FIO_SFUNC void fio___test_multipart_streaming_field_small(void) {
-  streaming_field_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"username\"\r\n"
-                     "\r\n"
-                     "john_doe\r\n"
-                     "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result =
-      fio_multipart_parse(&streaming_field_callbacks,
-                          &ctx,
-                          boundary_buf,
-                          data,
-                          FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Streaming field parse should succeed");
-  FIO_ASSERT(result.field_count == 1,
-             "Should have 1 field, got %zu",
-             result.field_count);
-  FIO_ASSERT(ctx.field_start_calls == 1,
-             "Should have 1 field_start call, got %zu",
-             ctx.field_start_calls);
-  FIO_ASSERT(ctx.field_data_calls == 1,
-             "Should have 1 field_data call, got %zu",
-             ctx.field_data_calls);
-  FIO_ASSERT(ctx.field_end_calls == 1,
-             "Should have 1 field_end call, got %zu",
-             ctx.field_end_calls);
-  FIO_ASSERT(ctx.field_data_bytes == 8,
-             "Field should have 8 bytes ('john_doe'), got %zu",
-             ctx.field_data_bytes);
-  FIO_ASSERT(FIO_MEMCMP(ctx.accumulated_field_data, "john_doe", 8) == 0,
-             "Field data should be 'john_doe'");
-  FIO_ASSERT(FIO_MEMCMP(ctx.last_field_name, "username", 8) == 0,
-             "Field name should be 'username'");
-}
-
-/**
- * Test: Streaming field callbacks with large field (2KB+)
- *
- * Verifies that streaming field callbacks work correctly for large fields.
- */
-FIO_SFUNC void fio___test_multipart_streaming_field_large(void) {
-  streaming_field_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-
-  /* Build multipart with large field value (2KB) */
-  char large_data[4096];
-  size_t pos = 0;
-
-  const char *header = "------boundary\r\n"
-                       "Content-Disposition: form-data; name=\"large_text\"\r\n"
-                       "\r\n";
-  size_t header_len = FIO_STRLEN(header);
-  FIO_MEMCPY(large_data + pos, header, header_len);
-  pos += header_len;
-
-  /* Field value: 2KB of 'B' characters */
-  size_t value_size = 2048;
-  for (size_t i = 0; i < value_size; ++i) {
-    large_data[pos++] = 'B';
-  }
-
-  const char *footer = "\r\n------boundary--\r\n";
-  size_t footer_len = FIO_STRLEN(footer);
-  FIO_MEMCPY(large_data + pos, footer, footer_len);
-  pos += footer_len;
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result =
-      fio_multipart_parse(&streaming_field_callbacks,
-                          &ctx,
-                          boundary_buf,
-                          large_data,
-                          pos);
-
-  FIO_ASSERT(result.err == 0, "Large streaming field parse should succeed");
-  FIO_ASSERT(result.field_count == 1, "Should have 1 field");
-  FIO_ASSERT(ctx.field_start_calls == 1, "Should have 1 field_start call");
-  FIO_ASSERT(ctx.field_data_calls == 1,
-             "Should have 1 field_data call (current impl)");
-  FIO_ASSERT(ctx.field_end_calls == 1, "Should have 1 field_end call");
-  FIO_ASSERT(ctx.field_data_bytes == value_size,
-             "Field should have %zu bytes, got %zu",
-             value_size,
-             ctx.field_data_bytes);
-
-  /* Verify all data is 'B' */
-  for (size_t i = 0; i < value_size && i < ctx.accumulated_field_len; ++i) {
-    FIO_ASSERT(ctx.accumulated_field_data[i] == 'B',
-               "Field data byte %zu should be 'B'",
-               i);
-  }
-}
-
-/**
- * Test: Backward compatibility - on_field still works when streaming callbacks
- * not provided
- *
- * Verifies that the legacy on_field callback is used when on_field_start is
- * NULL.
- */
-FIO_SFUNC void fio___test_multipart_streaming_field_backward_compat(void) {
-  test_multipart_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1\r\n"
-                     "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field2\"\r\n"
-                     "\r\n"
-                     "value2\r\n"
-                     "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  /* Use test_callbacks which has on_field but no streaming callbacks */
-  fio_multipart_result_s result = fio_multipart_parse(&test_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Backward compat parse should succeed");
-  FIO_ASSERT(result.field_count == 2,
-             "Should have 2 fields, got %zu",
-             result.field_count);
-  FIO_ASSERT(ctx.field_count == 2,
-             "on_field callback should be called 2 times, got %zu",
-             ctx.field_count);
-  FIO_ASSERT(FIO_MEMCMP(ctx.last_field_name, "field2", 6) == 0,
-             "Last field name should be 'field2'");
-  FIO_ASSERT(FIO_MEMCMP(ctx.last_field_value, "value2", 6) == 0,
-             "Last field value should be 'value2'");
-}
-
-/**
- * Test: Mixed usage - fields use streaming, files use streaming
- *
- * Verifies that streaming field callbacks work alongside file streaming
- * callbacks.
- */
-FIO_SFUNC void fio___test_multipart_streaming_field_mixed(void) {
-  streaming_field_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"username\"\r\n"
-                     "\r\n"
-                     "john_doe\r\n"
-                     "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"avatar\"; "
-                     "filename=\"photo.jpg\"\r\n"
-                     "Content-Type: image/jpeg\r\n"
-                     "\r\n"
-                     "JPEG_DATA_HERE\r\n"
-                     "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"email\"\r\n"
-                     "\r\n"
-                     "john@example.com\r\n"
-                     "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result =
-      fio_multipart_parse(&streaming_field_callbacks,
-                          &ctx,
-                          boundary_buf,
-                          data,
-                          FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Mixed streaming parse should succeed");
-  FIO_ASSERT(result.field_count == 2,
-             "Should have 2 fields, got %zu",
-             result.field_count);
-  FIO_ASSERT(result.file_count == 1,
-             "Should have 1 file, got %zu",
-             result.file_count);
-  FIO_ASSERT(ctx.field_start_calls == 2,
-             "Should have 2 field_start calls, got %zu",
-             ctx.field_start_calls);
-  FIO_ASSERT(ctx.field_data_calls == 2,
-             "Should have 2 field_data calls, got %zu",
-             ctx.field_data_calls);
-  FIO_ASSERT(ctx.field_end_calls == 2,
-             "Should have 2 field_end calls, got %zu",
-             ctx.field_end_calls);
-  FIO_ASSERT(ctx.file_count == 1,
-             "Should have 1 file, got %zu",
-             ctx.file_count);
-  FIO_ASSERT(ctx.file_data_bytes == 14,
-             "File should have 14 bytes, got %zu",
-             ctx.file_data_bytes);
-}
-
-/**
- * Test: Streaming field abort
- *
- * Verifies that returning non-zero from on_field_data aborts parsing.
- */
-static int aborting_field_data(void *udata,
-                               void *field_ctx,
-                               fio_buf_info_s data) {
-  (void)udata;
-  (void)field_ctx;
-  (void)data;
-  return 1; /* Abort */
-}
-
-FIO_SFUNC void fio___test_multipart_streaming_field_abort(void) {
-  streaming_field_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1\r\n"
-                     "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field2\"\r\n"
-                     "\r\n"
-                     "value2\r\n"
-                     "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  /* Create callbacks with aborting field_data */
-  fio_multipart_parser_callbacks_s abort_callbacks = {
-      .on_field = NULL,
-      .on_field_start = streaming_field_on_field_start,
-      .on_field_data = aborting_field_data,
-      .on_field_end = streaming_field_on_field_end,
-      .on_file_start = streaming_field_on_file_start,
-      .on_file_data = streaming_field_on_file_data,
-      .on_file_end = streaming_field_on_file_end,
-      .on_error = test_on_error,
-  };
-
-  fio_multipart_result_s result = fio_multipart_parse(&abort_callbacks,
-                                                      &ctx,
-                                                      boundary_buf,
-                                                      data,
-                                                      FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == -1, "Aborted parse should return error -1");
-  FIO_ASSERT(ctx.field_start_calls == 1,
-             "Should have 1 field_start call before abort");
-}
-
-/**
- * Test: Multiple fields with streaming callbacks
- *
- * Verifies that multiple fields are handled correctly with streaming callbacks.
- */
-FIO_SFUNC void fio___test_multipart_streaming_field_multiple(void) {
-  streaming_field_ctx_s ctx = {0};
-
-  const char *boundary = "----boundary";
-  const char *data = "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field1\"\r\n"
-                     "\r\n"
-                     "value1\r\n"
-                     "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field2\"\r\n"
-                     "\r\n"
-                     "value2\r\n"
-                     "------boundary\r\n"
-                     "Content-Disposition: form-data; name=\"field3\"\r\n"
-                     "\r\n"
-                     "value3\r\n"
-                     "------boundary--\r\n";
-
-  fio_buf_info_s boundary_buf = FIO_BUF_INFO1((char *)boundary);
-
-  fio_multipart_result_s result =
-      fio_multipart_parse(&streaming_field_callbacks,
-                          &ctx,
-                          boundary_buf,
-                          data,
-                          FIO_STRLEN(data));
-
-  FIO_ASSERT(result.err == 0, "Multiple fields parse should succeed");
-  FIO_ASSERT(result.field_count == 3,
-             "Should have 3 fields, got %zu",
-             result.field_count);
-  FIO_ASSERT(ctx.field_start_calls == 3,
-             "Should have 3 field_start calls, got %zu",
-             ctx.field_start_calls);
-  FIO_ASSERT(ctx.field_data_calls == 3,
-             "Should have 3 field_data calls, got %zu",
-             ctx.field_data_calls);
-  FIO_ASSERT(ctx.field_end_calls == 3,
-             "Should have 3 field_end calls, got %zu",
-             ctx.field_end_calls);
-  /* Total bytes: "value1" + "value2" + "value3" = 6 + 6 + 6 = 18 */
-  FIO_ASSERT(ctx.field_data_bytes == 18,
-             "Total field bytes should be 18, got %zu",
-             ctx.field_data_bytes);
-}
-
-/* *****************************************************************************
-Stateful Streaming Tests (fio_multipart_stream_parse)
-***************************************************************************** */
-
-typedef struct {
-  char *file; /* reassembled file content (malloc'ed) */
-  size_t file_len;
-  size_t file_capa;
-  size_t file_starts;
-  size_t file_ends;
-  size_t headers_checked;
-  size_t fields;
-  char field_names[4][16];
-  char field_values[4][16];
-  size_t abort_after; /* abort on_file_data once file_len exceeds this (0 = no) */
-  int bad_ctx;
-} fio___mp_stream_ctx_s;
-
-static int fio___mp_stream_file_ctx_tag;
-
-FIO_SFUNC void *fio___mp_stream_on_field(void *udata,
-                                         fio_buf_info_s name,
-                                         fio_buf_info_s value,
-                                         fio_buf_info_s content_type) {
-  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
-  if (c->fields < 4 && name.len < 16 && value.len < 16) {
-    FIO_MEMCPY(c->field_names[c->fields], name.buf, name.len);
-    c->field_names[c->fields][name.len] = 0;
-    FIO_MEMCPY(c->field_values[c->fields], value.buf, value.len);
-    c->field_values[c->fields][value.len] = 0;
-  }
-  ++c->fields;
-  (void)content_type;
-  return NULL;
-}
-FIO_SFUNC void *fio___mp_stream_on_file_start(void *udata,
-                                              fio_buf_info_s name,
-                                              fio_buf_info_s filename,
-                                              fio_buf_info_s content_type,
-                                              fio_buf_info_s headers) {
-  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
-  ++c->file_starts;
-  const char *expected =
-      "Content-Disposition: form-data; name=\"up\"; "
-      "filename=\"f.bin\"\r\nContent-Type: application/octet-stream";
-  size_t len = FIO_STRLEN(expected);
-  FIO_ASSERT(headers.len == len && FIO_MEMCMP(headers.buf, expected, len) == 0,
-             "Stateful streaming raw part headers differ");
-  ++c->headers_checked;
-  (void)name, (void)filename, (void)content_type;
-  return &fio___mp_stream_file_ctx_tag;
-}
-FIO_SFUNC int fio___mp_stream_on_file_data(void *udata,
-                                           void *file_ctx,
-                                           fio_buf_info_s data) {
-  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
-  c->bad_ctx |= (file_ctx != &fio___mp_stream_file_ctx_tag);
-  if (c->file_len + data.len > c->file_capa) {
-    size_t n = (c->file_len + data.len) << 1;
-    c->file = (char *)realloc(c->file, n);
-    FIO_ASSERT(c->file, "allocation failed");
-    c->file_capa = n;
-  }
-  FIO_MEMCPY(c->file + c->file_len, data.buf, data.len);
-  c->file_len += data.len;
-  return (c->abort_after && c->file_len > c->abort_after);
-}
-FIO_SFUNC void fio___mp_stream_on_file_end(void *udata, void *file_ctx) {
-  fio___mp_stream_ctx_s *c = (fio___mp_stream_ctx_s *)udata;
-  c->bad_ctx |= (file_ctx != &fio___mp_stream_file_ctx_tag);
-  ++c->file_ends;
-}
-
-static const fio_multipart_parser_callbacks_s fio___mp_stream_callbacks = {
-    .on_field = fio___mp_stream_on_field,
-    .on_file_start = fio___mp_stream_on_file_start,
-    .on_file_data = fio___mp_stream_on_file_data,
-    .on_file_end = fio___mp_stream_on_file_end,
-};
-
-/** Builds: field a, a file with tricky content, field b. Returns length. */
-FIO_SFUNC size_t fio___mp_stream_build(char *dest,
-                                       size_t capa,
-                                       const char *file,
-                                       size_t file_len) {
-  size_t len = 0;
-#define MP_PUT(str, l)                                                         \
-  do {                                                                         \
-    FIO_ASSERT(len + (l) <= capa, "test buffer too small");                    \
-    FIO_MEMCPY(dest + len, (str), (l));                                        \
-    len += (l);                                                                \
-  } while (0)
-#define MP_PUTS(str) MP_PUT(str, FIO_STRLEN(str))
-  MP_PUTS("--XyZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n");
-  MP_PUTS("--XyZ\r\nContent-Disposition: form-data; name=\"up\"; "
-          "filename=\"f.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n");
-  MP_PUT(file, file_len);
-  MP_PUTS("\r\n--XyZ\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n2"
-          "\r\n--XyZ--\r\n");
-#undef MP_PUTS
-#undef MP_PUT
-  return len;
-}
-
-/** Feeds `msg` in `chunk` sized pieces, keeping unconsumed bytes. */
-FIO_SFUNC int fio___mp_stream_feed(fio___mp_stream_ctx_s *c,
-                                   const char *msg,
-                                   size_t msg_len,
-                                   size_t chunk,
-                                   size_t *max_pending) {
-  fio_multipart_stream_s stream = {0};
-  char *buf = (char *)malloc(msg_len + 1);
-  size_t buf_len = 0, fed = 0;
-  int err = -2;
+static int mp_feed(mp_ctx_s *c,
+                   const char *msg,
+                   size_t len,
+                   size_t block,
+                   size_t *peak) {
+  fio_multipart_s p;
+  FIO_ASSERT(!fio_multipart_init(&p, MP_B), "init failed");
+  char *buf = (char *)malloc(len + 1);
   FIO_ASSERT(buf, "allocation failed");
-  while (err == -2 && fed < msg_len) {
-    size_t n = (msg_len - fed < chunk) ? msg_len - fed : chunk;
-    FIO_MEMCPY(buf + buf_len, msg + fed, n);
-    buf_len += n;
-    fed += n;
+  size_t kept = 0, off = 0;
+  int err = 0;
+  if (peak)
+    *peak = 0;
+  for (;;) {
+    size_t add = (len - off < block) ? (len - off) : block;
+    memcpy(buf + kept, msg + off, add);
+    kept += add;
+    off += add;
+    int eof = (off == len);
     fio_multipart_result_s r =
-        fio_multipart_stream_parse(&stream,
-                                   &fio___mp_stream_callbacks,
-                                   c,
-                                   FIO_BUF_INFO1((char *)"XyZ"),
-                                   buf,
-                                   buf_len);
-    err = r.err;
-    FIO_ASSERT(r.consumed <= buf_len, "consumed beyond buffer");
-    FIO_MEMMOVE(buf, buf + r.consumed, buf_len - r.consumed);
-    buf_len -= r.consumed;
-    if (max_pending && buf_len > *max_pending)
-      *max_pending = buf_len;
+        fio_multipart_parse(&p, &MP_CB, c, buf, kept, eof);
+    FIO_ASSERT(r.consumed <= kept, "consumed beyond the data");
+    if (r.err) {
+      err = r.err;
+      break;
+    }
+    if (eof) {
+      FIO_ASSERT(r.consumed == kept, "eof success must consume everything");
+      break;
+    }
+    if (r.consumed) {
+      memmove(buf, buf + r.consumed, kept - r.consumed);
+      kept -= r.consumed;
+    }
+    if (peak && kept > *peak)
+      *peak = kept;
   }
-  if (err == -2)
-    err = fio_multipart_stream_close(&stream, &fio___mp_stream_callbacks, c)
-              ? -3 /* truncated inside a file */
-              : -2;
   free(buf);
   return err;
 }
 
-FIO_SFUNC void fio___test_multipart_stream_parse(void) {
-  fprintf(stderr, "  * stateful streaming (fio_multipart_stream_parse)\n");
-  /* file content full of near-miss delimiters and CR/LF sequences */
-  static char file[70000];
-  for (size_t i = 0; i < sizeof(file); ++i)
-    file[i] = (char)(i * 131 + (i >> 7));
-  for (size_t i = 0; i + 310 < sizeof(file); i += 997) {
-    FIO_MEMCPY(file + i, "\r\n--XyX", 7); /* near-miss delimiter */
-    FIO_MEMCPY(file + i + 300, "\r\n--Xy", 6);
-  }
-  static char msg[71000];
-  size_t msg_len = fio___mp_stream_build(msg, sizeof(msg), file, sizeof(file));
+/* *****************************************************************************
+Tests
+***************************************************************************** */
 
-  const size_t chunks[] = {1, 2, 3, 7, 8, 9, 64, 100, 4096, 65536, 1 << 20};
-  for (size_t i = 0; i < sizeof(chunks) / sizeof(chunks[0]); ++i) {
-    fio___mp_stream_ctx_s c = {0};
-    size_t max_pending = 0;
-    int err = fio___mp_stream_feed(&c, msg, msg_len, chunks[i], &max_pending);
-    FIO_ASSERT(!err, "stream chunk %zu: err %d", chunks[i], err);
-    FIO_ASSERT(c.file_starts == 1 && c.file_ends == 1 &&
-                   c.headers_checked == 1 && !c.bad_ctx,
-               "stream chunk %zu: file callbacks %zu / %zu",
-               chunks[i],
-               c.file_starts,
-               c.file_ends);
-    FIO_ASSERT(c.file_len == sizeof(file) && !memcmp(c.file, file, c.file_len),
-               "stream chunk %zu: file content mismatch (%zu bytes)",
-               chunks[i],
-               c.file_len);
-    FIO_ASSERT(c.fields == 2 && !strcmp(c.field_names[0], "a") &&
-                   !strcmp(c.field_values[0], "1") &&
-                   !strcmp(c.field_names[1], "b") &&
-                   !strcmp(c.field_values[1], "2"),
-               "stream chunk %zu: fields mismatch",
-               chunks[i]);
-    /* pending data stays bounded: one part's headers + a held-back tail */
-    if (chunks[i] < 4096)
-      FIO_ASSERT(max_pending < 256,
-                 "stream chunk %zu: buffer grew to %zu bytes",
-                 chunks[i],
-                 max_pending);
-    free(c.file);
-  }
+static const char MP_MSG[] =
+    "--XyZ\r\n"
+    "Content-Disposition: form-data; name=\"a\"\r\n"
+    "\r\n"
+    "value-a\r\n"
+    "--XyZ\r\n"
+    "Content-Disposition: form-data; name=\"up\"; filename=\"t.txt\"\r\n"
+    "Content-Type: text/plain\r\n"
+    "\r\n"
+    "file\r\n-\r\n--Xy\r\nx--XyZ\0end\r\n"
+    "--XyZ\r\n"
+    "content-disposition: form-data; name=\"e\"\r\n"
+    "Content-Type: text/x\r\n"
+    "\r\n"
+    "\r\n"
+    "--XyZ\r\n"
+    "Content-Disposition: form-data; name=\"empty\"; filename=\"\"\r\n"
+    "\r\n"
+    "\r\n"
+    "--XyZ--\r\n"
+    "epilogue --XyZ junk";
 
-  /* every split point of a small message */
+static const char MP_LOG[] =
+    "s[a][(null)]=value-a|"
+    "f[up][t.txt][text/plain]=file\r\n-\r\n--Xy\r\nx--XyZ\0end|"
+    "s[e][text/x]=|"
+    "f[empty][][(null)]=|";
+
+FIO_SFUNC void mp_test_basic(void) {
+  fprintf(stderr, "  * complete parts, borrowed values, headers\n");
+  mp_ctx_s c = {0};
+  FIO_ASSERT(!mp_whole(&c, MP_MSG, sizeof(MP_MSG) - 1), "parse failed");
+  FIO_ASSERT(c.len == sizeof(MP_LOG) - 1 && !memcmp(c.log, MP_LOG, c.len),
+             "unexpected parts: %s",
+             c.log);
+  FIO_ASSERT(c.strings == 2 && c.files == 2, "part counts");
+  static const char hdr[] =
+      "Content-Disposition: form-data; name=\"empty\"; filename=\"\"";
+  FIO_ASSERT(c.headers.len == sizeof(hdr) - 1 &&
+                 !memcmp(c.headers.buf, hdr, c.headers.len),
+             "raw headers: %.*s",
+             (int)c.headers.len,
+             c.headers.buf);
+  mp_ctx_reset(&c);
+
+  /* a leading CRLF, an empty body and NULL callbacks (validated, skipped) */
   {
-    char small[512];
-    size_t small_len =
-        fio___mp_stream_build(small, sizeof(small), "\r\n--Xy\r\nZ", 9);
-    for (size_t chunk = 1; chunk <= small_len; ++chunk) {
-      fio___mp_stream_ctx_s c = {0};
-      int err = fio___mp_stream_feed(&c, small, small_len, chunk, NULL);
-      FIO_ASSERT(!err && c.file_len == 9 &&
-                     !memcmp(c.file, "\r\n--Xy\r\nZ", 9) && c.fields == 2 &&
-                     c.file_ends == 1 && c.headers_checked == 1,
-                 "small stream chunk %zu: err %d, file %zu",
-                 chunk,
+    static const char m[] = "\r\n--XyZ--";
+    FIO_ASSERT(!mp_whole(&c, m, sizeof(m) - 1) && !c.len, "empty multipart");
+    fio_multipart_s p;
+    fio_multipart_init(&p, MP_B);
+    fio_multipart_result_s r =
+        fio_multipart_parse(&p, NULL, NULL, MP_MSG, sizeof(MP_MSG) - 1, 1);
+    FIO_ASSERT(!r.err && r.consumed == sizeof(MP_MSG) - 1, "NULL callbacks");
+    fio_multipart_init(&p, MP_B);
+    r = fio_multipart_parse(&p, NULL, NULL, MP_MSG, 40, 1);
+    FIO_ASSERT(r.err == FIO_MULTIPART_ERROR_GENERIC, "NULL callbacks: eof");
+  }
+  mp_ctx_reset(&c);
+}
+
+FIO_SFUNC void mp_test_blocks(void) {
+  fprintf(stderr, "  * every block size gives the same parts once\n");
+  const size_t len = sizeof(MP_MSG) - 1;
+  for (size_t block = 1; block <= len; ++block) {
+    mp_ctx_s c = {0};
+    int err = mp_feed(&c, MP_MSG, len, block, NULL);
+    FIO_ASSERT(!err && c.len == sizeof(MP_LOG) - 1 &&
+                   !memcmp(c.log, MP_LOG, c.len),
+               "block %zu: err %d, parts: %s",
+               block,
+               err,
+               c.log);
+    mp_ctx_reset(&c);
+  }
+}
+
+FIO_SFUNC void mp_test_need_more(void) {
+  fprintf(stderr, "  * need more: !consumed && !err, consumed parts only\n");
+  fio_multipart_s p;
+  mp_ctx_s c = {0};
+  fio_multipart_init(&p, MP_B);
+  fio_multipart_result_s r = fio_multipart_parse(&p, &MP_CB, &c, NULL, 0, 0);
+  FIO_ASSERT(!r.err && !r.consumed, "no data: need more");
+  r = fio_multipart_parse(&p, &MP_CB, &c, "--Xy", 4, 0);
+  FIO_ASSERT(!r.err && !r.consumed, "partial first delimiter: need more");
+  r = fio_multipart_parse(&p, &MP_CB, &c, "--Xa", 4, 0);
+  FIO_ASSERT(r.err == FIO_MULTIPART_ERROR_GENERIC, "preamble rejected early");
+  r = fio_multipart_parse(&p, &MP_CB, &c, MP_MSG, sizeof(MP_MSG) - 1, 1);
+  FIO_ASSERT(r.err == FIO_MULTIPART_ERROR_GENERIC, "errors are permanent");
+
+  /* the first part completes; the second is pending */
+  size_t part1 = mp_find(MP_MSG, sizeof(MP_MSG) - 1, "value-a") + 7 +
+                 9; /* past "\r\n--XyZ\r\n" */
+  fio_multipart_init(&p, MP_B);
+  r = fio_multipart_parse(&p, &MP_CB, &c, MP_MSG, part1 + 20, 0);
+  FIO_ASSERT(!r.err && r.consumed == part1 && c.strings == 1,
+             "consumed %zu (expected %zu), strings %zu",
+             r.consumed,
+             part1,
+             c.strings);
+  mp_ctx_reset(&c);
+}
+
+FIO_SFUNC void mp_test_truncation(void) {
+  fprintf(stderr, "  * eof: every truncation fails, closing at eof is fine\n");
+  const size_t len = sizeof(MP_MSG) - 1;
+  const size_t closed = mp_find(MP_MSG, len, "--XyZ--") + 7;
+  for (size_t i = 0; i < len; ++i) {
+    mp_ctx_s c = {0};
+    int err = mp_whole(&c, MP_MSG, i);
+    int ok = (i == closed || i >= closed + 2); /* not after the lone CR */
+    FIO_ASSERT(ok ? !err : err == FIO_MULTIPART_ERROR_GENERIC,
+               "prefix %zu: err %d",
+               i,
+               err);
+    if (ok)
+      FIO_ASSERT(c.len == sizeof(MP_LOG) - 1, "prefix %zu: parts lost", i);
+    mp_ctx_reset(&c);
+  }
+}
+
+FIO_SFUNC void mp_test_closing_grammar(void) {
+  fprintf(stderr, "  * closing delimiter line grammar (any split)\n");
+  static const struct {
+    const char *suffix;
+    int ok;
+  } cases[] = {
+      {"", 1},
+      {"\r\n", 1},
+      {"\r\nepilogue\r\n--XyZ--junk", 1},
+      {"  \t\r\n", 1},
+      {"  ", 1},
+      {"\t", 1},
+      {"garbage", 0},
+      {"  x", 0},
+      {"\r", 0},
+      {"\rx", 0},
+      {" \r", 0},
+      {"-", 0},
+      {"\n", 0},
+  };
+  static const char head[] = "--XyZ\r\n"
+                             "Content-Disposition: form-data; name=\"up\"; "
+                             "filename=\"f\"\r\n\r\n"
+                             "data\r\n--XyZ--";
+  for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+    char msg[256];
+    size_t len =
+        (size_t)snprintf(msg, sizeof(msg), "%s%s", head, cases[i].suffix);
+    for (size_t block = 1; block <= len; ++block) {
+      mp_ctx_s c = {0};
+      int err = mp_feed(&c, msg, len, block, NULL);
+      /* a part is reported only once its delimiter line is valid */
+      FIO_ASSERT(cases[i].ok ? (!err && c.files == 1)
+                             : (err == FIO_MULTIPART_ERROR_GENERIC && !c.files),
+                 "suffix \"%s\", block %zu: err %d, files %zu",
+                 cases[i].suffix,
+                 block,
                  err,
-                 c.file_len);
-      free(c.file);
+                 c.files);
+      mp_ctx_reset(&c);
     }
   }
+  /* the same grammar between parts: "--XyZ" must be followed by CRLF */
+  static const char bad[] = "--XyZ\r\nContent-Disposition: form-data; "
+                            "name=\"a\"\r\n\r\nv\r\n--XyZx\r\n";
+  mp_ctx_s c = {0};
+  FIO_ASSERT(mp_whole(&c, bad, sizeof(bad) - 1) ==
+                     FIO_MULTIPART_ERROR_GENERIC &&
+                 !c.strings,
+             "malformed delimiter line must fail before the part's callback");
+  mp_ctx_reset(&c);
+}
 
-  /* truncated input: stream_close ends the open file */
-  {
-    fio___mp_stream_ctx_s c = {0};
-    int err = fio___mp_stream_feed(&c, msg, msg_len / 2, 1000, NULL);
-    FIO_ASSERT(err == -3 && c.file_starts == 1 && c.file_ends == 1,
-               "truncated stream: err %d, file %zu / %zu",
-               err,
-               c.file_starts,
-               c.file_ends);
-    free(c.file);
+FIO_SFUNC void mp_test_callback_errors(void) {
+  fprintf(stderr, "  * callback errors are opaque and propagate unchanged\n");
+  static const int codes[] = {42, -7, 1, -1};
+  for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); ++i) {
+    for (size_t at = 1; at <= 4; ++at) {
+      mp_ctx_s c = {.fail_on = codes[i], .fail_at = at};
+      int err = mp_whole(&c, MP_MSG, sizeof(MP_MSG) - 1);
+      FIO_ASSERT(err == codes[i] && c.strings + c.files == at,
+                 "code %d at %zu: err %d, parts %zu",
+                 codes[i],
+                 at,
+                 err,
+                 c.strings + c.files);
+      mp_ctx_reset(&c);
+      c = (mp_ctx_s){.fail_on = codes[i], .fail_at = at};
+      err = mp_feed(&c, MP_MSG, sizeof(MP_MSG) - 1, 7, NULL);
+      FIO_ASSERT(err == codes[i] && c.strings + c.files == at,
+                 "fed: code %d at %zu: err %d",
+                 codes[i],
+                 at,
+                 err);
+      mp_ctx_reset(&c);
+    }
   }
+}
 
-  /* stateless: a buffer ending right after a delimiter's CRLF must not make
-   * the caller re-parse (and re-report) completed parts */
-  {
-    const char *part1 =
-        "--XyZ\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n"
-        "--XyZ\r\n";
-    const char *part2 =
-        "Content-Disposition: form-data; name=\"b\"\r\n\r\n2\r\n--XyZ--\r\n";
-    char buf[256];
-    size_t l1 = FIO_STRLEN(part1), l2 = FIO_STRLEN(part2);
-    fio___mp_stream_ctx_s c = {0};
-    FIO_MEMCPY(buf, part1, l1);
-    fio_multipart_result_s r = fio_multipart_parse(&fio___mp_stream_callbacks,
-                                                   &c,
-                                                   FIO_BUF_INFO1((char *)"XyZ"),
-                                                   buf,
-                                                   l1);
-    FIO_ASSERT(r.err == -2 && r.consumed && c.fields == 1,
-               "stateless rewind: err %d consumed %zu fields %zu",
-               r.err,
-               r.consumed,
-               c.fields);
-    size_t keep = l1 - r.consumed;
-    FIO_MEMMOVE(buf, buf + r.consumed, keep);
-    FIO_MEMCPY(buf + keep, part2, l2);
-    r = fio_multipart_parse(&fio___mp_stream_callbacks,
-                            &c,
-                            FIO_BUF_INFO1((char *)"XyZ"),
-                            buf,
-                            keep + l2);
-    FIO_ASSERT(!r.err && c.fields == 2 && !strcmp(c.field_names[1], "b"),
-               "stateless rewind: second call err %d fields %zu",
-               r.err,
-               c.fields);
-  }
+FIO_SFUNC void mp_test_epilogue(void) {
+  fprintf(stderr, "  * after the closing delimiter, data is ignored\n");
+  fio_multipart_s p;
+  mp_ctx_s c = {0};
+  static const char m[] = "--XyZ--\r\n";
+  fio_multipart_init(&p, MP_B);
+  fio_multipart_result_s r =
+      fio_multipart_parse(&p, &MP_CB, &c, m, sizeof(m) - 1, 0);
+  FIO_ASSERT(!r.err && r.consumed == sizeof(m) - 1, "closing consumed");
+  r = fio_multipart_parse(&p, &MP_CB, &c, MP_MSG, sizeof(MP_MSG) - 1, 0);
+  FIO_ASSERT(!r.err && r.consumed == sizeof(MP_MSG) - 1 && !c.len,
+             "epilogue must be consumed, never parsed");
+  r = fio_multipart_parse(&p, &MP_CB, &c, NULL, 0, 1);
+  FIO_ASSERT(!r.err && !r.consumed, "eof after completion");
+  mp_ctx_reset(&c);
+}
 
-  /* on_file_data abort closes the file and stops */
-  {
-    fio___mp_stream_ctx_s c = {.abort_after = 1000};
-    int err = fio___mp_stream_feed(&c, msg, msg_len, 512, NULL);
-    FIO_ASSERT(err == -1 && c.file_ends == 1 && c.fields == 1,
-               "aborted stream: err %d, ends %zu, fields %zu",
-               err,
-               c.file_ends,
-               c.fields);
-    free(c.file);
+FIO_SFUNC void mp_test_init(void) {
+  fprintf(stderr, "  * boundary validation and copy\n");
+  fio_multipart_s p;
+  char b[FIO_MULTIPART_MAX_BOUNDARY + 2];
+  memset(b, 'b', sizeof(b));
+  FIO_ASSERT(fio_multipart_init(&p, FIO_BUF_INFO2(b, 0)) == -1, "empty");
+  FIO_ASSERT(fio_multipart_parse(&p, &MP_CB, NULL, "--", 2, 1).err ==
+                 FIO_MULTIPART_ERROR_GENERIC,
+             "a failed init fails parsing");
+  FIO_ASSERT(fio_multipart_init(&p, FIO_BUF_INFO2(NULL, 3)) == -1, "NULL");
+  FIO_ASSERT(fio_multipart_init(
+                 &p,
+                 FIO_BUF_INFO2(b, FIO_MULTIPART_MAX_BOUNDARY + 1)) == -1,
+             "too long");
+  FIO_ASSERT(fio_multipart_init(NULL, MP_B) == -1, "NULL parser");
+  FIO_ASSERT(fio_multipart_parse(NULL, &MP_CB, NULL, "", 0, 1).err ==
+                 FIO_MULTIPART_ERROR_GENERIC,
+             "NULL parser");
+  /* the longest boundary works, and the caller's copy may change */
+  FIO_ASSERT(
+      !fio_multipart_init(&p, FIO_BUF_INFO2(b, FIO_MULTIPART_MAX_BOUNDARY)),
+      "max length");
+  char msg[2 * FIO_MULTIPART_MAX_BOUNDARY + 128];
+  size_t len = 0;
+  msg[len++] = '-';
+  msg[len++] = '-';
+  memcpy(msg + len, b, FIO_MULTIPART_MAX_BOUNDARY);
+  len += FIO_MULTIPART_MAX_BOUNDARY;
+  static const char mid[] =
+      "\r\nContent-Disposition: form-data; name=\"k\"\r\n\r\nv\r\n--";
+  memcpy(msg + len, mid, sizeof(mid) - 1);
+  len += sizeof(mid) - 1;
+  memcpy(msg + len, b, FIO_MULTIPART_MAX_BOUNDARY);
+  len += FIO_MULTIPART_MAX_BOUNDARY;
+  msg[len++] = '-';
+  msg[len++] = '-';
+  memset(b, 'c', sizeof(b));
+  mp_ctx_s c = {0};
+  fio_multipart_result_s r = fio_multipart_parse(&p, &MP_CB, &c, msg, len, 1);
+  FIO_ASSERT(!r.err && c.strings == 1, "max boundary parse: err %d", r.err);
+  mp_ctx_reset(&c);
+}
+
+FIO_SFUNC void mp_test_limits(void) {
+  fprintf(stderr, "  * header and padding limits, missing disposition\n");
+  const size_t max = FIO_MULTIPART_MAX_HEADER_SIZE;
+  char *msg = (char *)malloc(max * 2 + 256);
+  FIO_ASSERT(msg, "allocation failed");
+  static const char cd[] = "Content-Disposition: form-data; name=\"k\"";
+  for (size_t extra = 0; extra < 2; ++extra) {
+    /* headers of exactly `max` (+ extra) bytes */
+    size_t len = (size_t)sprintf(msg, "--XyZ\r\n%s\r\nX-Pad: ", cd);
+    size_t pad = max + extra - (len - 7) - 0;
+    memset(msg + len, 'p', pad);
+    len += pad;
+    len += (size_t)sprintf(msg + len, "\r\n\r\nv\r\n--XyZ--");
+    for (size_t block = 0; block < 2; ++block) {
+      mp_ctx_s c = {0};
+      int err = block ? mp_feed(&c, msg, len, 1, NULL) : mp_whole(&c, msg, len);
+      FIO_ASSERT(extra ? err == FIO_MULTIPART_ERROR_GENERIC
+                       : (!err && c.strings == 1),
+                 "header limit (+%zu, block %zu): err %d",
+                 extra,
+                 block,
+                 err);
+      mp_ctx_reset(&c);
+    }
   }
+  /* Only the spaces/tabs after the two closing hyphens count as padding.
+   * Check both terminal forms, with and without an earlier part. */
+  for (size_t extra = 0; extra < 2; ++extra) {
+    for (size_t crlf = 0; crlf < 2; ++crlf) {
+      for (size_t part = 0; part < 2; ++part) {
+        size_t len = (size_t)sprintf(
+            msg,
+            part ? "--XyZ\r\nContent-Disposition: form-data; name=\"k\"\r\n"
+                   "\r\nv\r\n--XyZ--"
+                 : "--XyZ--");
+        memset(msg + len, ' ', max + extra);
+        len += max + extra;
+        if (crlf) {
+          msg[len++] = '\r';
+          msg[len++] = '\n';
+        }
+        for (size_t block = 0; block < 2; ++block) {
+          mp_ctx_s c = {0};
+          int err = block ? mp_feed(&c, msg, len, 127, NULL)
+                          : mp_whole(&c, msg, len);
+          FIO_ASSERT(extra ? err == FIO_MULTIPART_ERROR_GENERIC
+                           : (!err && c.strings == part),
+                     "closing padding (+%zu, crlf %zu, part %zu, block %zu): "
+                     "err %d, strings %zu",
+                     extra,
+                     crlf,
+                     part,
+                     block,
+                     err,
+                     c.strings);
+          mp_ctx_reset(&c);
+        }
+      }
+    }
+  }
+  {
+    static const char m[] = "--XyZ\r\nContent-Type: text/plain\r\n\r\nv\r\n"
+                            "--XyZ--";
+    mp_ctx_s c = {0};
+    FIO_ASSERT(mp_whole(&c, m, sizeof(m) - 1) == FIO_MULTIPART_ERROR_GENERIC,
+               "missing Content-Disposition must fail");
+    mp_ctx_reset(&c);
+  }
+  free(msg);
+}
+
+/** Large parts fed in small blocks: linear time, one part kept at a time. */
+FIO_SFUNC void mp_test_linear(void) {
+  fprintf(stderr, "  * large parts in small blocks: linear, one part kept\n");
+  const size_t big = (size_t)1 << 22; /* 4 MiB per part */
+  static const char h1[] =
+      "--XyZ\r\nContent-Disposition: form-data; name=\"f\"; filename=\"b\"\r\n"
+      "\r\n";
+  static const char h2[] =
+      "\r\n--XyZ\r\nContent-Disposition: form-data; name=\"s\"\r\n\r\n";
+  static const char tail[] = "\r\n--XyZ--\r\n";
+  size_t len =
+      (sizeof(h1) - 1) + big + (sizeof(h2) - 1) + big + (sizeof(tail) - 1);
+  char *msg = (char *)malloc(len);
+  FIO_ASSERT(msg, "allocation failed");
+  char *pos = msg;
+  memcpy(pos, h1, sizeof(h1) - 1);
+  pos += sizeof(h1) - 1;
+  for (size_t i = 0; i < big; ++i) /* near misses: "\r\n--XyY" */
+    pos[i] = "\r\n--XyY"[i % 7];
+  pos += big;
+  memcpy(pos, h2, sizeof(h2) - 1);
+  pos += sizeof(h2) - 1;
+  for (size_t i = 0; i < big; ++i)
+    pos[i] = (char)('a' + (i % 23));
+  pos += big;
+  memcpy(pos, tail, sizeof(tail) - 1);
+
+  mp_ctx_s whole = {0};
+  FIO_ASSERT(!mp_whole(&whole, msg, len), "whole parse failed");
+  mp_ctx_s c = {0};
+  size_t peak = 0;
+  clock_t start = clock();
+  int err = mp_feed(&c, msg, len, 61, &peak);
+  double secs = (double)(clock() - start) / CLOCKS_PER_SEC;
+  FIO_ASSERT(!err && c.len == whole.len && !memcmp(c.log, whole.log, c.len),
+             "block parse differs from a whole parse (err %d)",
+             err);
+  FIO_ASSERT(peak < big + 256,
+             "more than one part kept: %zu bytes (part %zu)",
+             peak,
+             big);
+  /* a rescan per block would take minutes (~8 * 10^11 byte compares) */
+  FIO_ASSERT(secs < 10.0, "parsing in blocks isn't linear (%.2fs)", secs);
+  fprintf(stderr, "    (8 MiB in 61 byte blocks: %.3fs)\n", secs);
+  mp_ctx_reset(&c);
+  mp_ctx_reset(&whole);
+  free(msg);
+}
+
+/** Callers breaking the contract (data not kept) get a rescan, not a crash. */
+FIO_SFUNC void mp_test_contract(void) {
+  fprintf(stderr, "  * shorter data than already searched: rescanned\n");
+  fio_multipart_s p;
+  mp_ctx_s c = {0};
+  const size_t len = sizeof(MP_MSG) - 1;
+  const size_t part1 = mp_find(MP_MSG, len, "value-a") + 7 + 9;
+  fio_multipart_init(&p, MP_B);
+  /* the second part's headers (87 bytes) are complete, its body pending */
+  fio_multipart_result_s r =
+      fio_multipart_parse(&p, &MP_CB, &c, MP_MSG, part1 + 100, 0);
+  FIO_ASSERT(!r.err && r.consumed == part1, "first part");
+  r = fio_multipart_parse(&p, &MP_CB, &c, MP_MSG + part1, 10, 0);
+  FIO_ASSERT(!r.err && !r.consumed, "shorter data: need more");
+  r = fio_multipart_parse(&p, &MP_CB, &c, MP_MSG + part1, len - part1, 1);
+  FIO_ASSERT(!r.err && c.len == sizeof(MP_LOG) - 1 &&
+                 !memcmp(c.log, MP_LOG, c.len),
+             "resumed parse: %s",
+             c.log);
+  mp_ctx_reset(&c);
 }
 
 /* *****************************************************************************
@@ -1615,38 +578,18 @@ Main Test Entry Point
 ***************************************************************************** */
 
 void fio_test_multipart(void) {
-  /* Basic tests */
-  fio___test_multipart_basic();
-  fio___test_multipart_file_upload();
-  fio___test_multipart_empty();
-  fio___test_multipart_quoted_filename();
-  fio___test_multipart_empty_filename();
-  fio___test_multipart_need_more_data();
-  fio___test_multipart_multiple_files();
-  fio___test_multipart_mixed_content();
-  fio___test_multipart_with_crlf_prefix();
-
-  /* Streaming tests */
-  fio___test_multipart_chunked_parsing();
-  fio___test_multipart_incremental_parts();
-  fio___test_multipart_large_file();
-  fio___test_multipart_boundary_in_content();
-  fio___test_multipart_large_field_value();
-  fio___test_multipart_chunk_split_at_boundary();
-  fio___test_multipart_empty_file();
-  fio___test_multipart_consumed_tracking();
-  fio___test_multipart_binary_content();
-
-  /* Streaming field callback tests */
-  fio___test_multipart_streaming_field_small();
-  fio___test_multipart_streaming_field_large();
-  fio___test_multipart_streaming_field_backward_compat();
-  fio___test_multipart_streaming_field_mixed();
-  fio___test_multipart_streaming_field_abort();
-  fio___test_multipart_streaming_field_multiple();
-
-  /* Stateful streaming (file data in bounded memory) */
-  fio___test_multipart_stream_parse();
+  fprintf(stderr, "Testing MIME multipart parser\n");
+  mp_test_basic();
+  mp_test_blocks();
+  mp_test_need_more();
+  mp_test_truncation();
+  mp_test_closing_grammar();
+  mp_test_callback_errors();
+  mp_test_epilogue();
+  mp_test_init();
+  mp_test_limits();
+  mp_test_contract();
+  mp_test_linear();
 }
 
 #ifndef FIO_TEST_ALL
