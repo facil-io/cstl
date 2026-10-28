@@ -37,7 +37,7 @@ BROTLI API
  * Returns:
  *  - On success: decompressed byte count (<= out_len).
  *  - On buffer too small: the REQUIRED buffer size (> out_len).
- *  - On corrupt/invalid data: 0.
+ *  - On corrupt, invalid or truncated data: 0.
  *  - When out==NULL or out_len==0: performs a header scan summing MLEN
  *    values and returns the required size (0 if data is corrupt).
  *    This allows callers to query the decompressed size without allocating.
@@ -187,6 +187,7 @@ typedef struct {
   unsigned avail;     /* bits available in buffer */
   const uint8_t *src; /* current read position */
   const uint8_t *end; /* one past last byte of input */
+  unsigned overrun;   /* a read needed bits past the end of input */
 } fio___brotli_bits_s;
 
 FIO_SFUNC void fio___brotli_bits_init(fio___brotli_bits_s *b,
@@ -194,6 +195,7 @@ FIO_SFUNC void fio___brotli_bits_init(fio___brotli_bits_s *b,
                                       size_t len) {
   b->bits = 0;
   b->avail = 0;
+  b->overrun = 0;
   b->src = (const uint8_t *)data;
   b->end = b->src + len;
 }
@@ -231,8 +233,10 @@ FIO_IFUNC uint32_t fio___brotli_bits_get(fio___brotli_bits_s *b, unsigned n) {
   if (!n)
     return 0;
   fio___brotli_bits_fill(b);
-  if (n > b->avail)
+  if (n > b->avail) {
+    b->overrun = 1;
     return 0; /* input exhausted */
+  }
   v = fio___brotli_bits_peek(b, n);
   fio___brotli_bits_drop(b, n);
   return v;
@@ -241,8 +245,10 @@ FIO_IFUNC uint32_t fio___brotli_bits_get(fio___brotli_bits_s *b, unsigned n) {
 /* Read a single bit */
 FIO_IFUNC uint32_t fio___brotli_bits_get1(fio___brotli_bits_s *b) {
   fio___brotli_bits_fill(b);
-  if (b->avail == 0)
+  if (b->avail == 0) {
+    b->overrun = 1;
     return 0; /* input exhausted */
+  }
   uint32_t v = (uint32_t)(b->bits & 1);
   b->bits >>= 1;
   b->avail -= 1;
@@ -471,15 +477,19 @@ FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
   if (FIO___BROTLI_ENTRY_IS_SYM(entry)) {
     unsigned codelen = FIO___BROTLI_ENTRY_CODELEN(entry);
     /* nsym=1 simple codes store codelen=0 (no bits consumed). Valid. */
-    if (codelen > b->avail)
+    if (codelen > b->avail) {
+      b->overrun = 1;
       return FIO___BROTLI_HUFF_ERR;
+    }
     fio___brotli_bits_drop(b, codelen);
     return FIO___BROTLI_ENTRY_SYMBOL(entry);
   }
 
   /* Subtable lookup: the code is longer than root_bits */
-  if (b->avail <= root_bits)
+  if (b->avail <= root_bits) {
+    b->overrun = 1;
     return FIO___BROTLI_HUFF_ERR;
+  }
   fio___brotli_bits_drop(b, root_bits);
   fio___brotli_bits_fill(b);
   /* Zero-padded like the root lookup: the subtable is sized for its longest
@@ -495,8 +505,10 @@ FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
   if (codelen <= root_bits)
     return FIO___BROTLI_HUFF_ERR;
   unsigned drop = codelen - root_bits;
-  if (drop > b->avail)
+  if (drop > b->avail) {
+    b->overrun = 1;
     return FIO___BROTLI_HUFF_ERR;
+  }
   fio___brotli_bits_drop(b, drop);
   return FIO___BROTLI_ENTRY_SYMBOL(entry);
 }
@@ -604,6 +616,10 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
   for (unsigned i = hskip; i < 18; i++) {
     fio___brotli_bits_fill(b);
     uint32_t ix = fio___brotli_bits_peek(b, 4) & 0xF;
+    if (cl_vlc_len[ix] > b->avail) {
+      b->overrun = 1;
+      return 0;
+    }
     uint32_t cl_val = cl_vlc_val[ix];
     fio___brotli_bits_drop(b, cl_vlc_len[ix]);
     cl_lengths[fio___brotli_cl_order[i]] = (uint8_t)cl_val;
@@ -1639,6 +1655,9 @@ FIO_SFUNC size_t fio___brotli_decompress(void *out,
     return 0;
   }
 
+  /* the input ended before the last meta-block (RFC 7932 section 10) */
+  if (bits.overrun)
+    return 0;
   /* unread whole bytes in the bit buffer are past the end of the stream */
   if (in_used)
     *in_used =

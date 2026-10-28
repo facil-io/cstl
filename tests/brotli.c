@@ -84,6 +84,26 @@ FIO_SFUNC const uint8_t *fio___brotli_find_ascii_word(uint32_t min_len,
   return NULL;
 }
 
+/* A proper prefix of a stream lacks some of its bits (RFC 7932 section 10:
+ * reject it). Expects streams that decode to at most 1024 bytes. */
+FIO_SFUNC void fio___brotli_assert_prefixes_fail(const char *name,
+                                                 const uint8_t *stream,
+                                                 size_t len) {
+  uint8_t out[1024];
+  size_t cut = 0, dlen = 0;
+  for (; cut < len; ++cut) {
+    dlen = fio_brotli_decompress(out, sizeof(out), stream, cut);
+    if (dlen)
+      break;
+  }
+  TEST_ASSERT(cut == len,
+              "%s: first %zu of %zu bytes decoded to %zu bytes",
+              name,
+              cut,
+              len,
+              dlen);
+}
+
 static void test_reference_decode_vectors(void) {
   fprintf(stderr, "Testing reference Brotli decode vectors...\n");
 
@@ -135,6 +155,9 @@ static void test_reference_decode_vectors(void) {
         fio_brotli_decompress(NULL, 0, compressed, sizeof(compressed)) ==
             sizeof(expected) - 1,
         "reference hello: counting mode mismatch");
+    fio___brotli_assert_prefixes_fail("reference hello prefix",
+                                      compressed,
+                                      sizeof(compressed));
   }
 
   {
@@ -155,6 +178,9 @@ static void test_reference_decode_vectors(void) {
     TEST_ASSERT(len == sizeof(expected) &&
                     !FIO_MEMCMP(out, expected, sizeof(expected)),
                 "reference repeated: output mismatch");
+    fio___brotli_assert_prefixes_fail("reference repeated prefix",
+                                      compressed,
+                                      sizeof(compressed));
   }
 
   {
@@ -181,6 +207,9 @@ static void test_reference_decode_vectors(void) {
     TEST_ASSERT(len == sizeof(expected) &&
                     !FIO_MEMCMP(out, expected, sizeof(expected)),
                 "reference q5 text: output mismatch");
+    fio___brotli_assert_prefixes_fail("reference q5 text prefix",
+                                      compressed,
+                                      sizeof(compressed));
   }
 
   {
@@ -207,6 +236,9 @@ static void test_reference_decode_vectors(void) {
         fio_brotli_decompress(NULL, 0, compressed, sizeof(compressed)) ==
             sizeof(expected) - 1,
         "reference q11 html: counting mode mismatch");
+    fio___brotli_assert_prefixes_fail("reference q11 html prefix",
+                                      compressed,
+                                      sizeof(compressed));
   }
 }
 
@@ -503,6 +535,57 @@ static void test_compress_stream_end(void) {
 }
 
 /* *****************************************************************************
+Truncated streams must be rejected
+
+RFC 7932 rejects a stream that ends before its last meta-block is complete.
+Every proper prefix of a stream lacks some of its bits, so none may decode.
+***************************************************************************** */
+
+static void test_truncated_streams(void) {
+  fprintf(stderr, "Testing truncated Brotli streams...\n");
+  enum { MAX_LEN = 300 };
+  uint8_t text[MAX_LEN];
+  uint8_t binary[MAX_LEN];
+  uint8_t compressed[MAX_LEN * 2 + 1024];
+  uint8_t out[MAX_LEN + 64];
+  fio___brotli_make_corpus(text, sizeof(text));
+  fio___brotli_fill_pattern(binary, sizeof(binary), 0xB0771EU);
+  const struct {
+    const char *name;
+    const uint8_t *data;
+  } sources[] = {{"text", text}, {"binary", binary}};
+
+  for (size_t si = 0; si < sizeof(sources) / sizeof(sources[0]); ++si) {
+    for (int quality = 1; quality <= 6; ++quality) {
+      size_t len = 1, clen = 0, cut = 0, dlen = 0;
+      for (; len <= MAX_LEN; ++len) {
+        clen = fio_brotli_compress(compressed,
+                                   sizeof(compressed),
+                                   sources[si].data,
+                                   len,
+                                   quality);
+        for (cut = 0; cut < clen; ++cut) {
+          dlen = fio_brotli_decompress(out, sizeof(out), compressed, cut);
+          if (dlen)
+            break;
+        }
+        if (!clen || cut < clen)
+          break;
+      }
+      TEST_ASSERT(len > MAX_LEN,
+                  "truncated %s q%d len=%zu: first %zu of %zu bytes decoded "
+                  "to %zu bytes",
+                  sources[si].name,
+                  quality,
+                  len,
+                  cut,
+                  clen,
+                  dlen);
+    }
+  }
+}
+
+/* *****************************************************************************
 T005 — Inputs above 16MB must compress fully (chunked meta-blocks)
 
 fio_brotli_compress must support inputs larger than the 16MB single
@@ -593,6 +676,7 @@ int main(void) {
   test_api_edges_and_size_queries();
   test_quality_roundtrips();
   test_compress_stream_end();
+  test_truncated_streams();
   test_large_input_roundtrips();
 
   fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
