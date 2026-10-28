@@ -263,6 +263,48 @@ static void test_dictionary_tables_and_transforms(void) {
   }
 }
 
+/* *****************************************************************************
+A long code can be the last code of the input
+
+Codes longer than the 8-bit root table share a subtable sized for the longest
+code in it. The last code of a stream may be shorter than that, so fewer bits
+than the subtable width can remain after it.
+***************************************************************************** */
+
+static void test_huffman_decode_at_input_end(void) {
+  fprintf(stderr, "Testing Brotli Huffman decode at the end of input...\n");
+  /* Complete code: the last root slot holds one 9-bit and two 10-bit codes */
+  static const uint8_t lens[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10};
+  enum { NUM_SYMS = sizeof(lens) };
+  uint32_t table[512];
+  uint16_t codes[NUM_SYMS];
+  TEST_ASSERT(fio___brotli_build_table(table, 8, lens, NUM_SYMS, 512),
+              "huffman end of input: table build failed");
+  fio___brotli_build_codes(codes, lens, NUM_SYMS);
+
+  for (uint32_t sym = 0; sym < NUM_SYMS; ++sym) {
+    /* `lead` bits before the code move its end to every bit of a byte */
+    for (uint32_t lead = 0; lead < 8; ++lead) {
+      uint8_t buf[16] = {0};
+      fio___brotli_bw_s w;
+      fio___brotli_bw_init(&w, buf, sizeof(buf));
+      fio___brotli_bw_put(&w, 0, lead);
+      fio___brotli_bw_put_huff(&w, codes[sym], lens[sym]);
+      size_t len = fio___brotli_bw_finish(&w, buf);
+
+      fio___brotli_bits_s bits;
+      fio___brotli_bits_init(&bits, buf, len);
+      fio___brotli_bits_get(&bits, lead);
+      uint32_t got = fio___brotli_huff_decode(&bits, table, 8);
+      TEST_ASSERT(got == sym,
+                  "huffman end of input: symbol %u after %u bits decoded as %u",
+                  (unsigned)sym,
+                  (unsigned)lead,
+                  (unsigned)got);
+    }
+  }
+}
+
 static void test_api_edges_and_size_queries(void) {
   fprintf(stderr, "Testing Brotli API edge cases and size queries...\n");
 
@@ -409,6 +451,58 @@ static void test_quality_roundtrips(void) {
 }
 
 /* *****************************************************************************
+Compressed streams must end with the last meta-block
+
+Decoders built on google/brotli (the `brotli` CLI, Python's `brotli`, curl)
+reject any byte left after the end of the stream. fio_brotli_decompress
+ignores such bytes, so the roundtrips below also check where the decoder
+found the end of the stream.
+***************************************************************************** */
+
+static void test_compress_stream_end(void) {
+  fprintf(stderr, "Testing Brotli compressed stream end...\n");
+  enum { MAX_LEN = 300 };
+  uint8_t text[MAX_LEN];
+  uint8_t binary[MAX_LEN];
+  uint8_t compressed[MAX_LEN * 2 + 1024];
+  uint8_t out[MAX_LEN + 64];
+  fio___brotli_make_corpus(text, sizeof(text));
+  fio___brotli_fill_pattern(binary, sizeof(binary), 0xB0771EU);
+  const struct {
+    const char *name;
+    const uint8_t *data;
+  } sources[] = {{"text", text}, {"binary", binary}};
+
+  for (size_t si = 0; si < sizeof(sources) / sizeof(sources[0]); ++si) {
+    for (int quality = 1; quality <= 6; ++quality) {
+      size_t len = 0, clen = 0, dlen = 0, used = 0;
+      for (; len <= MAX_LEN; ++len) {
+        clen = fio_brotli_compress(compressed,
+                                   sizeof(compressed),
+                                   sources[si].data,
+                                   len,
+                                   quality);
+        used = 0;
+        dlen =
+            fio___brotli_decompress(out, sizeof(out), compressed, clen, &used);
+        if (!clen || dlen != len || FIO_MEMCMP(out, sources[si].data, len) ||
+            used != clen)
+          break;
+      }
+      TEST_ASSERT(len > MAX_LEN,
+                  "stream end %s q%d len=%zu: decoded %zu bytes, stream ends "
+                  "at byte %zu of %zu",
+                  sources[si].name,
+                  quality,
+                  len,
+                  dlen,
+                  used,
+                  clen);
+    }
+  }
+}
+
+/* *****************************************************************************
 T005 — Inputs above 16MB must compress fully (chunked meta-blocks)
 
 fio_brotli_compress must support inputs larger than the 16MB single
@@ -459,7 +553,8 @@ static void test_large_input_roundtrips(void) {
                   q,
                   n);
 
-      size_t dlen = fio_brotli_decompress(out, n + 1024, comp, clen);
+      size_t used = 0;
+      size_t dlen = fio___brotli_decompress(out, n + 1024, comp, clen, &used);
       TEST_ASSERT(dlen == n,
                   "large input %zu q%d: expected full roundtrip %zu bytes, "
                   "got %zu (input silently truncated at 16MB)",
@@ -471,6 +566,12 @@ static void test_large_input_roundtrips(void) {
                   "large input %zu q%d: payload mismatch",
                   n,
                   q);
+      TEST_ASSERT(used == clen,
+                  "large input %zu q%d: stream ends at byte %zu of %zu",
+                  n,
+                  q,
+                  used,
+                  clen);
     }
 
   next:
@@ -488,8 +589,10 @@ int main(void) {
 
   test_reference_decode_vectors();
   test_dictionary_tables_and_transforms();
+  test_huffman_decode_at_input_end();
   test_api_edges_and_size_queries();
   test_quality_roundtrips();
+  test_compress_stream_end();
   test_large_input_roundtrips();
 
   fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
