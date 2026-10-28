@@ -226,6 +226,34 @@ static void test_reference_decode_vectors(void) {
                 "block types in every category: expected \"a\", got %zu bytes",
                 len);
   }
+
+  {
+    /* All 256 literals have 8-bit codes. The code length code uses only
+     * one symbol (8), which takes zero bits (RFC 7932 section 3.5). */
+    static const uint8_t compressed[] = {0x62,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x07,
+                                         0x00,
+                                         0x04,
+                                         0x08,
+                                         0x01,
+                                         0x18,
+                                         0x39,
+                                         0xd9,
+                                         0xbb,
+                                         0x00};
+    uint8_t out[16] = {0};
+    size_t len =
+        fio_brotli_decompress(out, sizeof(out), compressed, sizeof(compressed));
+    TEST_ASSERT(len == 4 && !FIO_MEMCMP(out, "brot", 4),
+                "single code length code: expected \"brot\", got %zu bytes",
+                len);
+  }
 }
 
 static void test_dictionary_tables_and_transforms(void) {

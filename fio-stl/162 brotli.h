@@ -613,12 +613,25 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
 
   /* Build code-length Huffman table */
   uint32_t cl_table[1 << FIO___BROTLI_MAX_CL_LEN]; /* 32 entries */
-  if (!fio___brotli_build_table(cl_table,
-                                FIO___BROTLI_MAX_CL_LEN,
-                                cl_lengths,
-                                18,
-                                (uint32_t)(1U << FIO___BROTLI_MAX_CL_LEN)))
+  unsigned cl_used = 0, cl_only = 0;
+  for (unsigned i = 0; i < 18; i++) {
+    if (cl_lengths[i]) {
+      ++cl_used;
+      cl_only = i;
+    }
+  }
+  if (cl_used == 1) {
+    /* RFC 7932 section 3.5: a single used symbol has a zero-length code */
+    for (unsigned i = 0; i < (1U << FIO___BROTLI_MAX_CL_LEN); i++)
+      cl_table[i] = FIO___BROTLI_ENTRY_SYM(cl_only, 0);
+  } else if (!fio___brotli_build_table(
+                 cl_table,
+                 FIO___BROTLI_MAX_CL_LEN,
+                 cl_lengths,
+                 18,
+                 (uint32_t)(1U << FIO___BROTLI_MAX_CL_LEN))) {
     return 0;
+  }
 
   /* Read symbol code lengths using the code-length Huffman table.
    * Uses cumulative repeat mechanism per RFC 7932 / reference decoder:
