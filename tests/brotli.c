@@ -263,6 +263,48 @@ static void test_dictionary_tables_and_transforms(void) {
   }
 }
 
+/* *****************************************************************************
+A long code can be the last code of the input
+
+Codes longer than the 8-bit root table share a subtable sized for the longest
+code in it. The last code of a stream may be shorter than that, so fewer bits
+than the subtable width can remain after it.
+***************************************************************************** */
+
+static void test_huffman_decode_at_input_end(void) {
+  fprintf(stderr, "Testing Brotli Huffman decode at the end of input...\n");
+  /* Complete code: the last root slot holds one 9-bit and two 10-bit codes */
+  static const uint8_t lens[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10};
+  enum { NUM_SYMS = sizeof(lens) };
+  uint32_t table[512];
+  uint16_t codes[NUM_SYMS];
+  TEST_ASSERT(fio___brotli_build_table(table, 8, lens, NUM_SYMS, 512),
+              "huffman end of input: table build failed");
+  fio___brotli_build_codes(codes, lens, NUM_SYMS);
+
+  for (uint32_t sym = 0; sym < NUM_SYMS; ++sym) {
+    /* `lead` bits before the code move its end to every bit of a byte */
+    for (uint32_t lead = 0; lead < 8; ++lead) {
+      uint8_t buf[16] = {0};
+      fio___brotli_bw_s w;
+      fio___brotli_bw_init(&w, buf, sizeof(buf));
+      fio___brotli_bw_put(&w, 0, lead);
+      fio___brotli_bw_put_huff(&w, codes[sym], lens[sym]);
+      size_t len = fio___brotli_bw_finish(&w, buf);
+
+      fio___brotli_bits_s bits;
+      fio___brotli_bits_init(&bits, buf, len);
+      fio___brotli_bits_get(&bits, lead);
+      uint32_t got = fio___brotli_huff_decode(&bits, table, 8);
+      TEST_ASSERT(got == sym,
+                  "huffman end of input: symbol %u after %u bits decoded as %u",
+                  (unsigned)sym,
+                  (unsigned)lead,
+                  (unsigned)got);
+    }
+  }
+}
+
 static void test_api_edges_and_size_queries(void) {
   fprintf(stderr, "Testing Brotli API edge cases and size queries...\n");
 
@@ -488,6 +530,7 @@ int main(void) {
 
   test_reference_decode_vectors();
   test_dictionary_tables_and_transforms();
+  test_huffman_decode_at_input_end();
   test_api_edges_and_size_queries();
   test_quality_roundtrips();
   test_large_input_roundtrips();

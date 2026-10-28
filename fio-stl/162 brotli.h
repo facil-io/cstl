@@ -477,12 +477,15 @@ FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
     return FIO___BROTLI_ENTRY_SYMBOL(entry);
   }
 
-  /* Subtable lookup */
+  /* Subtable lookup: the code is longer than root_bits */
+  if (b->avail <= root_bits)
+    return FIO___BROTLI_HUFF_ERR;
   fio___brotli_bits_drop(b, root_bits);
   fio___brotli_bits_fill(b);
+  /* Zero-padded like the root lookup: the subtable is sized for its longest
+   * code, and the last code of the input may be shorter than that. The
+   * drop > b->avail check below rejects missing bits. */
   unsigned sub_bits = FIO___BROTLI_ENTRY_SUB_BITS(entry);
-  if (b->avail < sub_bits)
-    return FIO___BROTLI_HUFF_ERR;
   uint32_t sub_off = FIO___BROTLI_ENTRY_SUB_OFF(entry);
   uint32_t sub_idx = fio___brotli_bits_peek(b, sub_bits);
   entry = table[sub_off + sub_idx];
