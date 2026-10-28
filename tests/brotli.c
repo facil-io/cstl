@@ -208,6 +208,82 @@ static void test_reference_decode_vectors(void) {
             sizeof(expected) - 1,
         "reference q11 html: counting mode mismatch");
   }
+
+  /* The vectors below were built by hand and checked with libbrotlidec. */
+
+  {
+    /* Two block types in each category: every NBLTYPES is followed by the
+     * block type code, the block count code and the first block count of
+     * its own category (RFC 7932 section 9.2). */
+    static const uint8_t compressed[] = {
+        0x02, 0x00, 0x20, 0x82, 0xc8, 0x00, 0x00, 0x00, 0x11,
+        0x44, 0x06, 0x00, 0x00, 0x88, 0x20, 0x32, 0x00, 0x00,
+        0x00, 0x00, 0x44, 0x58, 0x20, 0x10, 0x08, 0x04, 0x00};
+    uint8_t out[16] = {0};
+    size_t len =
+        fio_brotli_decompress(out, sizeof(out), compressed, sizeof(compressed));
+    TEST_ASSERT(len == 1 && out[0] == 'a',
+                "block types in every category: expected \"a\", got %zu bytes",
+                len);
+  }
+
+  {
+    /* All 256 literals have 8-bit codes. The code length code uses only
+     * one symbol (8), which takes zero bits (RFC 7932 section 3.5). */
+    static const uint8_t compressed[] = {0x62,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x00,
+                                         0x07,
+                                         0x00,
+                                         0x04,
+                                         0x08,
+                                         0x01,
+                                         0x18,
+                                         0x39,
+                                         0xd9,
+                                         0xbb,
+                                         0x00};
+    uint8_t out[16] = {0};
+    size_t len =
+        fio_brotli_decompress(out, sizeof(out), compressed, sizeof(compressed));
+    TEST_ASSERT(len == 4 && !FIO_MEMCMP(out, "brot", 4),
+                "single code length code: expected \"brot\", got %zu bytes",
+                len);
+  }
+
+  {
+    /* WBITS=10 (1008-byte window): 1090 literals, then distance 1009. That
+     * is within the output but beyond the window, so it refers to the static
+     * dictionary (RFC 7932 section 4): word 0 of length 4, "time". */
+    static const uint8_t compressed[] = {0xa1,
+                                         0x28,
+                                         0x22,
+                                         0x00,
+                                         0x00,
+                                         0x11,
+                                         0x16,
+                                         0xe2,
+                                         0xc5,
+                                         0x07,
+                                         0x00,
+                                         0x3d};
+    uint8_t expected[1094];
+    uint8_t out[1200] = {0};
+    FIO_MEMSET(expected, 'a', 1090);
+    FIO_MEMCPY(expected + 1090, "time", 4);
+    size_t len =
+        fio_brotli_decompress(out, sizeof(out), compressed, sizeof(compressed));
+    TEST_ASSERT(len == sizeof(expected) &&
+                    !FIO_MEMCMP(out, expected, sizeof(expected)),
+                "dictionary beyond the window: expected %zu bytes ending in "
+                "\"time\", got %zu bytes",
+                sizeof(expected),
+                len);
+  }
 }
 
 static void test_dictionary_tables_and_transforms(void) {
@@ -261,6 +337,33 @@ static void test_dictionary_tables_and_transforms(void) {
         fio___brotli_dict_ht[base].len || fio___brotli_dict_ht[base + 1].len,
         "dictionary hash table should populate a bucket for the chosen word");
   }
+}
+
+/* NBLTYPESx is a VarLenUint8 plus one (RFC 7932 section 9.2), the same
+ * encoding the compressor writes. */
+static void test_block_type_counts(void) {
+  fprintf(stderr, "Testing Brotli block type count decoding...\n");
+  uint32_t first_bad = 0, got = 0;
+  for (uint32_t count = 1; count <= 256; ++count) {
+    uint8_t buf[16] = {0};
+    fio___brotli_bw_s w;
+    fio___brotli_bw_init(&w, buf, sizeof(buf));
+    fio___brotli_write_varlen_uint8(&w, count - 1);
+    fio___brotli_bw_put(&w, 0x5A, 8); /* marker: the next field */
+    size_t len = fio___brotli_bw_finish(&w, buf);
+
+    fio___brotli_bits_s bits;
+    fio___brotli_bits_init(&bits, buf, len);
+    got = fio___brotli_read_nbltypes(&bits);
+    if (got != count || fio___brotli_bits_get(&bits, 8) != 0x5A) {
+      first_bad = count;
+      break;
+    }
+  }
+  TEST_ASSERT(!first_bad,
+              "block type count %u decoded as %u (or misaligned the stream)",
+              (unsigned)first_bad,
+              (unsigned)got);
 }
 
 static void test_api_edges_and_size_queries(void) {
@@ -488,6 +591,7 @@ int main(void) {
 
   test_reference_decode_vectors();
   test_dictionary_tables_and_transforms();
+  test_block_type_counts();
   test_api_edges_and_size_queries();
   test_quality_roundtrips();
   test_large_input_roundtrips();

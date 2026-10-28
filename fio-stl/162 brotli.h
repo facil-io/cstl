@@ -613,12 +613,25 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
 
   /* Build code-length Huffman table */
   uint32_t cl_table[1 << FIO___BROTLI_MAX_CL_LEN]; /* 32 entries */
-  if (!fio___brotli_build_table(cl_table,
-                                FIO___BROTLI_MAX_CL_LEN,
-                                cl_lengths,
-                                18,
-                                (uint32_t)(1U << FIO___BROTLI_MAX_CL_LEN)))
+  unsigned cl_used = 0, cl_only = 0;
+  for (unsigned i = 0; i < 18; i++) {
+    if (cl_lengths[i]) {
+      ++cl_used;
+      cl_only = i;
+    }
+  }
+  if (cl_used == 1) {
+    /* RFC 7932 section 3.5: a single used symbol has a zero-length code */
+    for (unsigned i = 0; i < (1U << FIO___BROTLI_MAX_CL_LEN); i++)
+      cl_table[i] = FIO___BROTLI_ENTRY_SYM(cl_only, 0);
+  } else if (!fio___brotli_build_table(
+                 cl_table,
+                 FIO___BROTLI_MAX_CL_LEN,
+                 cl_lengths,
+                 18,
+                 (uint32_t)(1U << FIO___BROTLI_MAX_CL_LEN))) {
     return 0;
+  }
 
   /* Read symbol code lengths using the code-length Huffman table.
    * Uses cumulative repeat mechanism per RFC 7932 / reference decoder:
@@ -963,6 +976,11 @@ FIO_SFUNC uint32_t fio___brotli_read_varlen_uint8(fio___brotli_bits_s *b) {
   return fio___brotli_bits_get(b, n) + (1U << n);
 }
 
+/** Read NBLTYPESx (RFC 7932 section 9.2): VarLenUint8 + 1, so 1-256. */
+FIO_SFUNC uint32_t fio___brotli_read_nbltypes(fio___brotli_bits_s *b) {
+  return fio___brotli_read_varlen_uint8(b) + 1;
+}
+
 /**
  * Decode insert-and-copy command symbol into insert_code, copy_code,
  * and dist_code_zero flag.
@@ -1236,40 +1254,21 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
     /* === Compressed meta-block === */
 
-    /* Read NBLTYPES for each category (L, I, D) */
+    /* Read NBLTYPES and block switch info for each category (L, I, D).
+     * Each category's codes follow its own NBLTYPES (RFC 7932 section 9.2) */
     uint32_t nbltypes[3];
-    for (int cat = 0; cat < 3; cat++) {
-      if (!fio___brotli_bits_get1(&bits)) {
-        nbltypes[cat] = 1;
-      } else {
-        nbltypes[cat] = fio___brotli_read_varlen_uint8(&bits) + 2;
-        if (nbltypes[cat] > 256)
-          return 0; /* RFC 7932: max 256 block types */
-      }
-    }
-
-    /* Read block switch info */
     fio___brotli_block_s blk_lit = {0}, blk_iac = {0}, blk_dist = {0};
-    blk_lit.num_types = nbltypes[0];
-    blk_iac.num_types = nbltypes[1];
-    blk_dist.num_types = nbltypes[2];
-
+    fio___brotli_block_s *blk_cat[3] = {&blk_lit, &blk_iac, &blk_dist};
     uint32_t blk_tables[6][FIO___BROTLI_HUFF_SIZE + 512];
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_lit,
-                                       blk_tables[0],
-                                       blk_tables[1]))
-      return 0;
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_iac,
-                                       blk_tables[2],
-                                       blk_tables[3]))
-      return 0;
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_dist,
-                                       blk_tables[4],
-                                       blk_tables[5]))
-      return 0;
+    for (int cat = 0; cat < 3; cat++) {
+      nbltypes[cat] = fio___brotli_read_nbltypes(&bits);
+      blk_cat[cat]->num_types = nbltypes[cat];
+      if (fio___brotli_read_block_switch(&bits,
+                                         blk_cat[cat],
+                                         blk_tables[cat * 2],
+                                         blk_tables[cat * 2 + 1]))
+        return 0;
+    }
 
     /* NPOSTFIX and NDIRECT */
     uint32_t npostfix = fio___brotli_bits_get(&bits, 2);
@@ -1461,6 +1460,9 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
       /* Decode distance */
       uint32_t distance;
+      /* Longer distances refer to the static dictionary (RFC 7932 section 4) */
+      uint32_t max_distance =
+          (uint32_t)((size_t)pos < (size_t)window_size ? pos : window_size);
       if (dist_code_zero) {
         distance = (uint32_t)dist_rb[(dist_rb_idx - 1) & 3];
       } else {
@@ -1533,14 +1535,14 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
         /* Update ring buffer (dist_sym 0 = last distance, not pushed;
          * static dictionary references also not pushed - RFC 7932 Sec 4) */
-        if (dist_sym != 0 && distance <= (uint32_t)pos) {
+        if (dist_sym != 0 && distance <= max_distance) {
           dist_rb[dist_rb_idx & 3] = (int32_t)distance;
           dist_rb_idx++;
         }
       }
 
       /* Copy from backward reference or static dictionary */
-      if (distance <= (uint32_t)pos) {
+      if (distance <= max_distance) {
         /* Normal backward reference */
         if (copy_len > meta_remaining) {
           goto err_free_all;
@@ -1570,9 +1572,7 @@ SFUNC size_t fio_brotli_decompress(void *out,
         /* Static dictionary reference (RFC 7932 Section 8).
          * The word length is determined by copy_len.
          * The word index and transform are derived from the distance. */
-        uint32_t max_dist =
-            (uint32_t)((size_t)pos < (size_t)window_size ? pos : window_size);
-        uint32_t dict_off = distance - max_dist - 1;
+        uint32_t dict_off = distance - max_distance - 1;
         uint32_t wlen = copy_len;
         if (wlen < 4 || wlen > 24 || fio___brotli_ndbits[wlen] == 0) {
           goto err_free_all;
