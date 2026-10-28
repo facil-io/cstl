@@ -81549,6 +81549,10 @@ FIO_SFUNC size_t fio___brotli_decompress(void *out,
                                                word,
                                                (int)wlen,
                                                (int)transform_id);
+        /* a transform can make the word longer than the rest of the block */
+        if ((uint32_t)tlen > meta_remaining) {
+          goto err_free_all;
+        }
         for (int ti = 0; ti < tlen; ti++) {
           if (pos >= out_len) {
             /* Buffer overflow during dict copy */

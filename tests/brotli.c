@@ -240,6 +240,28 @@ static void test_reference_decode_vectors(void) {
                                       compressed,
                                       sizeof(compressed));
   }
+
+  {
+    /* google/brotli q10. Its 20-byte prefix decodes to a static dictionary
+     * word that is longer than the rest of the meta-block. */
+    static const uint8_t compressed[] = {
+        0x1b, 0x25, 0x00, 0xf8, 0x45, 0xb7, 0x79, 0xbd, 0xde, 0xaf,
+        0xe8, 0x08, 0x41, 0x16, 0xe8, 0x08, 0x0a, 0x93, 0xc2, 0x25,
+        0x28, 0x05, 0xa3, 0xd8, 0x1b, 0xdf, 0x0d, 0x6b, 0x0e, 0xe1,
+        0xb0, 0xa7, 0x52, 0x8f, 0xba, 0xe3, 0x68, 0x2a};
+    static const char expected[] = "itcncinlscya es aetegnlridtvntoraedere";
+    uint8_t out[64] = {0};
+    size_t len =
+        fio_brotli_decompress(out, sizeof(out), compressed, sizeof(compressed));
+    TEST_ASSERT(len == sizeof(expected) - 1 &&
+                    !FIO_MEMCMP(out, expected, sizeof(expected) - 1),
+                "reference q10 text: expected %zu bytes, got %zu",
+                sizeof(expected) - 1,
+                len);
+    fio___brotli_assert_prefixes_fail("reference q10 text prefix",
+                                      compressed,
+                                      sizeof(compressed));
+  }
 }
 
 static void test_dictionary_tables_and_transforms(void) {
