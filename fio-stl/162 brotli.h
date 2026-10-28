@@ -963,6 +963,11 @@ FIO_SFUNC uint32_t fio___brotli_read_varlen_uint8(fio___brotli_bits_s *b) {
   return fio___brotli_bits_get(b, n) + (1U << n);
 }
 
+/** Read NBLTYPESx (RFC 7932 section 9.2): VarLenUint8 + 1, so 1-256. */
+FIO_SFUNC uint32_t fio___brotli_read_nbltypes(fio___brotli_bits_s *b) {
+  return fio___brotli_read_varlen_uint8(b) + 1;
+}
+
 /**
  * Decode insert-and-copy command symbol into insert_code, copy_code,
  * and dist_code_zero flag.
@@ -1238,15 +1243,8 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
     /* Read NBLTYPES for each category (L, I, D) */
     uint32_t nbltypes[3];
-    for (int cat = 0; cat < 3; cat++) {
-      if (!fio___brotli_bits_get1(&bits)) {
-        nbltypes[cat] = 1;
-      } else {
-        nbltypes[cat] = fio___brotli_read_varlen_uint8(&bits) + 2;
-        if (nbltypes[cat] > 256)
-          return 0; /* RFC 7932: max 256 block types */
-      }
-    }
+    for (int cat = 0; cat < 3; cat++)
+      nbltypes[cat] = fio___brotli_read_nbltypes(&bits);
 
     /* Read block switch info */
     fio___brotli_block_s blk_lit = {0}, blk_iac = {0}, blk_dist = {0};

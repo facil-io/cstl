@@ -263,6 +263,33 @@ static void test_dictionary_tables_and_transforms(void) {
   }
 }
 
+/* NBLTYPESx is a VarLenUint8 plus one (RFC 7932 section 9.2), the same
+ * encoding the compressor writes. */
+static void test_block_type_counts(void) {
+  fprintf(stderr, "Testing Brotli block type count decoding...\n");
+  uint32_t first_bad = 0, got = 0;
+  for (uint32_t count = 1; count <= 256; ++count) {
+    uint8_t buf[16] = {0};
+    fio___brotli_bw_s w;
+    fio___brotli_bw_init(&w, buf, sizeof(buf));
+    fio___brotli_write_varlen_uint8(&w, count - 1);
+    fio___brotli_bw_put(&w, 0x5A, 8); /* marker: the next field */
+    size_t len = fio___brotli_bw_finish(&w, buf);
+
+    fio___brotli_bits_s bits;
+    fio___brotli_bits_init(&bits, buf, len);
+    got = fio___brotli_read_nbltypes(&bits);
+    if (got != count || fio___brotli_bits_get(&bits, 8) != 0x5A) {
+      first_bad = count;
+      break;
+    }
+  }
+  TEST_ASSERT(!first_bad,
+              "block type count %u decoded as %u (or misaligned the stream)",
+              (unsigned)first_bad,
+              (unsigned)got);
+}
+
 static void test_api_edges_and_size_queries(void) {
   fprintf(stderr, "Testing Brotli API edge cases and size queries...\n");
 
@@ -488,6 +515,7 @@ int main(void) {
 
   test_reference_decode_vectors();
   test_dictionary_tables_and_transforms();
+  test_block_type_counts();
   test_api_edges_and_size_queries();
   test_quality_roundtrips();
   test_large_input_roundtrips();
