@@ -254,6 +254,36 @@ static void test_reference_decode_vectors(void) {
                 "single code length code: expected \"brot\", got %zu bytes",
                 len);
   }
+
+  {
+    /* WBITS=10 (1008-byte window): 1090 literals, then distance 1009. That
+     * is within the output but beyond the window, so it refers to the static
+     * dictionary (RFC 7932 section 4): word 0 of length 4, "time". */
+    static const uint8_t compressed[] = {0xa1,
+                                         0x28,
+                                         0x22,
+                                         0x00,
+                                         0x00,
+                                         0x11,
+                                         0x16,
+                                         0xe2,
+                                         0xc5,
+                                         0x07,
+                                         0x00,
+                                         0x3d};
+    uint8_t expected[1094];
+    uint8_t out[1200] = {0};
+    FIO_MEMSET(expected, 'a', 1090);
+    FIO_MEMCPY(expected + 1090, "time", 4);
+    size_t len =
+        fio_brotli_decompress(out, sizeof(out), compressed, sizeof(compressed));
+    TEST_ASSERT(len == sizeof(expected) &&
+                    !FIO_MEMCMP(out, expected, sizeof(expected)),
+                "dictionary beyond the window: expected %zu bytes ending in "
+                "\"time\", got %zu bytes",
+                sizeof(expected),
+                len);
+  }
 }
 
 static void test_dictionary_tables_and_transforms(void) {

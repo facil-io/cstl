@@ -81396,6 +81396,9 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
       /* Decode distance */
       uint32_t distance;
+      /* Longer distances refer to the static dictionary (RFC 7932 section 4) */
+      uint32_t max_distance =
+          (uint32_t)((size_t)pos < (size_t)window_size ? pos : window_size);
       if (dist_code_zero) {
         distance = (uint32_t)dist_rb[(dist_rb_idx - 1) & 3];
       } else {
@@ -81468,14 +81471,14 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
         /* Update ring buffer (dist_sym 0 = last distance, not pushed;
          * static dictionary references also not pushed - RFC 7932 Sec 4) */
-        if (dist_sym != 0 && distance <= (uint32_t)pos) {
+        if (dist_sym != 0 && distance <= max_distance) {
           dist_rb[dist_rb_idx & 3] = (int32_t)distance;
           dist_rb_idx++;
         }
       }
 
       /* Copy from backward reference or static dictionary */
-      if (distance <= (uint32_t)pos) {
+      if (distance <= max_distance) {
         /* Normal backward reference */
         if (copy_len > meta_remaining) {
           goto err_free_all;
@@ -81505,9 +81508,7 @@ SFUNC size_t fio_brotli_decompress(void *out,
         /* Static dictionary reference (RFC 7932 Section 8).
          * The word length is determined by copy_len.
          * The word index and transform are derived from the distance. */
-        uint32_t max_dist =
-            (uint32_t)((size_t)pos < (size_t)window_size ? pos : window_size);
-        uint32_t dict_off = distance - max_dist - 1;
+        uint32_t dict_off = distance - max_distance - 1;
         uint32_t wlen = copy_len;
         if (wlen < 4 || wlen > 24 || fio___brotli_ndbits[wlen] == 0) {
           goto err_free_all;
