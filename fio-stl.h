@@ -81021,10 +81021,14 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
   return total;
 }
 
-SFUNC size_t fio_brotli_decompress(void *out,
-                                   size_t out_len,
-                                   const void *in,
-                                   size_t in_len) {
+/* Same as fio_brotli_decompress. After a full decode, `in_used` (if not NULL)
+ * is set to the byte length of the stream, which ends with the last
+ * meta-block. Any further input bytes are ignored. */
+FIO_SFUNC size_t fio___brotli_decompress(void *out,
+                                         size_t out_len,
+                                         const void *in,
+                                         size_t in_len,
+                                         size_t *in_used) {
   if (!in || !in_len)
     return 0;
 
@@ -81571,7 +81575,18 @@ SFUNC size_t fio_brotli_decompress(void *out,
     return 0;
   }
 
+  /* unread whole bytes in the bit buffer are past the end of the stream */
+  if (in_used)
+    *in_used =
+        (size_t)(bits.src - (const uint8_t *)in) - (size_t)(bits.avail >> 3);
   return pos;
+}
+
+SFUNC size_t fio_brotli_decompress(void *out,
+                                   size_t out_len,
+                                   const void *in,
+                                   size_t in_len) {
+  return fio___brotli_decompress(out, out_len, in, in_len, NULL);
 }
 
 /* *****************************************************************************
@@ -84349,12 +84364,7 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
   } /* end meta-block chunk loop */
 #undef FIO___BROTLI_MAX_LIT_TREES
 
-  /* Write 8 trailing zero bits so the decompressor's bit reader always has
-   * at least root_bits (8) bits available when decoding the last symbol.
-   * The decompressor stops at meta_remaining=0 and never reads past the
-   * data, so these bits are harmless padding. */
-  fio___brotli_bw_put(&w, 0, 8);
-
+  /* No padding past the final byte: standard decoders reject trailing input. */
   size_t result = fio___brotli_bw_finish(&w, out);
 
   FIO_MEM_FREE(tokens, token_alloc);
