@@ -208,6 +208,24 @@ static void test_reference_decode_vectors(void) {
             sizeof(expected) - 1,
         "reference q11 html: counting mode mismatch");
   }
+
+  /* The vectors below were built by hand and checked with libbrotlidec. */
+
+  {
+    /* Two block types in each category: every NBLTYPES is followed by the
+     * block type code, the block count code and the first block count of
+     * its own category (RFC 7932 section 9.2). */
+    static const uint8_t compressed[] = {
+        0x02, 0x00, 0x20, 0x82, 0xc8, 0x00, 0x00, 0x00, 0x11,
+        0x44, 0x06, 0x00, 0x00, 0x88, 0x20, 0x32, 0x00, 0x00,
+        0x00, 0x00, 0x44, 0x58, 0x20, 0x10, 0x08, 0x04, 0x00};
+    uint8_t out[16] = {0};
+    size_t len =
+        fio_brotli_decompress(out, sizeof(out), compressed, sizeof(compressed));
+    TEST_ASSERT(len == 1 && out[0] == 'a',
+                "block types in every category: expected \"a\", got %zu bytes",
+                len);
+  }
 }
 
 static void test_dictionary_tables_and_transforms(void) {

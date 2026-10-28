@@ -81177,33 +81177,21 @@ SFUNC size_t fio_brotli_decompress(void *out,
 
     /* === Compressed meta-block === */
 
-    /* Read NBLTYPES for each category (L, I, D) */
+    /* Read NBLTYPES and block switch info for each category (L, I, D).
+     * Each category's codes follow its own NBLTYPES (RFC 7932 section 9.2) */
     uint32_t nbltypes[3];
-    for (int cat = 0; cat < 3; cat++)
-      nbltypes[cat] = fio___brotli_read_nbltypes(&bits);
-
-    /* Read block switch info */
     fio___brotli_block_s blk_lit = {0}, blk_iac = {0}, blk_dist = {0};
-    blk_lit.num_types = nbltypes[0];
-    blk_iac.num_types = nbltypes[1];
-    blk_dist.num_types = nbltypes[2];
-
+    fio___brotli_block_s *blk_cat[3] = {&blk_lit, &blk_iac, &blk_dist};
     uint32_t blk_tables[6][FIO___BROTLI_HUFF_SIZE + 512];
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_lit,
-                                       blk_tables[0],
-                                       blk_tables[1]))
-      return 0;
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_iac,
-                                       blk_tables[2],
-                                       blk_tables[3]))
-      return 0;
-    if (fio___brotli_read_block_switch(&bits,
-                                       &blk_dist,
-                                       blk_tables[4],
-                                       blk_tables[5]))
-      return 0;
+    for (int cat = 0; cat < 3; cat++) {
+      nbltypes[cat] = fio___brotli_read_nbltypes(&bits);
+      blk_cat[cat]->num_types = nbltypes[cat];
+      if (fio___brotli_read_block_switch(&bits,
+                                         blk_cat[cat],
+                                         blk_tables[cat * 2],
+                                         blk_tables[cat * 2 + 1]))
+        return 0;
+    }
 
     /* NPOSTFIX and NDIRECT */
     uint32_t npostfix = fio___brotli_bits_get(&bits, 2);
