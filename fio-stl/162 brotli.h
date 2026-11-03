@@ -265,6 +265,22 @@ FIO_IFUNC uint32_t fio___brotli_bits_get1(fio___brotli_bits_s *b) {
   return v;
 }
 
+/* Skip to the next byte boundary. RFC 7932 requires zero padding bits.
+ * Returns -1 on non-zero padding, 0 otherwise. */
+FIO_IFUNC int fio___brotli_bits_align(fio___brotli_bits_s *b) {
+  unsigned n = b->avail & 7; /* fills add whole bytes: rest of current byte */
+  uint32_t pad = fio___brotli_bits_peek(b, n);
+  fio___brotli_bits_drop(b, n);
+  return 0 - (pad != 0);
+}
+
+/* Return buffered whole bytes to the input (must be byte-aligned). */
+FIO_IFUNC void fio___brotli_bits_unread(fio___brotli_bits_s *b) {
+  b->src -= b->avail >> 3;
+  b->bits = 0;
+  b->avail = 0;
+}
+
 /* *****************************************************************************
 Huffman table builder - builds two-level lookup tables
 ***************************************************************************** */
@@ -503,8 +519,9 @@ FIO_IFUNC uint32_t fio___brotli_huff_decode(fio___brotli_bits_s *b,
   fio___brotli_bits_drop(b, root_bits);
   fio___brotli_bits_fill(b);
   unsigned sub_bits = FIO___BROTLI_ENTRY_SUB_BITS(entry);
-  if (b->avail < sub_bits)
-    return FIO___BROTLI_HUFF_ERR;
+  /* Bits past `avail` are zero (or true future bits), so peeking the full
+   * subtable width is safe; only the entry's actual codelen must be present
+   * (checked below). Requiring `sub_bits` here rejected valid streams. */
   uint32_t sub_off = FIO___BROTLI_ENTRY_SUB_OFF(entry);
   uint32_t sub_idx = fio___brotli_bits_peek(b, sub_bits);
   entry = table[sub_off + sub_idx];
@@ -649,6 +666,9 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
       cl_only = i;
     }
   }
+  /* RFC 7932 Section 3.5: the code must be complete (or a single symbol) */
+  if (cl_used != 1 && cl_space)
+    return 0;
   if (cl_used == 1) {
     /* RFC 7932 section 3.5: a single used symbol has a zero-length code */
     for (unsigned i = 0; i < (1U << FIO___BROTLI_MAX_CL_LEN); i++)
@@ -712,8 +732,9 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
       if (b->error)
         return 0;
       uint32_t repeat_delta = repeat - old_repeat;
-      /* Apply repeat_delta symbols */
-      for (uint32_t r = 0; r < repeat_delta && sym_count < alphabet_size; r++) {
+      if (repeat_delta > alphabet_size - sym_count)
+        return 0; /* repeat overflows the alphabet */
+      for (uint32_t r = 0; r < repeat_delta; r++) {
         lengths[sym_count++] = (uint8_t)new_len;
         if (new_len)
           space -= (32768U >> new_len);
@@ -721,6 +742,9 @@ FIO_SFUNC uint32_t fio___brotli_read_prefix_code(fio___brotli_bits_s *b,
     }
   }
 
+  /* RFC 7932 Section 3.5: the code must be complete (Kraft sum == 1) */
+  if (space)
+    return 0;
   /* Fill remaining with zeros */
   while (sym_count < alphabet_size)
     lengths[sym_count++] = 0;
@@ -868,7 +892,9 @@ FIO_SFUNC int fio___brotli_read_context_map(fio___brotli_bits_s *b,
     } else if (sym <= rlemax) {
       /* RLE zero: repeat 0 for (1 << sym) + read_bits(sym) times */
       uint32_t rep = (1U << sym) + fio___brotli_bits_get(b, sym);
-      for (uint32_t r = 0; r < rep && i < map_size; r++)
+      if (rep > map_size - i)
+        return -1; /* run overflows the context map */
+      for (uint32_t r = 0; r < rep; r++)
         map[i++] = 0;
     } else {
       uint32_t val = sym - rlemax;
@@ -1057,6 +1083,61 @@ FIO_SFUNC void fio___brotli_decode_iac(uint32_t cmd,
   *dist_code_zero = dz[block];
 }
 
+/* Meta-block header kinds (fio___brotli_read_mb_header results). */
+#define FIO___BROTLI_MB_ERR  0 /* invalid or truncated header */
+#define FIO___BROTLI_MB_SKIP 1 /* ISLASTEMPTY or metadata (already skipped) */
+#define FIO___BROTLI_MB_RAW  2 /* uncompressed: input unread, src at data */
+#define FIO___BROTLI_MB_CMP  3 /* compressed: bit reader at the body */
+
+/**
+ * Read one meta-block header (RFC 7932 Section 9.2), rejecting non-zero
+ * reserved / padding bits and exuberant (zero high) length nibbles / bytes.
+ * Metadata blocks are skipped. Sets `*is_last` and `*mlen`.
+ */
+FIO_SFUNC unsigned fio___brotli_read_mb_header(fio___brotli_bits_s *b,
+                                               int *is_last,
+                                               uint32_t *mlen) {
+  fio___brotli_bits_fill(b);
+  *is_last = (int)fio___brotli_bits_get1(b);
+  *mlen = 0;
+  if (*is_last && fio___brotli_bits_get1(b)) /* ISLASTEMPTY */
+    return b->error ? FIO___BROTLI_MB_ERR : FIO___BROTLI_MB_SKIP;
+  uint32_t mnibbles = fio___brotli_bits_get(b, 2);
+  if (mnibbles == 3) { /* metadata (allowed with ISLAST as well) */
+    if (fio___brotli_bits_get1(b))
+      return FIO___BROTLI_MB_ERR; /* reserved bit */
+    uint32_t nbytes = fio___brotli_bits_get(b, 2);
+    size_t skip = 0;
+    if (nbytes) {
+      uint32_t v = fio___brotli_bits_get(b, nbytes * 8);
+      if (nbytes > 1 && !(v >> ((nbytes - 1) * 8)))
+        return FIO___BROTLI_MB_ERR; /* exuberant MSKIPLEN byte */
+      skip = (size_t)v + 1;
+    }
+    if (fio___brotli_bits_align(b) || b->error)
+      return FIO___BROTLI_MB_ERR;
+    fio___brotli_bits_unread(b);
+    if (skip > (size_t)(b->end - b->src))
+      return FIO___BROTLI_MB_ERR;
+    b->src += skip;
+    return FIO___BROTLI_MB_SKIP;
+  }
+  uint32_t nibbles = mnibbles + 4;
+  uint32_t v = fio___brotli_bits_get(b, nibbles * 4);
+  if (nibbles > 4 && !(v >> ((nibbles - 1) * 4)))
+    return FIO___BROTLI_MB_ERR; /* exuberant MLEN nibble */
+  *mlen = v + 1;
+  if (!*is_last && fio___brotli_bits_get1(b)) { /* ISUNCOMPRESSED */
+    if (fio___brotli_bits_align(b) || b->error)
+      return FIO___BROTLI_MB_ERR;
+    fio___brotli_bits_unread(b);
+    if (*mlen > (size_t)(b->end - b->src))
+      return FIO___BROTLI_MB_ERR;
+    return FIO___BROTLI_MB_RAW;
+  }
+  return b->error ? FIO___BROTLI_MB_ERR : FIO___BROTLI_MB_CMP;
+}
+
 /**
  * Scan remaining meta-block headers in a Brotli stream, summing MLEN values.
  * Used after buffer overflow to determine total required output size.
@@ -1067,59 +1148,14 @@ FIO_SFUNC size_t fio___brotli_scan_remaining_mlen(fio___brotli_bits_s *bits) {
   size_t total = 0;
   int is_last = 0;
   while (!is_last) {
-    fio___brotli_bits_fill(bits);
-    is_last = (int)fio___brotli_bits_get1(bits);
-
-    /* ISLASTEMPTY */
-    if (is_last && fio___brotli_bits_get1(bits))
-      break;
-    if (bits->error)
-      return 0;
-
-    /* Meta-block length (MLEN) */
-    uint32_t mnibbles = fio___brotli_bits_get(bits, 2);
-    if (bits->error)
-      return 0;
-    if (mnibbles == 3) {
-      /* Metadata or empty meta-block */
-      if (!is_last) {
-        if (fio___brotli_bits_get1(bits))
-          return 0; /* reserved bit */
-        uint32_t mskipbytes = fio___brotli_bits_get(bits, 2);
-        if (mskipbytes > 0) {
-          uint32_t mskiplen = fio___brotli_bits_get(bits, mskipbytes * 8) + 1;
-          if (bits->avail & 7)
-            fio___brotli_bits_drop(bits, bits->avail & 7);
-          bits->src -= bits->avail / 8;
-          if (bits->error || mskiplen > (size_t)(bits->end - bits->src))
-            return 0;
-          bits->src += mskiplen;
-          bits->bits = 0;
-          bits->avail = 0;
-        } else {
-          if (bits->avail & 7)
-            fio___brotli_bits_drop(bits, bits->avail & 7);
-        }
-      }
-      continue;
-    }
-
-    uint32_t mlen_nibbles = mnibbles + 4;
-    uint32_t mlen = fio___brotli_bits_get(bits, mlen_nibbles * 4) + 1;
-    if (bits->error || mlen > SIZE_MAX - total)
+    uint32_t mlen;
+    unsigned kind = fio___brotli_read_mb_header(bits, &is_last, &mlen);
+    if (kind == FIO___BROTLI_MB_ERR || mlen > SIZE_MAX - total)
       return 0;
     total += mlen;
-
-    /* Check for uncompressed meta-block */
-    if (!is_last && fio___brotli_bits_get1(bits)) {
-      /* Uncompressed: skip MLEN raw bytes */
-      if (bits->avail & 7)
-        fio___brotli_bits_drop(bits, bits->avail & 7);
-      bits->src -= (bits->avail / 8);
-      bits->bits = 0;
-      bits->avail = 0;
-      if (bits->error || mlen > (size_t)(bits->end - bits->src))
-        return 0;
+    if (kind == FIO___BROTLI_MB_SKIP)
+      continue;
+    if (kind == FIO___BROTLI_MB_RAW) {
       bits->src += mlen;
       continue;
     }
@@ -1227,57 +1263,13 @@ SFUNC size_t fio_brotli_decompress(void *out,
   /* Process meta-blocks */
   int is_last = 0;
   while (!is_last) {
-    fio___brotli_bits_fill(&bits);
-
-    is_last = (int)fio___brotli_bits_get1(&bits);
-
-    /* ISLASTEMPTY */
-    if (is_last && fio___brotli_bits_get1(&bits))
-      break;
-
-    /* Meta-block length (MLEN) */
-    uint32_t mnibbles = fio___brotli_bits_get(&bits, 2);
-    if (bits.error)
+    uint32_t mlen;
+    unsigned kind = fio___brotli_read_mb_header(&bits, &is_last, &mlen);
+    if (kind == FIO___BROTLI_MB_ERR)
       return 0;
-    if (mnibbles == 3) {
-      /* Metadata or empty meta-block */
-      if (!is_last) {
-        if (fio___brotli_bits_get1(&bits))
-          return 0; /* reserved bit */
-        uint32_t mskipbytes = fio___brotli_bits_get(&bits, 2);
-        if (mskipbytes > 0) {
-          uint32_t mskiplen = fio___brotli_bits_get(&bits, mskipbytes * 8) + 1;
-          if (bits.avail & 7)
-            fio___brotli_bits_drop(&bits, bits.avail & 7);
-          bits.src -= bits.avail / 8;
-          if (bits.error || mskiplen > (size_t)(bits.end - bits.src))
-            return 0;
-          bits.src += mskiplen;
-          bits.bits = 0;
-          bits.avail = 0;
-        } else {
-          if (bits.avail & 7)
-            fio___brotli_bits_drop(&bits, bits.avail & 7);
-        }
-      }
+    if (kind == FIO___BROTLI_MB_SKIP)
       continue;
-    }
-
-    uint32_t mlen_nibbles = mnibbles + 4;
-    uint32_t mlen = fio___brotli_bits_get(&bits, mlen_nibbles * 4) + 1;
-    if (bits.error)
-      return 0;
-
-    /* Check for uncompressed meta-block */
-    if (!is_last && fio___brotli_bits_get1(&bits)) {
-      /* Align to byte boundary and push back unused bits */
-      if (bits.avail & 7)
-        fio___brotli_bits_drop(&bits, bits.avail & 7);
-      bits.src -= (bits.avail / 8);
-      bits.bits = 0;
-      bits.avail = 0;
-      if (bits.error || mlen > (size_t)(bits.end - bits.src))
-        return 0;
+    if (kind == FIO___BROTLI_MB_RAW) {
       if (mlen > out_len - pos) {
         /* Buffer overflow on uncompressed meta-block.
          * Add remaining bytes and scan subsequent headers. */
@@ -1674,7 +1666,10 @@ SFUNC size_t fio_brotli_decompress(void *out,
     return 0;
   }
 
-  return bits.error ? 0 : pos;
+  /* Bits after the last meta-block, up to the byte boundary, must be zero. */
+  if (fio___brotli_bits_align(&bits) || bits.error)
+    return 0;
+  return pos;
 }
 
 /* *****************************************************************************
@@ -2884,13 +2879,17 @@ FIO_SFUNC void fio___brotli_dict_ht_build(void) {
 FIO_SFUNC uint32_t fio___brotli_dict_find(const uint8_t *src,
                                           uint32_t src_len,
                                           uint32_t pos,
+                                          size_t stream_pos,
                                           uint32_t window_size,
                                           uint32_t *out_copy_len,
                                           uint32_t *out_distance,
                                           int32_t *out_score) {
   if (pos + 4 > src_len)
     return 0;
-  uint32_t max_backward = (pos < window_size) ? pos : window_size;
+  /* RFC 7932 Section 8: max_backward depends on the absolute stream position
+   * (not the chunk-local `pos`), since decoders track total output. */
+  uint32_t max_backward =
+      (stream_pos < (size_t)window_size) ? (uint32_t)stream_pos : window_size;
   uint32_t h = fio___brotli_dict_hash4(src + pos);
   uint32_t base = h * 2;
   uint32_t best_len = 0;
@@ -3534,6 +3533,7 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
               uint32_t dict_len = fio___brotli_dict_find(src,
                                                          src_len,
                                                          pos,
+                                                         chunk_off + pos,
                                                          window_size,
                                                          &dict_copy_len,
                                                          &dict_dist,
@@ -4077,8 +4077,10 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
           if (bs_remaining > 0)
             bs_remaining--;
         } else if (use_context_modeling) {
-          uint8_t p1 = p > 0 ? src[p - 1] : 0;
-          uint8_t p2 = p > 1 ? src[p - 2] : 0;
+          /* p1/p2 span meta-blocks: use the absolute stream position */
+          size_t ap = chunk_off + p;
+          uint8_t p1 = ap > 0 ? in_bytes[ap - 1] : 0;
+          uint8_t p2 = ap > 1 ? in_bytes[ap - 2] : 0;
           uint32_t ctx =
               (uint32_t)fio___brotli_context_lut[cmode * 512 + p1] |
               (uint32_t)fio___brotli_context_lut[cmode * 512 + 256 + p2];
@@ -4454,8 +4456,10 @@ SFUNC size_t fio_brotli_compress FIO_NOOP(void *out,
           if (bs_remaining > 0)
             bs_remaining--;
         } else if (use_context_modeling) {
-          uint8_t p1 = p > 0 ? src[p - 1] : 0;
-          uint8_t p2 = p > 1 ? src[p - 2] : 0;
+          /* p1/p2 span meta-blocks: use the absolute stream position */
+          size_t ap = chunk_off + p;
+          uint8_t p1 = ap > 0 ? in_bytes[ap - 1] : 0;
+          uint8_t p2 = ap > 1 ? in_bytes[ap - 2] : 0;
           uint32_t ctx =
               (uint32_t)fio___brotli_context_lut[cmode * 512 + p1] |
               (uint32_t)fio___brotli_context_lut[cmode * 512 + 256 + p2];
@@ -4525,6 +4529,10 @@ Cleanup
 
 #undef FIO___BROTLI_HUFF_BITS
 #undef FIO___BROTLI_HUFF_SIZE
+#undef FIO___BROTLI_MB_ERR
+#undef FIO___BROTLI_MB_SKIP
+#undef FIO___BROTLI_MB_RAW
+#undef FIO___BROTLI_MB_CMP
 #undef FIO___BROTLI_HUFF_MASK
 #undef FIO___BROTLI_MAX_CODE_LEN
 #undef FIO___BROTLI_MAX_CL_LEN

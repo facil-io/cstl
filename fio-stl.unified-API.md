@@ -21003,6 +21003,8 @@ fio_buf_info_s key;
 fio_buf_info_s cert;
 fio_buf_info_s trust;
 fio_buf_info_s pass;
+/** The URL query without the TLS hints at its head / tail (see below). */
+fio_buf_info_s query;
 bool tls;
 } fio_url_tls_info_s
 ```
@@ -21121,6 +21123,19 @@ i.e.:
     https://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
     wss://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
     tcp://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+
+The returned `query` omits the TLS hints at the head / tail of the URL query,
+so it can be forwarded to a peer, i.e.: `u.query = fio_url_is_tls(u).query;`
+Hints in the middle of the query are read and kept (pass-through for
+application keys with colliding names).
+
+Only hints actually used are omitted: `tls` / `ssl` always; `trust` when it
+has a value; `key` / `cert` only when both are set; `pass` / `password` only
+alongside that pair. i.e.:
+
+    ?tls&page=1&trust=sys   => query: "page=1"
+    ?page=1&tls&sort=a      => query: "page=1&tls&sort=a" (TLS: true)
+    ?key=API_KEY            => query: "key=API_KEY" (no cert, not a hint)
 
 _Symbol type:_ `function`
 

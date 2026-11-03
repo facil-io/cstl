@@ -95,6 +95,8 @@ typedef struct {
   fio_buf_info_s cert;
   fio_buf_info_s trust;
   fio_buf_info_s pass;
+  /** The URL query without the TLS hints at its head / tail (see below). */
+  fio_buf_info_s query;
   bool tls;
 } fio_url_tls_info_s;
 
@@ -143,6 +145,19 @@ typedef struct {
  *     https://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
  *     wss://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
  *     tcp://example.com/?key=key_file_or_env_var&cert=cert_file_or_env_var&pass=key_password
+ *
+ * The returned `query` omits the TLS hints at the head / tail of the URL query,
+ * so it can be forwarded to a peer, i.e.: `u.query = fio_url_is_tls(u).query;`
+ * Hints in the middle of the query are read and kept (pass-through for
+ * application keys with colliding names).
+ *
+ * Only hints actually used are omitted: `tls` / `ssl` always; `trust` when it
+ * has a value; `key` / `cert` only when both are set; `pass` / `password` only
+ * alongside that pair. i.e.:
+ *
+ *     ?tls&page=1&trust=sys   => query: "page=1"
+ *     ?page=1&tls&sort=a      => query: "page=1&tls&sort=a" (TLS: true)
+ *     ?key=API_KEY            => query: "key=API_KEY" (no cert, not a hint)
  */
 SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u);
 /* *****************************************************************************
@@ -473,9 +488,35 @@ finish:
   return r;
 }
 
+/* Tests if a query element is a TLS hint used by `fio_url_is_tls`. */
+FIO_SFUNC bool fio___url_is_tls_hint(fio_url_query_each_s *i,
+                                     fio_url_tls_info_s *r) {
+  uint32_t name;
+  switch (i->name.len) {
+  case 3:
+    name = fio_buf2u24_le(i->name.buf) | 0x202020U;
+    return name == fio_buf2u24_le("tls") || name == fio_buf2u24_le("ssl") ||
+           (r->key.len && name == fio_buf2u24_le("key"));
+  case 4:
+    name = fio_buf2u32u(i->name.buf) | 0x20202020UL;
+    return (r->cert.len && name == fio_buf2u32u("cert")) ||
+           (r->pass.len && name == fio_buf2u32u("pass"));
+  case 5:
+    return r->trust.len && i->value.len &&
+           (fio_buf2u32u(i->name.buf) | 0x20202020UL) ==
+               fio_buf2u32u("trus") &&
+           (i->name.buf[4] | 0x20) == 't';
+  case 8:
+    return r->pass.len && (fio_buf2u64u(i->name.buf) |
+                           0x2020202020202020ULL) == fio_buf2u64u("password");
+  }
+  return 0;
+}
+
 /* Returns TLS data associated with the URL. */
 SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
-  fio_url_tls_info_s r = {0};
+  fio_url_tls_info_s r = {.query = u.query};
+  bool hints = 0; /* `tls` / `ssl` keys don't leave other traces */
   switch (u.scheme.len) {
   case 3: /* wss || tls || ssl */
     r.tls =
@@ -524,7 +565,7 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
           if (i.value.len)
             key = i.value;
         } else if (name == wrd_tls || name == wrd_ssl) {
-          r.tls = 1;
+          r.tls = hints = 1;
           if (i.value.len && !(i.value.len == 1 && i.value.buf[0] == '1') &&
               !(i.value.len == 4 &&
                 (fio_buf2u32u(i.value.buf) | 0x20202020UL) == wrd_true))
@@ -555,6 +596,33 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
       r.trust = trust;
       r.tls = 1;
     }
+    if (hints | (r.key.len != 0) | (r.trust.len != 0)) {
+      /* omit the hints at the head / tail of the query */
+      char *const end = u.query.buf + u.query.len;
+      char *head = u.query.buf; /* first byte after the leading hints */
+      char *tail = NULL;        /* first byte of the trailing hints */
+      bool leading = 1;
+      FIO_URL_QUERY_EACH(u.query, i) {
+        if (!fio___url_is_tls_hint(&i, &r)) {
+          leading = 0;
+          tail = NULL;
+          continue;
+        }
+        if (leading)
+          head = i.private___.buf ? i.private___.buf : end;
+        else if (!tail)
+          tail = i.name.buf;
+      }
+      if (leading) /* all hints */
+        tail = head = end;
+      else if (!tail)
+        tail = end;
+      else
+        --tail; /* the '&' before the trailing hints */
+      r.query = FIO_BUF_INFO2(head, (size_t)(tail - head));
+      if (!r.query.len)
+        r.query.buf = NULL;
+    }
   }
   FIO_LOG_DDEBUG2(
       "URL TLS detection: %s (key: %u, cert: %u, trust: %u, pass: %u)",
@@ -565,6 +633,7 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u) {
       (unsigned)!!r.pass.len);
   return r;
 }
+
 /* *****************************************************************************
 FIO_URL - Cleanup
 ***************************************************************************** */

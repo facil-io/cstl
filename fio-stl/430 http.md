@@ -580,8 +580,11 @@ fio_http_connect("https://example.com/", NULL, .on_http = on_response,
                  .verify = 1);
 ```
 
-The `trust=sys` / `trust=<ca-file>` URL query also works, but the URL query
-is sent to the server as the request query unless `h` already has one.
+The `trust=sys` / `trust=<ca-file>` URL query also works. The URL query is
+sent to the server as the request query (unless `h` already has one), with
+the TLS hints at its head / tail omitted (see `fio_url_is_tls`). Hints in the
+middle of the query are sent as-is, so place TLS hints first or last, e.g.,
+`https://example.com/?page=1&trust=sys` sends `?page=1`.
 
 **Note**: interim `1xx` responses other than `101` (e.g., `100 Continue`,
 `103 Early Hints`) are skipped (RFC 9110 §15.2). `on_http` runs once, for

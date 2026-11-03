@@ -134,6 +134,8 @@ SFUNC fio_io_s *fio_http_connect FIO_NOOP(const char *url,
   fio_url_s u = (fio_url_s){0};
   if (url)
     u = fio_url_parse(url, FIO_STRLEN(url));
+  const fio_url_tls_info_s tls_info = fio_url_is_tls(u);
+  u.query = tls_info.query; /* TLS hints at the head / tail aren't sent */
   /* RFC 9110 §7.2: Host is the URL authority (host [":" port], no userinfo),
    * a slice of `url`: restore the `[IPv6]` brackets the parser strips, then
    * extend to the end of the port (which follows the host). */
@@ -192,7 +194,7 @@ SFUNC fio_io_s *fio_http_connect FIO_NOOP(const char *url,
       const int err = fio_string_write2(
           &origin,
           FIO_STRING_ALLOC_COPY,
-          FIO_STRING_WRITE_STR2("https", (size_t)(4 + fio_url_is_tls(u).tls)),
+          FIO_STRING_WRITE_STR2("https", (size_t)(4 + tls_info.tls)),
           FIO_STRING_WRITE_STR2("://", 3U),
           FIO_STRING_WRITE_STR_INFO(authority));
       if (!err) /* the header map copies the value */

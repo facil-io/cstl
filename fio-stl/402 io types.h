@@ -291,7 +291,7 @@ FIO_SFUNC void fio___io_protocol_init(fio_io_protocol_s *pr, _Bool has_tls) {
   if (!pr->io_functions.free_context)
     pr->io_functions.free_context = io_fn.free_context;
   if (!pr->io_functions.dup_context)
-    pr->io_functions.dup_context = fio___io_func_default_dup_context;
+    pr->io_functions.dup_context = io_fn.dup_context;
   if (!pr->io_functions.start)
     pr->io_functions.start = io_fn.start;
   if (!pr->io_functions.read)

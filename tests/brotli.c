@@ -712,6 +712,249 @@ static void test_security_regressions(void) {
   }
 }
 
+/* *****************************************************************************
+RFC 7932 conformance regressions (2026-11 audit vs Google Brotli 1.1.0)
+
+F1: a valid code longer than the root table width at the very end of input
+    was rejected (subtable lookup required the full subtable width).
+F2: q5/q6 dictionary references in chunks after the first (>16MB input) used
+    the chunk-local position for max_backward (corrupt / invalid output).
+F3: invalid streams (padding, incomplete codes, overflowing repeats, reserved
+    bit, exuberant nibbles, ISLAST metadata) were accepted. Each vector below
+    is rejected by the reference decoder.
+***************************************************************************** */
+
+static void test_rfc_conformance_regressions(void) {
+  fprintf(stderr, "Testing RFC 7932 conformance regressions...\n");
+  { /* F1: 9-bit code using the last 9 bits of input (root table = 8 bits) */
+    static const uint8_t lengths[11] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10};
+    static const uint8_t in[2] = {0x80, 0x7F}; /* 7 pad bits, 11111111 0 */
+    uint32_t table[1024];
+    fio___brotli_bits_s bits;
+    TEST_ASSERT(fio___brotli_build_table(table,
+                                         8,
+                                         lengths,
+                                         11,
+                                         sizeof(table) / sizeof(table[0])),
+                "F1 table build");
+    fio___brotli_bits_init(&bits, in, sizeof(in));
+    fio___brotli_bits_fill(&bits);
+    fio___brotli_bits_drop(&bits, 7);
+    TEST_ASSERT(fio___brotli_huff_decode(&bits, table, 8) == 8 && !bits.error &&
+                    !bits.avail,
+                "F1 long code at end of input must decode");
+  }
+  { /* F2: >16MB word text at q5/q6 (dictionary hits in later chunks) */
+    static const char *words[] = {"the ",
+                                  "people ",
+                                  "world ",
+                                  "<div>",
+                                  "time. ",
+                                  "of ",
+                                  "and ",
+                                  "http://example.com/",
+                                  "ation "};
+    size_t n = ((size_t)17 << 20) + 17;
+    size_t bound = fio_brotli_compress_bound(n);
+    uint8_t *src = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, n, 0);
+    uint8_t *comp = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, bound, 0);
+    uint8_t *out = (uint8_t *)FIO_MEM_REALLOC(NULL, 0, n, 0);
+    TEST_ASSERT(src && comp && out, "F2 allocation");
+    if (src && comp && out) {
+      uint64_t r = 7;
+      for (size_t i = 0; i < n;) {
+        r = r * 6364136223846793005ULL + 1442695040888963407ULL;
+        const char *w = words[(r >> 33) % 9];
+        while (*w && i < n)
+          src[i++] = (uint8_t)*w++;
+      }
+      for (int q = 5; q <= 6; ++q) {
+        size_t clen = fio_brotli_compress(comp, bound, src, n, q);
+        size_t dlen = clen ? fio_brotli_decompress(out, n, comp, clen) : 0;
+        TEST_ASSERT(dlen == n && !FIO_MEMCMP(out, src, n),
+                    "F2 q%d >16MB text roundtrip (got %zu of %zu)",
+                    q,
+                    dlen,
+                    n);
+      }
+    }
+    if (out)
+      FIO_MEM_FREE(out, n);
+    if (comp)
+      FIO_MEM_FREE(comp, bound);
+    if (src)
+      FIO_MEM_FREE(src, n);
+  }
+  { /* Uncompressed "x", then an ISLAST metadata block with 2 bytes ("ab") */
+    uint8_t buf[16], out[8];
+    fio___brotli_bw_s w;
+    for (unsigned pad = 0; pad < 2; ++pad) {
+      fio___brotli_bw_init(&w, buf, sizeof(buf));
+      fio___brotli_bw_put(&w, 0, 20); /* WBITS=16, !ISLAST, 4 nibbles, MLEN=1 */
+      fio___brotli_bw_put(&w, 1, 1);  /* ISUNCOMPRESSED */
+      fio___brotli_bw_put(&w, 0, 3);  /* padding */
+      fio___brotli_bw_put(&w, 'x', 8);
+      fio___brotli_bw_put(&w, 1, 1);   /* ISLAST */
+      fio___brotli_bw_put(&w, 0, 1);   /* !ISLASTEMPTY */
+      fio___brotli_bw_put(&w, 3, 2);   /* MNIBBLES = 0: metadata */
+      fio___brotli_bw_put(&w, 0, 1);   /* reserved */
+      fio___brotli_bw_put(&w, 1, 2);   /* MSKIPBYTES = 1 */
+      fio___brotli_bw_put(&w, 1, 8);   /* MSKIPLEN - 1 */
+      fio___brotli_bw_put(&w, pad, 1); /* padding (must be zero) */
+      fio___brotli_bw_put(&w, 0x6261, 16);
+      size_t n = fio___brotli_bw_finish(&w, buf);
+      size_t got = fio_brotli_decompress(out, sizeof(out), buf, n);
+      TEST_ASSERT(pad ? got == 0 : (got == 1 && out[0] == 'x'),
+                  "ISLAST metadata (padding %u): got %zu",
+                  pad,
+                  got);
+      got = fio_brotli_decompress(out, sizeof(out), buf, n - 1);
+      TEST_ASSERT(got == 0, "truncated ISLAST metadata accepted (%zu)", got);
+    }
+  }
+  { /* F3: invalid vectors (named after Google's error code) */
+    static const uint8_t padding_1[] = {
+        0x01,
+        0x00,
+        0x00,
+        0x24,
+        0x00,
+        0x6d,
+    };
+    static const uint8_t padding_2[] = {
+        0x02,
+        0x21,
+        0x02,
+        0xbf,
+        0x04,
+        0x40,
+        0x3c,
+        0x16,
+        0x08,
+        0x08,
+        0x23,
+        0x00,
+        0xa0,
+        0x00,
+    };
+    static const uint8_t exuberant_nibble[] = {
+        0x24,
+        0x00,
+        0x00,
+        0xff,
+        0xfe,
+        0xff,
+        0xfe,
+        0x9f,
+        0x2a,
+        0x80,
+        0x20,
+        0x24,
+        0x00,
+        0x00,
+        0xff,
+    };
+    static const uint8_t reserved[] = {
+        0x07,
+        0x06,
+        0x80,
+        0x20,
+        0x64,
+        0x00,
+        0x00,
+        0xb0,
+        0x51,
+        0x20,
+        0x64,
+        0x00,
+        0x00,
+        0xb0,
+        0x11,
+        0x50,
+        0xfd,
+        0x00,
+    };
+    static const uint8_t cl_space[] = {
+        0x17, 0xdd, 0xd5, 0xa8, 0x00, 0x00, 0x00, 0xd0, 0x50, 0x00, 0x88,
+        0x03, 0x00, 0xd0, 0x50, 0x00, 0x88, 0x03, 0x00, 0x00, 0x00, 0x18,
+    };
+    static const uint8_t huffman_space[] = {
+        0x1f, 0x39, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2a,
+        0x00, 0x24, 0x00, 0x24, 0x3a, 0x00, 0x00, 0x51, 0x90, 0x00,
+        0x03, 0x03, 0xb7, 0x16, 0x1f, 0xb1, 0x40, 0x9a, 0xef,
+    };
+    static const uint8_t cmap_repeat[] = {
+        0xb1, 0xd0, 0x35, 0x00, 0xe0, 0x4c, 0xb0, 0x6d, 0x1d, 0xac, 0x1d, 0x23,
+        0xc0, 0x23, 0x2d, 0x9a, 0x5b, 0x91, 0xa8, 0xe8, 0xec, 0xfd, 0x31, 0x2d,
+        0xe0, 0x95, 0xe2, 0xf1, 0x4a, 0xf4, 0xea, 0x08, 0xc6, 0xc2, 0x34, 0xf3,
+        0x25, 0xfc, 0x53, 0x04, 0xc2, 0x00, 0xc7, 0x4f, 0x92, 0x30, 0xcb, 0xd4,
+        0xec, 0x84, 0x6b, 0xa6, 0x48, 0x3a, 0xb8, 0xe9, 0x55, 0x51, 0x5a, 0xce,
+        0xb9, 0x99, 0x99, 0xb5, 0x54, 0x6c, 0xff, 0xff, 0xff, 0x38, 0xef, 0xae,
+        0x24, 0x97, 0x56, 0x61, 0xea, 0xf0, 0x8c, 0xce, 0xe8, 0x0d, 0x58, 0x12,
+        0x4a, 0xa2, 0x32, 0x98, 0x6e, 0x57, 0x41, 0xaa, 0x21, 0xe5, 0x26, 0xdf,
+        0xa2, 0x35, 0xef, 0x12, 0x3f, 0x5a, 0x9e, 0x7b, 0x71, 0x73, 0xf4, 0x34,
+        0x9b, 0x4b, 0x35, 0xdf, 0x1d, 0x05, 0x82, 0x9e, 0xef, 0x3f, 0xdd, 0xcd,
+        0xd6, 0xc0, 0x3b, 0x1c, 0xd8, 0xc6, 0xab, 0x0d, 0x46, 0xad, 0x0c, 0x84,
+        0x84, 0x06, 0xf7, 0x00, 0x00, 0xff, 0xff, 0x9a, 0x59, 0xe9, 0xe9, 0x55,
+        0x11, 0x4c, 0xc0, 0xfa, 0xa7, 0x29, 0x8d, 0x66, 0xa9, 0xfa, 0xe4, 0x79,
+        0x00, 0x79, 0x17, 0xf7, 0x13, 0x9e, 0xfd, 0x3a, 0xeb, 0xa5, 0x18, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+        0xff, 0xff, 0x8c, 0x41, 0xa7, 0x8e, 0x17, 0x18, 0x0e, 0xf4, 0x8f, 0x6c,
+        0xab, 0x96, 0xd0, 0x64, 0x38,
+    };
+    static const uint8_t last_metadata_truncated[] = {
+        0x03, 0x21, 0x80, 0x54, 0x69, 0x6d, 0x65, 0x20, 0x69, 0x73, 0x6f, 0x66,
+        0x20, 0x70, 0x65, 0x6f, 0x70, 0x6c, 0x65, 0x20, 0x0a, 0x7b, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x22,
+        0x6b, 0x22, 0x3a, 0x61, 0x6e, 0x64, 0x20, 0x69, 0x6e, 0x67, 0x20, 0x7b,
+        0x22, 0x6b, 0x22, 0x3a, 0x69, 0x6e, 0x67, 0x20, 0x54, 0x69, 0x6d, 0x65,
+        0x61, 0x74, 0x69, 0x6f, 0x6e, 0x00, 0x47, 0x74, 0x74, 0x70, 0x3a, 0x2f,
+        0x2f, 0x2e, 0x20, 0x3c, 0x64, 0x69, 0x76, 0x3e, 0x6f, 0x66, 0x20, 0x03,
+    };
+    static const uint8_t synth_too_many_symbols_repeated[] = {
+        0x1b, 0x03, 0x00, 0x00, 0x00, 0x01, 0x80, 0xc3, 0x3d, 0x80,
+        0x58, 0x82, 0x0c, 0x00, 0xc0, 0xc1, 0x96, 0x49, 0x0c, 0x90,
+        0x00, 0x00, 0xb8, 0xd3, 0x46, 0x01, 0x1a, 0x01,
+    };
+    static const uint8_t synth_too_large_context_map[] = {
+        0x1b, 0x00, 0x00, 0xd1, 0xe1, 0x01, 0xc6, 0xe0, 0xe2, 0x06, 0x00, 0x00,
+        0x91, 0xb2, 0x70, 0xfe, 0xfb, 0x45, 0x58, 0x88, 0x01, 0x00, 0x70, 0xb0,
+        0x65, 0x12, 0x03, 0x24, 0x00, 0x00, 0xee, 0xb4, 0x11, 0x01,
+    };
+    static const struct {
+      const char *name;
+      const uint8_t *data;
+      size_t len;
+    } bad[] = {
+#define TEST_BAD_VECTOR(v) {#v, v, sizeof(v)}
+        TEST_BAD_VECTOR(padding_1),
+        TEST_BAD_VECTOR(padding_2),
+        TEST_BAD_VECTOR(exuberant_nibble),
+        TEST_BAD_VECTOR(reserved),
+        TEST_BAD_VECTOR(cl_space),
+        TEST_BAD_VECTOR(huffman_space),
+        TEST_BAD_VECTOR(cmap_repeat),
+        TEST_BAD_VECTOR(last_metadata_truncated),
+        TEST_BAD_VECTOR(synth_too_many_symbols_repeated),
+        TEST_BAD_VECTOR(synth_too_large_context_map),
+#undef TEST_BAD_VECTOR
+    };
+    static uint8_t out[1 << 16];
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); ++i) {
+      size_t got =
+          fio_brotli_decompress(out, sizeof(out), bad[i].data, bad[i].len);
+      TEST_ASSERT(got == 0,
+                  "invalid stream %s accepted (%zu bytes)",
+                  bad[i].name,
+                  got);
+    }
+  }
+}
+
 static unsigned test_dict_start;
 static unsigned test_dict_failures;
 static void *test_dict_first_use_thread(void *arg) {
@@ -755,6 +998,7 @@ int main(void) {
   test_api_edges_and_size_queries();
   test_quality_roundtrips();
   test_large_input_roundtrips();
+  test_rfc_conformance_regressions();
 
   fprintf(stderr, "\n=== Results: %d passed, %d failed ===\n", g_pass, g_fail);
   return g_fail ? 1 : 0;

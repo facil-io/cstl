@@ -1699,6 +1699,143 @@ FIO_SFUNC void test_string_security_regressions(void) {
   }
 }
 
+/* =============================================================================
+ * Test: supported self-aliases with a moving allocator (staging policy)
+ * ========================================================================== */
+static size_t test___alias_moves;
+
+/* always moves: copies, poisons and frees the old allocation */
+FIO_SFUNC int test___alias_realloc(fio_str_info_s *dest, size_t len) {
+  const size_t capa = fio_string_capa4len(len);
+  char *next = (char *)malloc(capa);
+  if (!next)
+    return -1;
+  if (dest->len)
+    FIO_MEMCPY(next, dest->buf, dest->len);
+  next[dest->len] = 0;
+  FIO_MEMSET(dest->buf, 0xA5, dest->capa);
+  free(dest->buf);
+  dest->buf = next;
+  dest->capa = capa;
+  ++test___alias_moves;
+  return 0;
+}
+
+/* exact-size destination, so any growth must reallocate (and move) */
+FIO_SFUNC fio_str_info_s test___alias_dest(const char *s, size_t len) {
+  fio_str_info_s d = FIO_STR_INFO3((char *)malloc(len + 1), len, len + 1);
+  FIO_ASSERT(d.buf, "allocation failed");
+  FIO_MEMCPY(d.buf, s, len);
+  d.buf[len] = 0;
+  return d;
+}
+
+/* self-source (offset 0) must match an external-source control */
+FIO_SFUNC void test___alias_control(
+    const char *name,
+    const char *s,
+    size_t len,
+    int (*op)(fio_str_info_s *, fio_string_realloc_fn, const void *, size_t)) {
+  fio_str_info_s a = test___alias_dest(s, len);
+  fio_str_info_s c = test___alias_dest(s, len);
+  char *ext = test___exact_copy(s, len);
+  const int ra = op(&a, test___alias_realloc, a.buf, len);
+  const int rc = op(&c, test___alias_realloc, ext, len);
+  FIO_ASSERT(ra == rc && a.len == c.len &&
+                 !FIO_MEMCMP(a.buf, c.buf, a.len + 1),
+             "%s self-alias != control (rc %d/%d, len %zu/%zu)",
+             name,
+             ra,
+             rc,
+             a.len,
+             c.len);
+  free(a.buf);
+  free(c.buf);
+  free(ext);
+}
+
+/* over-limit self-source: rejected before mutation or allocation */
+FIO_SFUNC void test___alias_reject(
+    const char *name,
+    const char *s,
+    size_t len,
+    int (*op)(fio_str_info_s *, fio_string_realloc_fn, const void *, size_t)) {
+  fio_str_info_s d = test___alias_dest(s, len);
+  const size_t moves = test___alias_moves;
+  const int r = op(&d, test___alias_realloc, d.buf, len);
+  FIO_ASSERT(r == -1 && moves == test___alias_moves && d.len == len &&
+                 d.capa == len + 1 && !FIO_MEMCMP(d.buf, s, len + 1),
+             "%s over-limit self-alias should fail unchanged (r=%d)",
+             name,
+             r);
+  free(d.buf);
+}
+
+FIO_SFUNC char *test___alias_repeat(const char *unit, size_t count) {
+  const size_t ulen = strlen(unit);
+  char *s = (char *)malloc((ulen * count) + 1);
+  FIO_ASSERT(s, "allocation failed");
+  for (size_t i = 0; i < count; ++i)
+    FIO_MEMCPY(s + (i * ulen), unit, ulen);
+  s[ulen * count] = 0;
+  return s;
+}
+
+FIO_SFUNC void test_string_self_alias(void) {
+  { /* tail replace from an earlier part of the same buffer */
+    fio_str_info_s d = test___alias_dest("abcdef", 6);
+    int r = fio_string_replace(&d, test___alias_realloc, 3, 3, d.buf + 2, 3);
+    FIO_ASSERT(!r && d.len == 6 && !FIO_MEMCMP(d.buf, "abccde", 7),
+               "tail self-replace: %s",
+               d.buf);
+    free(d.buf);
+    char *b = fio_bstr_write(NULL, "abcdef", 6);
+    b = fio_bstr_replace(b, 3, 3, b + 2, 3);
+    FIO_ASSERT(fio_bstr_len(b) == 6 && !FIO_MEMCMP(b, "abccde", 7),
+               "fio_bstr_replace tail self-replace: %s",
+               b);
+    fio_bstr_free(b);
+  }
+  { /* tail replace: over-limit self-source fails before truncation */
+    const size_t len = FIO___STRING_REPLACE_SELF_LIMIT + 64;
+    char *s = test___alias_repeat("x", len);
+    fio_str_info_s d = test___alias_dest(s, len);
+    const size_t moves = test___alias_moves;
+    int r = fio_string_replace(&d, test___alias_realloc, 8, len, d.buf, len);
+    FIO_ASSERT(r == -1 && moves == test___alias_moves && d.len == len &&
+                   !FIO_MEMCMP(d.buf, s, len + 1),
+               "tail over-limit self-replace should fail unchanged");
+    free(d.buf);
+    free(s);
+  }
+  { /* Base32 self-decode (grows => moves) */
+    char *s = test___alias_repeat("MFRGGZDF", 64);
+    test___alias_control("base32dec", s, 512, fio_string_write_base32dec);
+    free(s);
+    s = test___alias_repeat("MFRGGZDF", 256); /* 2048 > limit */
+    test___alias_reject("base32dec", s, 2048, fio_string_write_base32dec);
+    free(s);
+  }
+  { /* HTML self-unescape (grows => moves) */
+    fio_str_info_s d = test___alias_dest("&lt;&amp;&gt;", 13);
+    int r = fio_string_write_html_unescape(&d, test___alias_realloc, d.buf, 13);
+    FIO_ASSERT(!r && d.len == 16 && !FIO_MEMCMP(d.buf, "&lt;&amp;&gt;<&>", 17),
+               "HTML self-unescape: %s",
+               d.buf);
+    free(d.buf);
+    test___alias_control("html-unescape",
+                         "&lt;&amp;&gt;",
+                         13,
+                         fio_string_write_html_unescape);
+    char *s = test___alias_repeat("&lt;", 511); /* 2044 > limit */
+    test___alias_reject("html-unescape",
+                        s,
+                        2044,
+                        fio_string_write_html_unescape);
+    free(s);
+  }
+}
+
 int main(void) {
   test_str_info_macros();
   test_string2primitive();
@@ -1724,5 +1861,6 @@ int main(void) {
   test_string_files();
   test_archive_roundtrips();
   test_string_security_regressions();
+  test_string_self_alias();
   return 0;
 }

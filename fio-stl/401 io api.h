@@ -616,7 +616,9 @@ struct fio_io_functions_s {
    *
    * Listeners pass the result to every accepted connection as is
    * (`fio_io_attach_fd` takes ownership); `start` handles a NULL context (the
-   * bundled TLS backends close such connections). Defaults to returning NULL.
+   * bundled TLS backends close such connections). If missing, it is inherited
+   * from the default TLS backend (TLS protocols) or returns NULL (plaintext);
+   * it MUST match the `build_context` / `free_context` that own the context.
    */
   void *(*dup_context)(void *context);
   /**

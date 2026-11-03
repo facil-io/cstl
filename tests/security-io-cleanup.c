@@ -101,17 +101,22 @@ static void test_null_protocol_tls_ownership(void) {
   fio_io_tls_default_functions(&saved);
 }
 
-static void test_custom_tls_missing_dup(void) {
-  fio_io_protocol_s pr = {
-      .io_functions = {.build_context = ctx_build, .free_context = ctx_free},
-  };
+static void *ctx_dup(void *ctx) { return ctx; }
+static void test_default_tls_inherits_dup(void) {
+  fio_io_functions_s saved = fio_io_tls_default_functions(NULL);
+  fio_io_functions_s backend = {.build_context = ctx_build,
+                                .free_context = ctx_free,
+                                .dup_context = ctx_dup};
+  fio_io_tls_default_functions(&backend);
+  fio_io_protocol_s pr = {0};
   fio___io_protocol_init_test(&pr, 1);
-  CHECK(pr.io_functions.dup_context == fio___io_func_default_dup_context,
-        "custom TLS transport must not inherit another backend's context dup");
+  CHECK(pr.io_functions.dup_context == ctx_dup,
+        "TLS protocol must inherit the default backend's context dup");
+  fio_io_tls_default_functions(&saved);
 }
 
 int main(void) {
-  test_custom_tls_missing_dup();
+  test_default_tls_inherits_dup();
   test_null_protocol_tls_ownership();
   fprintf(stderr, "Testing IO teardown\n");
   test_normal_paths();

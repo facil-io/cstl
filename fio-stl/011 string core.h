@@ -1731,6 +1731,8 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
     if (start_pos < 0)
       start_pos = 0;
   }
+  /* stage a self-source before truncation / movement can corrupt it */
+  FIO___STRING_REPLACE_SELF(-1, dest, src, len);
   /* overflow-safe form of: (start_pos + overwrite_len >= dest->len) */
   if ((size_t)start_pos >= dest->len ||
       overwrite_len >= dest->len - (size_t)start_pos) {
@@ -1740,7 +1742,6 @@ SFUNC int fio_string_replace(fio_str_info_s *dest,
     }
     return fio_string_write(dest, reallocate, src, len);
   }
-  FIO___STRING_REPLACE_SELF(-1, dest, src, len);
   size_t move_start = start_pos + overwrite_len;
   size_t move_len = dest->len - (start_pos + overwrite_len);
   if (overwrite_len < len) {
@@ -2429,11 +2430,11 @@ SFUNC int fio_string_write_base32dec(fio_str_info_s *dest,
       255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
       255};
   int r = -1;
-  const uint8_t *e = (const uint8_t *)encoded;
   size_t symbols = 0, i = 0;
-  if (!dest || (!e && encoded_len))
+  if (!dest || (!encoded && encoded_len))
     return r;
   FIO___STRING_REPLACE_SELF_SHRINK(-1, dest, encoded, encoded_len);
+  const uint8_t *e = (const uint8_t *)encoded; /* after (possible) staging */
   /* validate and count data symbols (whitespace is free, `=` ends data) */
   for (; i < encoded_len; ++i) {
     const uint8_t d = base32decode[e[i]];
@@ -3073,6 +3074,7 @@ SFUNC int fio_string_write_html_unescape(fio_str_info_s *dest,
   int r = 0;
   if (!dest || !data || !data_len)
     return r;
+  FIO___STRING_REPLACE_SELF_SHRINK(-1, dest, data, data_len);
   { /* decoded output is never longer than the input */
     size_t reserve = data_len;
     if (fio_string___write_validate_len(dest, reallocate, &reserve))

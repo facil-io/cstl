@@ -822,6 +822,7 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
     return (fio_io_listener_s *)l;
   }
   fio_url_s url = fio_url_parse(args.url, url_alt.len);
+  args.tls = fio_io_tls_from_url(args.tls, url);
   if (url.scheme.buf &&
       (url.scheme.len > 2 && url.scheme.len < 5 &&
        (url.scheme.buf[0] | (char)0x20) == 't' &&
@@ -852,7 +853,6 @@ FIO_NOOP(struct fio_io_listen_args_s args) {
     url = fio_url_parse(args.url, url_alt.len);
   }
 
-  args.tls = fio_io_tls_from_url(args.tls, url);
   fio___io_protocol_init_test(args.protocol, !!args.tls);
   built_tls = args.protocol->io_functions.build_context(args.tls, 0);
   if (args.tls && !built_tls) { /* TLS requested: never fall back to plain */

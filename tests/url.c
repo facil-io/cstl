@@ -502,4 +502,43 @@ int main(void) {
     }
     FIO_ASSERT(count == 3, "query iterator pair count mismatch: %zu", count);
   }
+
+  { /* TLS hints at the head / tail are omitted from the forwarded query */
+    struct {
+      const char *url;
+      const char *query; /* NULL == empty */
+      bool tls;
+    } q[] = {
+        {"https://h/?a=1", "a=1", 1},
+        {"http://h/?tls", NULL, 1},
+        {"http://h/?TLS=1&a=1", "a=1", 1},
+        {"http://h/?a=1&ssl=true", "a=1", 1},
+        {"http://h/?tls&a=1&trust=sys", "a=1", 1},
+        {"http://h/?tls&trust=sys&a=1&b=2", "a=1&b=2", 1},
+        {"http://h/?a=1&b=2&trust=sys&tls", "a=1&b=2", 1},
+        {"http://h/?a=1&tls&b=2", "a=1&tls&b=2", 1},  /* middle: kept */
+        {"http://h/?tls&a=1&tls&b=2&tls", "a=1&tls&b=2", 1},
+        {"http://h/?key=API_KEY", "key=API_KEY", 0}, /* not a hint */
+        {"http://h/?a=1&key=K&pass=P", "a=1&key=K&pass=P", 0},
+        {"http://h/?a=1&trust=", "a=1&trust=", 0}, /* empty: unused */
+        {"http://h/?key=k&cert=c&password=p&a=1", "a=1", 1},
+        {"http://h/?a=1&key=k&b=2&cert=c&pass=p", "a=1&key=k&b=2", 1},
+        {"http://h/?tls&&a=1", "&a=1", 1}, /* empty element ends the run */
+        {"http://h/?tls&", "", 1},
+        {"http://h/?a=1#tls", "a=1", 0},
+        {NULL, NULL, 0},
+    };
+    for (size_t i = 0; q[i].url; ++i) {
+      const fio_url_tls_info_s t =
+          fio_url_is_tls(fio_url_parse(q[i].url, FIO_STRLEN(q[i].url)));
+      const size_t len = q[i].query ? FIO_STRLEN(q[i].query) : 0;
+      FIO_ASSERT(t.tls == q[i].tls && t.query.len == len &&
+                     (!len || !memcmp(t.query.buf, q[i].query, len)),
+                 "omitted TLS hints mismatch for %s: (tls %d) %.*s",
+                 q[i].url,
+                 (int)t.tls,
+                 (int)t.query.len,
+                 t.query.buf ? t.query.buf : "");
+    }
+  }
 }

@@ -5327,6 +5327,8 @@ typedef struct {
   fio_buf_info_s cert;
   fio_buf_info_s trust;
   fio_buf_info_s pass;
+  /** The URL query without the TLS hints at its head / tail. */
+  fio_buf_info_s query;
   bool tls;
 } fio_url_tls_info_s;
 ```
@@ -5375,6 +5377,12 @@ SFUNC fio_url_tls_info_s fio_url_is_tls(fio_url_s u);
 Detects TLS from scheme or query. Implicit TLS schemes include `wss`, `https`, `sses`, `ssse`, `tcps`, `stcp`, `tls`, `ssl`, `udps`, `sudp`. Scheme and query-key matching is case-insensitive.
 
 Query keys `tls` or `ssl` enable TLS. A nonempty value other than `1` or `true` supplies both key and certificate. A nonempty `key` and `cert` pair also enables TLS; `pass` or `password` supplies its optional passphrase. A nonempty `trust` value enables TLS independently. `key`, `cert`, or passphrase parameters alone do not enable TLS.
+
+TLS hints are read from the whole query. The returned `query` is the URL query with the hints at its head / tail omitted, a slice of the original (no copy), so it can be forwarded to a peer: `u.query = fio_url_is_tls(u).query;` (`fio_http_connect` does this for the request query). Hints in the middle of the query are read **and** kept, a pass-through for application keys with colliding names. Only hints actually used are omitted: `tls` / `ssl` always, `trust` when nonempty, `key` / `cert` only when both are set, and `pass` / `password` only alongside that pair. i.e.:
+
+- `?tls&page=1&trust=sys` => `page=1`
+- `?page=1&tls&sort=a` => `page=1&tls&sort=a` (TLS enabled)
+- `?key=API_KEY` => `key=API_KEY` (no `cert`, not a hint)
 
 Input slices need no trailing NUL or padding. Returned slices borrow the input buffer. Debug diagnostics report only TLS status and material-presence flags, never material contents.
 
@@ -21975,8 +21983,11 @@ fio_http_connect("https://example.com/", NULL, .on_http = on_response,
                  .verify = 1);
 ```
 
-The `trust=sys` / `trust=<ca-file>` URL query also works, but the URL query
-is sent to the server as the request query unless `h` already has one.
+The `trust=sys` / `trust=<ca-file>` URL query also works. The URL query is
+sent to the server as the request query (unless `h` already has one), with
+the TLS hints at its head / tail omitted (see `fio_url_is_tls`). Hints in the
+middle of the query are sent as-is, so place TLS hints first or last, e.g.,
+`https://example.com/?page=1&trust=sys` sends `?page=1`.
 
 **Note**: interim `1xx` responses other than `101` (e.g., `100 Continue`,
 `103 Early Hints`) are skipped (RFC 9110 §15.2). `on_http` runs once, for

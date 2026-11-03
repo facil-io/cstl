@@ -619,8 +619,10 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
   if (!q)
     return -1;
   while (workers > 255) {
-    fio_queue_workers_add(q, 128);
-    fio_queue_workers_add(q, 128);
+    if (fio_queue_workers_add(q, 128))
+      return -1;
+    if (fio_queue_workers_add(q, 128))
+      return -1;
     workers -= 256;
   }
   if (!workers)

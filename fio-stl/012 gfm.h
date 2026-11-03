@@ -74,8 +74,9 @@ FIO_ASSERT_STATIC(FIO_GFM_REF_CACHE_SIZE > 0,
 #define FIO___GFM_MIN_FENCE_LEN     3
 #define FIO___GFM_MAX_ATX_HEADING   6
 #define FIO___GFM_MAX_ENTITY_LEN    32
-/* Maximum bracket nesting for each link or image opener. Independent later
- * openers remain eligible even when one opener exceeds the limit. */
+/* Maximum bracket nesting for each link or image opener, also used as the
+ * destination parenthesis nesting limit (CommonMark permits such a limit).
+ * Independent later openers remain eligible when one opener exceeds it. */
 #define FIO___GFM_MAX_INLINE_BRACKETS 64U
 
 /** Error codes — negative values are parser-generated. */
@@ -2733,13 +2734,14 @@ FIO_SFUNC char *fio___gfm_link_like_end(char *p, char *end) {
   char *after = s + 1;
   if (after < end && *after == '(') {
     char *q = after + 1;
-    int pd = 1;
-    while (q < end && pd) {
+    unsigned pd = 1; /* same nesting cap as find_link: bounds inner checks */
+    while (q < end && pd && pd <= FIO___GFM_MAX_INLINE_BRACKETS + 1) {
       if (*q == '\\' && q + 1 < end) {
         q += 2;
         continue;
       }
-      pd += (*q == '(') - (*q == ')');
+      pd += (*q == '(');
+      pd -= (*q == ')');
       ++q;
     }
     return pd ? NULL : q;
@@ -3010,7 +3012,11 @@ FIO_SFUNC char *fio___gfm_find_link(fio___gfm_parser_s *st,
     if (lp < end && *lp == '<') {
       ++lp;
       ds = lp;
-      while (lp < end && *lp != '>' && *lp != '\n' && *lp != '\r') {
+      /* An unescaped '<' also ends (rejects) the destination, per spec. So a
+       * failed scan stops at or before the next opener's '<' (never escaped,
+       * it follows '(' or whitespace): failed scans are disjoint, O(n). */
+      while (lp < end && *lp != '>' && *lp != '<' && *lp != '\n' &&
+             *lp != '\r') {
         if (*lp == '\\' && lp + 1 < end) {
           lp += 2;
           continue;
@@ -3023,16 +3029,19 @@ FIO_SFUNC char *fio___gfm_find_link(fio___gfm_parser_s *st,
       ++lp;
     } else if (lp < end && *lp != ')') {
       ds = lp;
-      int pd = 0;
+      /* Each failing opener leaves one unmatched '(' that later scans must
+       * count, so the nesting cap bounds the work to O(n * cap). */
+      unsigned pd = 0;
       while (lp < end && *lp != ' ' && *lp != '\t' && *lp != '\n' &&
              *lp != '\r') {
         if (*lp == '\\' && lp + 1 < end) {
           lp += 2;
           continue;
         }
-        if (*lp == '(')
-          ++pd;
-        else if (*lp == ')') {
+        if (*lp == '(') {
+          if (++pd > FIO___GFM_MAX_INLINE_BRACKETS)
+            goto try_ref;
+        } else if (*lp == ')') {
           if (pd == 0)
             break;
           --pd;
@@ -3057,14 +3066,16 @@ FIO_SFUNC char *fio___gfm_find_link(fio___gfm_parser_s *st,
       char close_ch = (open_ch == '(') ? ')' : open_ch;
       ++lp;
       ts = lp;
-      while (lp < end && *lp != close_ch) {
+      /* A '('-title may not hold an unescaped '(' (spec). As with '<' above,
+       * failed title scans then stop before the next same-kind opener. */
+      while (lp < end && *lp != close_ch && !(open_ch == '(' && *lp == '(')) {
         if (*lp == '\\' && lp + 1 < end) {
           lp += 2;
           continue;
         }
         ++lp;
       }
-      if (lp >= end)
+      if (lp >= end || *lp != close_ch)
         goto try_ref;
       te = lp;
       ++lp;

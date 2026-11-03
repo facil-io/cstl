@@ -1,5 +1,13 @@
 # Change Log
 
+### 0.8.5 (unreleased)
+
+**Security**: (`url`, `http`) `fio_http_connect` no longer sends TLS hints (`tls`, `ssl`, `key`, `cert`, `pass`, `password`, `trust`) placed at the head / tail of the URL query to the server; before, key / certificate paths and key passwords leaked into the request target. Hints in the middle of the query are still read but sent as-is (pass-through for colliding application keys). `fio_url_tls_info_s` gains `query`, the URL query without the head / tail hints (adopt with `u.query = fio_url_is_tls(u).query`).
+
+**Fix**: (`brotli`) RFC 7932 conformance, checked against Google Brotli 1.1.0. Compression at quality 5-6 of inputs over 16MB produced streams that other decoders rejected or decoded into wrong bytes (later meta-blocks used chunk-local positions for static dictionary distances and literal context). The decoder no longer rejects a valid stream whose final code is longer than 8 bits, and now rejects invalid streams it used to accept: non-zero padding or reserved bits, incomplete or oversubscribed prefix codes, code-length and context-map repeats that overflow, exuberant length nibbles, and truncated metadata in the last meta-block.
+
+**Security**: (`gfm`, `md2html`) repeated malformed inline links (`[x](`, `[x](<`, `[x](u (`) no longer rescan the rest of the paragraph for each opener (quadratic time). Per CommonMark, `<destinations>` and `(titles)` now reject an unescaped `<` / `(`, and link destinations allow at most 64 nested parentheses.
+
 ### 0.8.4 - 2026-11-02
 
 **Security**: (`md2html`) rendering failures leave a supplied output buffer unchanged, and allocation failures return `NULL` instead of partial HTML. Image-alt rendering uses linear delimiter matching without recursive calls, preventing nested-image stack exhaustion and quadratic bracket rescans.
