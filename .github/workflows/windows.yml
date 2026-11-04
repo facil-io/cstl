@@ -2,7 +2,7 @@ name: Windows MSVC CI
 
 on:
   push:
-    branches: [ master ]
+    branches: [ '**' ]
   pull_request:
     branches: [ master ]
 
@@ -26,9 +26,15 @@ jobs:
       run: |
         $excludedExact  = @("ipc", "redis", "openssl", "tmp_compress_compare")
         $excludedPrefix = @("tls13", "pubsub")
+        $excludedDirs   = @("extern-split", "generators")
 
-        $tests = Get-ChildItem -Path "tests" -Filter "*.c" | Sort-Object Name | Where-Object {
+        # Recurse into subfolders (tests/dependency-selection/...), mirroring the
+        # relative path under tmp\win to avoid flat-name collisions. Non-standalone
+        # folders are excluded here and handled by dedicated steps below.
+        $root = (Get-Location).Path
+        $tests = Get-ChildItem -Path "tests" -Filter "*.c" -Recurse | Sort-Object FullName | Where-Object {
             $name = $_.BaseName
+            if ($excludedDirs -contains (Split-Path $_.DirectoryName -Leaf)) { return $false }
             $skip = $false
             foreach ($ex in $excludedExact)  { if ($name -eq $ex)            { $skip = $true; break } }
             foreach ($ex in $excludedPrefix) { if ($name.StartsWith($ex))    { $skip = $true; break } }
@@ -39,18 +45,21 @@ jobs:
 
         foreach ($test in $tests) {
             $name = $test.BaseName
-            $src  = "tests\$($test.Name)"
+            $src  = $test.FullName.Substring($root.Length + 1)
+            $out  = Join-Path "tmp\win" (Split-Path $src -Parent)
+            New-Item -ItemType Directory -Force -Path $out | Out-Null
+            $exe  = Join-Path $out "${name}_d.exe"
             Write-Host ""
             Write-Host "=== [DEBUG-NOALLOC] $name ==="
 
-            & cl /Od /RTCsu /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG "/Fe:.\${name}_d.exe" /link crypt32.lib bcrypt.lib
+            & cl /Od /RTCsu /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_MEMORY_DISABLE=1 /DFIO_LEAK_COUNTER=1 /DDEBUG "/Fe:$exe" /link crypt32.lib bcrypt.lib
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++
                 continue
             }
 
-            & ".\${name}_d.exe"
+            & $exe
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "RUN FAILED: $name"
                 $failed++
@@ -69,9 +78,12 @@ jobs:
       run: |
         $excludedExact  = @("ipc", "redis", "openssl", "tmp_compress_compare")
         $excludedPrefix = @("tls13", "pubsub")
+        $excludedDirs   = @("extern-split", "generators")
 
-        $tests = Get-ChildItem -Path "tests" -Filter "*.c" | Sort-Object Name | Where-Object {
+        $root = (Get-Location).Path
+        $tests = Get-ChildItem -Path "tests" -Filter "*.c" -Recurse | Sort-Object FullName | Where-Object {
             $name = $_.BaseName
+            if ($excludedDirs -contains (Split-Path $_.DirectoryName -Leaf)) { return $false }
             $skip = $false
             foreach ($ex in $excludedExact)  { if ($name -eq $ex)            { $skip = $true; break } }
             foreach ($ex in $excludedPrefix) { if ($name.StartsWith($ex))    { $skip = $true; break } }
@@ -82,18 +94,21 @@ jobs:
 
         foreach ($test in $tests) {
             $name = $test.BaseName
-            $src  = "tests\$($test.Name)"
+            $src  = $test.FullName.Substring($root.Length + 1)
+            $out  = Join-Path "tmp\win" (Split-Path $src -Parent)
+            New-Item -ItemType Directory -Force -Path $out | Out-Null
+            $exe  = Join-Path $out "${name}.exe"
             Write-Host ""
             Write-Host "=== [RELEASE] $name ==="
 
-            & cl /O2 /Oi /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 "/Fe:.\${name}.exe" /link crypt32.lib bcrypt.lib
+            & cl /O2 /Oi /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS /DFIO_LEAK_COUNTER=1 "/Fe:$exe" /link crypt32.lib bcrypt.lib
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "COMPILE FAILED: $name"
                 $failed++
                 continue
             }
 
-            & ".\${name}.exe"
+            & $exe
             if ($LASTEXITCODE -ne 0) {
                 Write-Host "RUN FAILED: $name"
                 $failed++
@@ -106,3 +121,49 @@ jobs:
         Write-Host ""
         Write-Host "Results: $passed passed, $failed failed out of $($passed + $failed) total"
         if ($failed -gt 0) { exit 1 }
+
+    # tests/extern-split is a multi-translation-unit build: `impl.c` holds the
+    # FIO_EXTERN_COMPLETE definitions while `main.c` is a declarations-only TU.
+    # Both must be compiled separately and linked together - this is the only
+    # build shape that exposes duplicate external symbols (e.g. .CRT$XCU
+    # constructor pointers and leak-counter helpers) under MSVC.
+    - name: Test Extern Split (multi-TU link)
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Force -Path "tmp\win\extern-split" | Out-Null
+
+        # Same flags in both TUs (a mixed configuration would itself be a bug).
+        $cflags = @("/c", "/Od", "/RTCsu", "/TC", "/I.", "/D_CRT_NONSTDC_NO_WARNINGS", "/DFIO_MEMORY_DISABLE=1", "/DFIO_LEAK_COUNTER=1", "/DDEBUG")
+
+        & cl @cflags "tests\extern-split\impl.c" "/Fo:tmp\win\extern-split\impl.obj"
+        if ($LASTEXITCODE -ne 0) { Write-Host "COMPILE FAILED: extern-split/impl.c"; exit 1 }
+
+        & cl @cflags "tests\extern-split\main.c" "/Fo:tmp\win\extern-split\main.obj"
+        if ($LASTEXITCODE -ne 0) { Write-Host "COMPILE FAILED: extern-split/main.c"; exit 1 }
+
+        & cl "tmp\win\extern-split\impl.obj" "tmp\win\extern-split\main.obj" "/Fe:tmp\win\extern-split\extern-split.exe" /link crypt32.lib bcrypt.lib ws2_32.lib
+        if ($LASTEXITCODE -ne 0) { Write-Host "LINK FAILED: extern-split"; exit 1 }
+
+        & "tmp\win\extern-split\extern-split.exe"
+        if ($LASTEXITCODE -ne 0) { Write-Host "RUN FAILED: extern-split"; exit 1 }
+
+        Write-Host "PASS: extern-split"
+
+    # tests/generators/*.c are code generators, not tests. They are excluded
+    # from the recursive loop above and validated here via their --check mode.
+    - name: Check Generators
+      shell: pwsh
+      run: |
+        $root = (Get-Location).Path
+        foreach ($gen in Get-ChildItem -Path "tests\generators" -Filter "*.c" | Sort-Object Name) {
+            $name = $gen.BaseName
+            $src  = $gen.FullName.Substring($root.Length + 1)
+            New-Item -ItemType Directory -Force -Path "tmp\win\tests\generators" | Out-Null
+            $exe  = "tmp\win\tests\generators\$name.exe"
+            Write-Host "=== [GENERATOR] $name ==="
+            & cl /O2 /TC $src /I. /D_CRT_NONSTDC_NO_WARNINGS "/Fe:$exe" /link crypt32.lib bcrypt.lib
+            if ($LASTEXITCODE -ne 0) { Write-Host "COMPILE FAILED: $name"; exit 1 }
+            & $exe --check
+            if ($LASTEXITCODE -ne 0) { Write-Host "CHECK FAILED: $name"; exit 1 }
+            Write-Host "PASS: $name"
+        }
