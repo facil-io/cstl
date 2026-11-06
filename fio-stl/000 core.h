@@ -1915,15 +1915,17 @@ Memory Leak Detection
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
 #ifndef FIO___LEAK_COUNTER_DEF
-/* Deceleration only, to be placed before the `extern` block if needed. */
+/* Declaration only, to be placed before the `extern` block if needed. */
 #define FIO___LEAK_COUNTER_DEC(name)                                           \
-  size_t FIO_NAME(fio___leak_counter, name)(size_t i);
-
+  size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
+  void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);
 /* The shared counter + a (once per TU) `FIO_CALL_AFTER_EXIT` leak report. */
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
   size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
   void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);                    \
-  size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
+  /* now do not need FIO_WEAK because all _DEF under completeTU gate,
+   * deleted to see once-silent link issues explicitly not only on windows */  \
+  size_t FIO_NAME(fio___leak_counter, name)(size_t i) {                        \
     static volatile size_t counter = 0;                                        \
     size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
     if (FIO_UNLIKELY(tmp == ((size_t)-1)))                                     \
@@ -1934,7 +1936,7 @@ Memory Leak Detection
                "(%d) " FIO_MACRO2STR(name) " `free` after `free` detected!",   \
                fio_getpid());                                                  \
   }                                                                            \
-  void FIO_WEAK FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {          \
+  void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {                   \
     size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
     FIO_LOG_DEBUG2("(%d) testing leaks for " FIO_MACRO2STR(name),              \
                    fio_getpid());                                              \
