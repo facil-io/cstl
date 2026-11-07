@@ -40970,7 +40970,7 @@ FIO_IFUNC int64_t fio_timer_next_at(fio_timer_queue_s *tq) {
   int64_t v = (int64_t)((~(uint64_t)0) >> 1);
   if (!tq)
     goto missing_tq;
-  if (!tq || !tq->next)
+  if (!tq->next)
     return v;
   FIO___LOCK_LOCK(tq->lock);
   if (tq->next)
@@ -41249,11 +41249,7 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
   grp.thread = fio_thread_current();
   FIO_LIST_PUSH(&grp.queue->consumers, &grp.node);
   grp.stop = 0;
-  fio_thread_t *threads =
-      grp.workers > 256
-          ? ((fio_thread_t *)
-                 FIO_MEM_REALLOC_(NULL, 0, sizeof(*threads) * grp.workers, 0))
-          : threads_buf;
+  fio_thread_t *threads = threads_buf;
   fio_thread_mutex_init(&grp.mutex);
   fio_thread_cond_init(&grp.cond);
   for (size_t i = 0; i < grp.workers; ++i) {
@@ -41271,8 +41267,6 @@ FIO_SFUNC void *fio___queue_worker_manager(void *g_) {
       continue;
     fio_thread_join(threads + i);
   }
-  if (threads != threads_buf)
-    FIO_MEM_FREE_(threads, sizeof(*threads) * grp.workers);
   fio_queue_perform_all(grp.queue);
   FIO___LOCK_LOCK(grp.queue->lock);
   FIO_LIST_REMOVE(&grp.node);
@@ -41319,12 +41313,13 @@ SFUNC int fio_queue_workers_add(fio_queue_s *q, size_t workers) {
     return -1;
   }
   unsigned stop;
-  do {
+  while (true) {
     /* Acquire the manager's copy before releasing this stack argument. */
     fio_atomic_load(stop, &grp.stop);
-    if (stop)
-      FIO_THREAD_RESCHEDULE();
-  } while (stop);
+    if (!stop)
+      break;
+    FIO_THREAD_RESCHEDULE();
+  }
   FIO___LOCK_UNLOCK(q->lock);
   return 0;
 }

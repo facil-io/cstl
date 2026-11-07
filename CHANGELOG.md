@@ -1,6 +1,6 @@
 # Change Log
 
-### Unreleased (2026-11-07)
+### 0.8.5 (unreleased)
 
 **Fix**: (`core`, `extern`) split `FIO_EXTERN` builds: `FIO_WEAK` is no longer used for the leak-counter symbols in `000 core.h`. Every `FIO_LEAK_COUNTER_DEF` now sits under the `FIO_EXTERN_COMPLETE` gate, so duplicate definitions surface as explicit link errors instead of being silently merged by a weak symbol. `FIO_LEAK_COUNTER_DEC` now declares both the counter and its cleanup function.
 
@@ -9,8 +9,6 @@
 **Fix**: (`patches`, `extern`) the Windows startup-housekeeping constructor in `001 patches.h` now runs only in the complete TU (`FIO_EXTERN_COMPLETE` or no `FIO_EXTERN`), instead of once per translation unit.
 
 **Docs**: `FIO_LEAK_COUNTER_DEC` documented as the declarations-only counterpart of `FIO_LEAK_COUNTER_DEF` (`000 core.h`, `001 header.h`, `001 logging.md`, `001 version and settings.md`).
-
-### 0.8.5 (unreleased)
 
 **Security**: (`url`, `http`) `fio_http_connect` no longer sends TLS hints (`tls`, `ssl`, `key`, `cert`, `pass`, `password`, `trust`) placed at the head / tail of the URL query to the server; before, key / certificate paths and key passwords leaked into the request target. Hints in the middle of the query are still read but sent as-is (pass-through for colliding application keys). `fio_url_tls_info_s` gains `query`, the URL query without the head / tail hints (adopt with `u.query = fio_url_is_tls(u).query`).
 
