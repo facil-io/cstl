@@ -3673,6 +3673,12 @@ FIO_MIFN uint64_t fio_math_mul64_fold(uint64_t a, uint64_t b) {
   return r;
 }
 
+FIO_MIFN uint32_t fio_math_mul32_fold(uint32_t a, uint32_t b) {
+  uint64_t r = (uint64_t)a * b;
+  r ^= (r << 32);
+  return (uint32_t)r;
+}
+
 /**
  * Multi-precision long multiplication for `len` 64 bit words.
  *

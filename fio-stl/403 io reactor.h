@@ -680,7 +680,9 @@ static void fio___io_listen_on_data_task(void *io_, void *ignr_) {
   fio___io_listen_s *l = (fio___io_listen_s *)fio_io_udata(io);
   if (!fio_io_is_open(io)) /* closed while the accept task was queued */
     goto done;
-  fio_io_unsuspend(io);
+  if ((FIO___IO_FLAG_UNSET(io, FIO___IO_FLAG_SUSPENDED) &
+       FIO___IO_FLAG_SUSPENDED))
+    fio___io_monitor_in(io);
   while (FIO_SOCK_FD_ISVALID(fd = fio_sock_accept(fio_io_fd(io), NULL, NULL))) {
     // FIO_LOG_DDEBUG2("(%d) accepted new connection with fd %d",
     //                 fio_io_pid(),

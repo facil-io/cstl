@@ -221,12 +221,12 @@ int main(int argc, char const *argv[]) {
   FIO_LOG_DEBUG2("IO overhead: %zu bytes", sizeof(fio_io_s) + 8);
   FIO_LOG_DEBUG2("HTTP connection overhead: %zu bytes state + %zu bytes buffer",
                  sizeof(fio___http_connection_s) + 8,
-                 FIO_HTTP_DEFAULT_MAX_LINE_LEN);
+                 (size_t)FIO_HTTP_DEFAULT_MAX_LINE_LEN);
   FIO_LOG_DEBUG2("HTTP handle overhead: %zu", sizeof(fio_http_s) + 8);
   FIO_LOG_DEBUG2("Total HTTP overhead: %zu+%zu bytes",
                  sizeof(fio_io_s) + sizeof(fio___http_connection_s) +
                      sizeof(fio_http_s) + 24,
-                 FIO_HTTP_DEFAULT_MAX_LINE_LEN);
+                 (size_t)FIO_HTTP_DEFAULT_MAX_LINE_LEN);
   if (fio_cli_get_i("-w"))
     FIO_LOG_DEBUG2("Hot restart signal: SIGUSR1");
 
