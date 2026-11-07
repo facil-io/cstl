@@ -1100,6 +1100,18 @@ FIO_SFUNC void fio___openssl_alpn_client_dispatch(
                          (fio_io_s *)SSL_get_ex_data(conn->ssl, 0));
 }
 
+/** Schedules `on_data` when input is buffered beyond the kernel socket (poll
+ * won't report it): plaintext or records held by OpenSSL, or a complete TLS
+ * record in `recv_buf`. A partial record waits for the socket. */
+FIO_SFUNC void fio___openssl_schedule_buffered(
+    fio___openssl_connection_s *conn) {
+  size_t avail = conn->recv_buf_len - conn->recv_buf_pos;
+  const uint8_t *h = conn->recv_buf + conn->recv_buf_pos;
+  if (SSL_has_pending(conn->ssl) ||
+      (avail >= 5 && avail >= 5 + (((size_t)h[3] << 8) | (size_t)h[4])))
+    fio_io_on_data_schedule((fio_io_s *)SSL_get_ex_data(conn->ssl, 0));
+}
+
 /** Called to perform a non-blocking `read`, same as the system call.
  *
  * Custom BIO flow (one copy, same as BIO_new_socket):
@@ -1193,8 +1205,10 @@ FIO_SFUNC ssize_t fio___openssl_read(fio_socket_i fd,
     if (conn->enc_buf_len > conn->enc_buf_sent)
       fio___openssl_send_enc_buf(fd, conn);
 
-    if (r == 1)
+    if (r == 1) {
+      fio___openssl_schedule_buffered(conn); /* caller may not read again */
       return (ssize_t)readbytes;
+    }
     if ((err = fio___openssl_failure(conn, r)))
       goto fatal;
     if (conn->rbio_starved ||
@@ -1227,6 +1241,10 @@ FIO_SFUNC int fio___openssl_flush(fio_socket_i fd, void *tls_ctx) {
   fio___openssl_connection_s *conn = (fio___openssl_connection_s *)tls_ctx;
   if (!conn)
     return 0;
+  /* `on_ready` flushes before un-throttling: re-deliver input whose `on_data`
+   * was skipped while throttled (mirrors the native TLS 1.3 flush). */
+  if (conn->handshake_complete)
+    fio___openssl_schedule_buffered(conn);
   if (conn->enc_buf_sent >= conn->enc_buf_len) {
     conn->enc_buf_len = 0;
     conn->enc_buf_sent = 0;

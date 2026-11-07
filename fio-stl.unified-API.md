@@ -4,13 +4,13 @@ Generated automatically from code documentation comments in `./fio-stl/*.h`. Do 
 
 The [`fio-stl.md`](fio-stl) contains logic and explanations, here are listed all the public symbols detected (correctly or incorrectly), allowing for a quick reference (using your browser's / editor's search capabilities).
 
-Total symbols: 3265.
+Total symbols: 3267.
 
 ## Contents
 
 - [`./fio-stl/000 copyright.h`](#fio-stl-000-copyright-h) — 1
-- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1774
-- [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 13
+- [`./fio-stl/000 core.h`](#fio-stl-000-core-h) — 1775
+- [`./fio-stl/001 header.h`](#fio-stl-001-header-h) — 14
 - [`./fio-stl/001 logging.h`](#fio-stl-001-logging-h) — 1
 - [`./fio-stl/001 memalt.h`](#fio-stl-001-memalt-h) — 5
 - [`./fio-stl/001 patches.h`](#fio-stl-001-patches-h) — 2
@@ -103,7 +103,7 @@ _Symbol type:_ `macro`
 
 ## <a id="fio-stl-000-core-h"></a> `./fio-stl/000 core.h`
 
-1774 public symbols.
+1775 public symbols.
 
 ### Definition / Code Generation Macros
 
@@ -10998,6 +10998,16 @@ FIO_MIFN uint64_t fio_math_mul64_fold(uint64_t a, uint64_t b)
 
 _Symbol type:_ `function`
 
+#### `fio_math_mul32_fold`
+
+```c
+FIO_MIFN uint32_t fio_math_mul32_fold(uint32_t a, uint32_t b)
+```
+
+
+
+_Symbol type:_ `function`
+
 #### `fio_math_mul`
 
 ```c
@@ -18819,7 +18829,26 @@ _Symbol type:_ `function`
 
 ## <a id="fio-stl-001-header-h"></a> `./fio-stl/001 header.h`
 
-13 public symbols.
+14 public symbols.
+
+### Definition / Code Generation Macros
+
+#### `FIO_LEAK_COUNTER_DEF`
+
+```c
+#define FIO_LEAK_COUNTER_DEF      FIO___LEAK_COUNTER_DEF
+```
+
+Defines a named leak counter, its cleanup function and a constructor that
+registers the cleanup with the `FIO_CALL_AFTER_EXIT` state event.
+
+Emits non-`static` symbols, so it must appear in exactly one translation
+unit (the `FIO_EXTERN_COMPLETE` one, or every unit in a header-only build).
+`FIO_LEAK_COUNTER_SKIP_EXIT` disables the exit registration.
+
+_Note:_  this MACRO defines or declares code.
+
+_Symbol type:_ `macro`
 
 ### Macros
 
@@ -18908,10 +18937,13 @@ _Symbol type:_ `macro`
 #### `FIO_LEAK_COUNTER_DEC`
 
 ```c
-#define FIO_LEAK_COUNTER_DEC(name)
+#define FIO_LEAK_COUNTER_DEC      FIO___LEAK_COUNTER_DEC
 ```
 
-
+Declares a named leak counter and its cleanup function without defining
+them. Use in declarations-only `FIO_EXTERN` translation units; the single
+`FIO_EXTERN_COMPLETE` unit defines the counter with
+`FIO_LEAK_COUNTER_DEF`.
 
 _Symbol type:_ `macro`
 
