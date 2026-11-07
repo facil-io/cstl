@@ -1915,11 +1915,27 @@ Memory Leak Detection
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
 #ifndef FIO___LEAK_COUNTER_DEF
-/* Declaration only, to be placed before the `extern` block if needed. */
+/**
+ * Declares a named leak counter and its cleanup function, without defining
+ * them.
+ *
+ * The counter itself is defined by `FIO_LEAK_COUNTER_DEF` in exactly one
+ * translation unit (the `FIO_EXTERN_COMPLETE` one). Use this macro in
+ * declarations-only `FIO_EXTERN` units that need to reference the counter.
+ */
 #define FIO___LEAK_COUNTER_DEC(name)                                           \
   size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
   void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);
-/* The shared counter + a (once per TU) `FIO_CALL_AFTER_EXIT` leak report. */
+/**
+ * Defines a named leak counter, its cleanup function and a constructor that
+ * registers the cleanup with the `FIO_CALL_AFTER_EXIT` state event.
+ *
+ * Emits non-`static` symbols, so place it under the
+ * `FIO_EXTERN_COMPLETE` / no-`FIO_EXTERN` gate. Declarations-only units use
+ * `FIO_LEAK_COUNTER_DEC` instead.
+ *
+ * `FIO_LEAK_COUNTER_SKIP_EXIT` disables the exit registration.
+ */
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
   size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
   void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);                    \

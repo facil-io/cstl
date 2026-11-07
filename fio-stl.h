@@ -1953,11 +1953,27 @@ Memory Leak Detection
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
 #ifndef FIO___LEAK_COUNTER_DEF
-/* Declaration only, to be placed before the `extern` block if needed. */
+/**
+ * Declares a named leak counter and its cleanup function, without defining
+ * them.
+ *
+ * The counter itself is defined by `FIO_LEAK_COUNTER_DEF` in exactly one
+ * translation unit (the `FIO_EXTERN_COMPLETE` one). Use this macro in
+ * declarations-only `FIO_EXTERN` units that need to reference the counter.
+ */
 #define FIO___LEAK_COUNTER_DEC(name)                                           \
   size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
   void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);
-/* The shared counter + a (once per TU) `FIO_CALL_AFTER_EXIT` leak report. */
+/**
+ * Defines a named leak counter, its cleanup function and a constructor that
+ * registers the cleanup with the `FIO_CALL_AFTER_EXIT` state event.
+ *
+ * Emits non-`static` symbols, so place it under the
+ * `FIO_EXTERN_COMPLETE` / no-`FIO_EXTERN` gate. Declarations-only units use
+ * `FIO_LEAK_COUNTER_DEC` instead.
+ *
+ * `FIO_LEAK_COUNTER_SKIP_EXIT` disables the exit registration.
+ */
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
   size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
   void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);                    \
@@ -9069,6 +9085,7 @@ Recursive inclusion management
 /* *****************************************************************************
 Leak Counter Helpers
 ***************************************************************************** */
+#undef FIO_LEAK_COUNTER_DEC
 #undef FIO_LEAK_COUNTER_DEF
 #undef FIO_LEAK_COUNTER_ON_ALLOC
 #undef FIO_LEAK_COUNTER_ON_FREE
@@ -9085,7 +9102,21 @@ Leak Counter Helpers
 #ifndef FIO_LEAK_COUNTER_SKIP_EXIT
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
+/**
+ * Declares a named leak counter and its cleanup function without defining
+ * them. Use in declarations-only `FIO_EXTERN` translation units; the single
+ * `FIO_EXTERN_COMPLETE` unit defines the counter with
+ * `FIO_LEAK_COUNTER_DEF`.
+ */
 #define FIO_LEAK_COUNTER_DEC      FIO___LEAK_COUNTER_DEC
+/**
+ * Defines a named leak counter, its cleanup function and a constructor that
+ * registers the cleanup with the `FIO_CALL_AFTER_EXIT` state event.
+ *
+ * Emits non-`static` symbols, so it must appear in exactly one translation
+ * unit (the `FIO_EXTERN_COMPLETE` one, or every unit in a header-only build).
+ * `FIO_LEAK_COUNTER_SKIP_EXIT` disables the exit registration.
+ */
 #define FIO_LEAK_COUNTER_DEF      FIO___LEAK_COUNTER_DEF
 #define FIO_LEAK_COUNTER_ON_ALLOC FIO___LEAK_COUNTER_ON_ALLOC
 #define FIO_LEAK_COUNTER_ON_FREE  FIO___LEAK_COUNTER_ON_FREE

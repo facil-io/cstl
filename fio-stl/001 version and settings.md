@@ -22,53 +22,54 @@ Most defaults are guarded with `#ifndef`; define them before including the heade
 
 ### Memory and Safety
 
-- **`FIO_LEAK_COUNTER`** — Enables memory-leak counting. When enabled, the leak counter tracks allocations made through facil.io allocators and prints a summary at exit.  
-  Default: `1` (enabled).  
-  Set to `0` to disable counting and the exit report.  
+- **`FIO_LEAK_COUNTER`** — Enables memory-leak counting. When enabled, the leak counter tracks allocations made through facil.io allocators and prints a summary at exit.
+  Default: `1` (enabled).
+  Set to `0` to disable counting and the exit report.
   Note: this conflicts with `FIO_NO_LOG`, because the leak report uses the logging layer.
-- **`FIO_LEAK_COUNTER_SKIP_EXIT`** — Skip the automatic leak report at exit when leak counting is enabled.  
+- **`FIO_LEAK_COUNTER_SKIP_EXIT`** — Skip the automatic leak report at exit when leak counting is enabled.
   Default: `0` (report at exit).
-- **`FIO_LEAK_COUNTER_DEF(name)`** — Declares a named leak counter.
+- **`FIO_LEAK_COUNTER_DEC(name)`** — Declares a named leak counter without defining it; use in declarations-only `FIO_EXTERN` units.
+- **`FIO_LEAK_COUNTER_DEF(name)`** — Defines a named leak counter, its cleanup and the `FIO_CALL_AFTER_EXIT` registration; only in the single `FIO_EXTERN_COMPLETE` unit (or every unit in a header-only build).
 - **`FIO_LEAK_COUNTER_ON_ALLOC(name)`** — Records an allocation against the named counter.
 - **`FIO_LEAK_COUNTER_ON_FREE(name)`** — Records a free against the named counter.
 - **`FIO_LEAK_COUNTER_COUNT(name)`** — Returns the current value of the named counter.
-- **`FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT`** — When non-zero, facil.io allocators zero-initialize returned memory by default.  
-  Default: `1` (secure by default).  
+- **`FIO_MEMORY_INITIALIZE_ALLOCATIONS_DEFAULT`** — When non-zero, facil.io allocators zero-initialize returned memory by default.
+  Default: `1` (secure by default).
   Set to `0` if you want raw allocations and prefer to do your own initialization.
-- **`FIO_MEM_PAGE_SIZE_LOG`** — Log₂ of the OS memory page size. The memory allocator uses this to round allocations and map memory efficiently.  
-  Default: `12` (4096-byte pages).  
+- **`FIO_MEM_PAGE_SIZE_LOG`** — Log₂ of the OS memory page size. The memory allocator uses this to round allocations and map memory efficiently.
+  Default: `12` (4096-byte pages).
   Change it if you are targeting a system with a different page size.
 - **`FIO_STATIC_ALLOC_SAFE_CONCURRENCY_MAX`** — Default slot count for selected internal `FIO_STATIC_ALLOC_DEF` invocations (default: `256`). The macro does not use this setting implicitly; pass it explicitly as the fourth argument where appropriate.
 
 ### Concurrency
 
-- **`FIO_USE_THREAD_MUTEX`** — Choose the locking primitive used by thread-safe modules.  
-  Default: `0` (use facil.io spinlocks).  
-  Set to `1` to use OS native mutexes (`pthread_mutex_t` on POSIX) instead.  
+- **`FIO_USE_THREAD_MUTEX`** — Choose the locking primitive used by thread-safe modules.
+  Default: `0` (use facil.io spinlocks).
+  Set to `1` to use OS native mutexes (`pthread_mutex_t` on POSIX) instead.
   If you need this decision to apply to only a single `#include`, use `FIO_USE_THREAD_MUTEX_TMP` in [`./001 header.h`](./001%20header.h) instead.
 
 ### Performance and Alignment
 
-- **`FIO_UNALIGNED_ACCESS`** — Allows facil.io to attempt unaligned memory access on CPUs that support it. When enabled, the library may use faster paths in helpers such as `fio_buf2uXX`.  
-  Default: `1` (attempt detection).  
+- **`FIO_UNALIGNED_ACCESS`** — Allows facil.io to attempt unaligned memory access on CPUs that support it. When enabled, the library may use faster paths in helpers such as `fio_buf2uXX`.
+  Default: `1` (attempt detection).
   Set to `0` on strict-alignment architectures or if you want to forbid unaligned access entirely. The actual capability is reflected by `FIO_UNALIGNED_MEMORY_ACCESS_ENABLED`, which is derived at compile time.
-- **`FIO_LIMIT_INTRINSIC_BUFFER`** — Limits register pressure in some pseudo-intrinsic loops by processing smaller batches and looping more.  
-  Default: `1`.  
+- **`FIO_LIMIT_INTRINSIC_BUFFER`** — Limits register pressure in some pseudo-intrinsic loops by processing smaller batches and looping more.
+  Default: `1`.
   Set to `0` if you prefer larger unrolled buffers and do not mind the extra register use.
 
 ### Maps
 
-- **`FIO_MAP_WARNING_BITSIZE`** — Bit size at which hash-map allocations trigger an internal warning threshold in the `imap`/`map` templates.  
-  Default: `24`.  
+- **`FIO_MAP_WARNING_BITSIZE`** — Bit size at which hash-map allocations trigger an internal warning threshold in the `imap`/`map` templates.
+  Default: `24`.
   Raise or lower it to tune when the library starts worrying about map size during growth.
 
 ### Logging
 
 - **`FIO_NO_LOG`** — Define this to remove all logging output. Cannot be combined with `FIO_LEAK_COUNTER`; the two are mutually exclusive.
-- **`FIO_LOG2STDERR`** — Low-level sink used by the logging macros.  
-  Default: no-op.  
+- **`FIO_LOG2STDERR`** — Low-level sink used by the logging macros.
+  Default: no-op.
   Override to print to `stderr` or route messages to a custom destination.
-- **`FIO_LOG_LENGTH_LIMIT`** — Approximate cap on a single formatted log message, limiting stack memory use.  
+- **`FIO_LOG_LENGTH_LIMIT`** — Approximate cap on a single formatted log message, limiting stack memory use.
   Default: `1024`.
 - **`DEBUG`** — Define this to enable debug-only log macros (`FIO_LOG_D*`) and active `FIO_ASSERT_DEBUG` checks. Also disables SIMD/Neon intrinsics in [`./000 core.h`](./000%20core.h).
 
