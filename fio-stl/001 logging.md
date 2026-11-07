@@ -156,13 +156,23 @@ See also: [Compiler Attributes](./001 compiler attributes.md).
 
 Enabled by `FIO_LEAK_COUNTER` (default `1`). `FIO_NO_LOG` and `FIO_LEAK_COUNTER` are mutually exclusive because leak reports are printed through the log.
 
+### `FIO_LEAK_COUNTER_DEC`
+
+```c
+#define FIO_LEAK_COUNTER_DEC(name)
+```
+
+Declares a named counter and its cleanup function without defining them. Use it in declarations-only `FIO_EXTERN` translation units that reference the counter but must not emit a definition.
+
 ### `FIO_LEAK_COUNTER_DEF`
 
 ```c
 #define FIO_LEAK_COUNTER_DEF(name)
 ```
 
-Defines a named counter and a cleanup function that reports remaining allocations at process exit.
+Defines a named counter, a cleanup function that reports remaining allocations at process exit, and a constructor that registers the cleanup with the `FIO_CALL_AFTER_EXIT` state event (skipped when `FIO_LEAK_COUNTER_SKIP_EXIT` is set).
+
+Emits non-`static` symbols, so it belongs in exactly one translation unit: the `FIO_EXTERN_COMPLETE` unit when the header is split, or every unit in a header-only build. Declarations-only units use `FIO_LEAK_COUNTER_DEC` instead.
 
 ### `FIO_LEAK_COUNTER_ON_ALLOC`
 

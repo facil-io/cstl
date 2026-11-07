@@ -213,6 +213,19 @@ void example(void) {
 
 ---
 
+## Split (`FIO_EXTERN`) builds
+
+When the header is split into a declarations-only `FIO_EXTERN` unit and one `FIO_EXTERN_COMPLETE` implementation unit, the leak counter generated for `FIO_REF_NAME` is emitted in two steps:
+
+- `FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)` — definitions (counter, cleanup, exit registration), placed under the complete-TU gate only.
+- `FIO_LEAK_COUNTER_DEC(FIO_REF_NAME)` — declarations only, placed under the gate that also enables the `static` helpers in declarations-only units.
+
+The declarations are needed because the internal helper types are `static` in declarations-only translation units (see [`001 header.h`](./001%20header.h)), so those units still compile their own copies of the inline wrappers and therefore reference the counter symbols. `_DEC` makes the symbols visible without defining them, so the linker resolves them against the single `_DEF` in the implementation unit.
+
+`FIO_WEAK` is not used for these symbols: a duplicate definition is a real error and is reported by the linker instead of being silently merged.
+
+---
+
 ## Memory Layout
 
 ```

@@ -186,11 +186,18 @@ Internal helper types (`FIO___RECURSIVE_INCLUDE` other than 99) are `static`
 (see `001 header.h`), so every translation unit needs their implementation,
 even a declarations-only `FIO_EXTERN` one (e.g., FIOBJ inline constructors).
 ***************************************************************************** */
+
+/* definition in complete TU only */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)
+#endif
+
 #if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN) ||                    \
     (defined(FIO___RECURSIVE_INCLUDE) && (FIO___RECURSIVE_INCLUDE + 1) != 100)
 
-/* static helpers exist in declarations-only TUs too: report leaks once */
-FIO_LEAK_COUNTER_DEF(FIO_REF_NAME)
+/* static helpers exist in declarations-only TUs too: report leaks once,
+ * use _DEC (enough to be seen in fiobj_), not _DEF that is in only one TU */
+FIO_LEAK_COUNTER_DEC(FIO_REF_NAME)
 
 /** Allocates a reference counted object. */
 #ifdef FIO_REF_FLEX_TYPE
