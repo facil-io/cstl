@@ -58,6 +58,9 @@ Patches for Windows
 Windows initialization
 ***************************************************************************** */
 
+/* do startup once, in complete TU only */
+#if defined(FIO_EXTERN_COMPLETE) || !defined(FIO_EXTERN)
+
 /* Enable console colors */
 FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
   HANDLE c = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -79,6 +82,7 @@ FIO_CONSTRUCTOR(fio___windows_startup_housekeeping) {
   /* by default, windows read files using _O_TEXT, which affects behavior */
   _set_fmode(_O_BINARY);
 }
+#endif
 
 /* *****************************************************************************
 Inlined patched and MACRO statements

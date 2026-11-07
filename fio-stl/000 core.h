@@ -1915,15 +1915,33 @@ Memory Leak Detection
 #define FIO_LEAK_COUNTER_SKIP_EXIT 0
 #endif
 #ifndef FIO___LEAK_COUNTER_DEF
-/* Deceleration only, to be placed before the `extern` block if needed. */
+/**
+ * Declares a named leak counter and its cleanup function, without defining
+ * them.
+ *
+ * The counter itself is defined by `FIO_LEAK_COUNTER_DEF` in exactly one
+ * translation unit (the `FIO_EXTERN_COMPLETE` one). Use this macro in
+ * declarations-only `FIO_EXTERN` units that need to reference the counter.
+ */
 #define FIO___LEAK_COUNTER_DEC(name)                                           \
-  size_t FIO_NAME(fio___leak_counter, name)(size_t i);
-
-/* The shared counter + a (once per TU) `FIO_CALL_AFTER_EXIT` leak report. */
+  size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
+  void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);
+/**
+ * Defines a named leak counter, its cleanup function and a constructor that
+ * registers the cleanup with the `FIO_CALL_AFTER_EXIT` state event.
+ *
+ * Emits non-`static` symbols, so place it under the
+ * `FIO_EXTERN_COMPLETE` / no-`FIO_EXTERN` gate. Declarations-only units use
+ * `FIO_LEAK_COUNTER_DEC` instead.
+ *
+ * `FIO_LEAK_COUNTER_SKIP_EXIT` disables the exit registration.
+ */
 #define FIO___LEAK_COUNTER_DEF(name)                                           \
   size_t FIO_NAME(fio___leak_counter, name)(size_t i);                         \
   void FIO_NAME(fio___leak_counter_cleanup, name)(void *i);                    \
-  size_t FIO_WEAK FIO_NAME(fio___leak_counter, name)(size_t i) {               \
+  /* now do not need FIO_WEAK because all _DEF under completeTU gate,
+   * deleted to see once-silent link issues explicitly not only on windows */  \
+  size_t FIO_NAME(fio___leak_counter, name)(size_t i) {                        \
     static volatile size_t counter = 0;                                        \
     size_t tmp = fio_atomic_add_fetch(&counter, i);                            \
     if (FIO_UNLIKELY(tmp == ((size_t)-1)))                                     \
@@ -1934,7 +1952,7 @@ Memory Leak Detection
                "(%d) " FIO_MACRO2STR(name) " `free` after `free` detected!",   \
                fio_getpid());                                                  \
   }                                                                            \
-  void FIO_WEAK FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {          \
+  void FIO_NAME(fio___leak_counter_cleanup, name)(void *i) {                   \
     size_t counter = FIO_NAME(fio___leak_counter, name)((size_t)(uintptr_t)i); \
     FIO_LOG_DEBUG2("(%d) testing leaks for " FIO_MACRO2STR(name),              \
                    fio_getpid());                                              \
