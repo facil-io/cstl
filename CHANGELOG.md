@@ -1,20 +1,28 @@
 # Change Log
 
-### 0.8.5 (unreleased)
+### 0.8.5 - 2026-11-07
 
-**Fix**: (`core`, `extern`) split `FIO_EXTERN` builds: `FIO_WEAK` is no longer used for the leak-counter symbols in `000 core.h`. Every `FIO_LEAK_COUNTER_DEF` now sits under the `FIO_EXTERN_COMPLETE` gate, so duplicate definitions surface as explicit link errors instead of being silently merged by a weak symbol. `FIO_LEAK_COUNTER_DEC` now declares both the counter and its cleanup function.
+**Security**: (`url`, `http`) `fio_http_connect` no longer sends TLS hints (`tls`, `ssl`, `key`, `cert`, `pass`, `password`, `trust`) at the head / tail of the URL query to the server; before, key / certificate paths and key passwords leaked into the request target. Hints in the middle of the query are still read but sent as-is, so they don't collide with application keys. The new `fio_url_tls_info_s.query` holds the query without the head / tail hints (`u.query = fio_url_is_tls(u).query`).
 
-**Fix**: (`ref`, `extern`) `249 reference counter.h` splits the two gates: `FIO_LEAK_COUNTER_DEF` remains in the complete-TU gate only, while the static-helpers gate uses `FIO_LEAK_COUNTER_DEC` so declarations-only units still see the symbols.
-
-**Fix**: (`patches`, `extern`) the Windows startup-housekeeping constructor in `001 patches.h` now runs only in the complete TU (`FIO_EXTERN_COMPLETE` or no `FIO_EXTERN`), instead of once per translation unit.
-
-**Docs**: `FIO_LEAK_COUNTER_DEC` documented as the declarations-only counterpart of `FIO_LEAK_COUNTER_DEF` (`000 core.h`, `001 header.h`, `001 logging.md`, `001 version and settings.md`).
-
-**Security**: (`url`, `http`) `fio_http_connect` no longer sends TLS hints (`tls`, `ssl`, `key`, `cert`, `pass`, `password`, `trust`) placed at the head / tail of the URL query to the server; before, key / certificate paths and key passwords leaked into the request target. Hints in the middle of the query are still read but sent as-is (pass-through for colliding application keys). `fio_url_tls_info_s` gains `query`, the URL query without the head / tail hints (adopt with `u.query = fio_url_is_tls(u).query`).
-
-**Fix**: (`brotli`) RFC 7932 conformance, checked against Google Brotli 1.1.0. Compression at quality 5-6 of inputs over 16MB produced streams that other decoders rejected or decoded into wrong bytes (later meta-blocks used chunk-local positions for static dictionary distances and literal context). The decoder no longer rejects a valid stream whose final code is longer than 8 bits, and now rejects invalid streams it used to accept: non-zero padding or reserved bits, incomplete or oversubscribed prefix codes, code-length and context-map repeats that overflow, exuberant length nibbles, and truncated metadata in the last meta-block.
+**Security**: (`io`) `fio_io_listen` reads TLS hints before it adds a default port. Before, a listen URL without a port (e.g., `localhost?tls`) lost its TLS hints and served plaintext.
 
 **Security**: (`gfm`, `md2html`) repeated malformed inline links (`[x](`, `[x](<`, `[x](u (`) no longer rescan the rest of the paragraph for each opener (quadratic time). Per CommonMark, `<destinations>` and `(titles)` now reject an unescaped `<` / `(`, and link destinations allow at most 64 nested parentheses.
+
+**Fix**: (`core`, `ref`, `patches`, `extern`) multi-TU `FIO_EXTERN` builds link on Windows (PR #35, thanks to Timofey Kostenok, @t1m-k). Leak counters no longer use `FIO_WEAK`: `FIO_LEAK_COUNTER_DEF` is defined only in the `FIO_EXTERN_COMPLETE` unit, so duplicates become link errors. `FIO_LEAK_COUNTER_DEC` (now documented) declares the counter and its cleanup function for declarations-only units, and the Windows startup constructor runs only in the complete unit.
+
+**Fix**: (`io`) idle servers no longer burn CPU. The listener's accept task forced an `on_data` event on every pass; it now only resumes monitoring a suspended listener.
+
+**Fix**: (`io`) a TLS protocol that leaves `dup_context` unset now inherits it from the default TLS backend. Before, it got a stub that returned `NULL`, so the bundled TLS backends closed every accepted connection.
+
+**Fix**: (`openssl`) input buffered inside OpenSSL (pending plaintext or a complete record) no longer stalls until more bytes reach the socket. This affected small reads and connections leaving throttling.
+
+**Fix**: (`string`) `fio_string_replace`, Base32 decoding and HTML unescaping now work when the source points into the destination. Before, a replacement reaching the end of the string, or a reallocation, could corrupt the source first.
+
+**Fix**: (`brotli`) RFC 7932 conformance, checked against Google Brotli 1.1.0. At quality 5-6, inputs over 16MB compressed into streams other decoders rejected or decoded wrongly. The decoder now accepts a valid final code longer than 8 bits, and rejects invalid streams it used to accept: non-zero padding or reserved bits, incomplete or oversubscribed prefix codes, overflowing repeats, exuberant length nibbles, and truncated metadata in the last meta-block.
+
+**Fix**: (`queue`) `fio_queue_workers_add` returns `-1` when adding more than 255 workers fails part-way; before, the error was ignored.
+
+**API**: (`core`) adds `fio_math_mul32_fold`, the 32-bit counterpart of `fio_math_mul64_fold`.
 
 ### 0.8.4 - 2026-11-02
 
